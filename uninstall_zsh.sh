@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/bin/zsh
 
-echo "🚨 WARNING: This will completely remove Zsh, Oh My Zsh, and all customizations."
-read -p "Are you sure you want to continue? (y/n): " CONFIRM
+echo "🚨 WARNING: This will completely remove Zsh, Oh My Zsh, plugins, themes, and all customizations."
+echo -n "Are you sure you want to continue? (y/n): "
+read CONFIRM
 if [[ "$CONFIRM" != "y" ]]; then
   echo "❌ Uninstall canceled."
   exit 1
@@ -13,9 +14,9 @@ echo "🧹 Starting Zsh Uninstall Process..."
 #  Function: Uninstall with Live Spinner
 # ===========================
 uninstall_with_spinner() {
-  local name="$1"          # Display name (e.g., "Zsh")
-  local check_cmd="$2"     # Command to check if installed
-  local uninstall_cmd="$3" # Command to uninstall
+  local name="$1"
+  local check_cmd="$2"
+  local uninstall_cmd="$3"
 
   if ! eval "$check_cmd"; then
     echo "⚠️  $name is not installed, skipping..."
@@ -28,7 +29,7 @@ uninstall_with_spinner() {
 
   i=0
   while kill -0 $PID 2>/dev/null; do
-    dots=$(((i % 3) + 1)) # Cycle between 1, 2, 3 dots
+    dots=$(((i % 3) + 1))
     printf "\r🗑 Removing $name %s" "$(printf '.%.0s' $(seq 1 $dots))"
     sleep 0.5
     ((i++))
@@ -38,7 +39,7 @@ uninstall_with_spinner() {
 }
 
 # ===========================
-#  Uninstall Zsh Plugins & Themes First
+#  Uninstall Zsh Plugins & Themes
 # ===========================
 ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
 PLUGINS=(
@@ -66,14 +67,15 @@ uninstall_with_spinner "Oh My Zsh" "[ -d \"$HOME/.oh-my-zsh\" ]" "rm -rf ~/.oh-m
 #  Remove Configuration Files
 # ===========================
 echo "🗑 Removing Zsh configuration files..."
-rm -f ~/.zshrc ~/.p10k.zsh ~/.zsh_history
-rm -rf ~/.zsh_cache
+# Remove Zsh-related files (but not directories)
+rm -f ~/.zshrc ~/.zshenv ~/.zsh_history ~/.zsh_sessions ~/.p10k* ~/.config_p10k_once ~/.zprofile ~/.zlogin ~/.zcompdump* ~/.shell.pre-oh-my-zsh ~/.brew_last_update
+# Remove Zsh-related directories separately
+rm -rf ~/.zsh_cache ~/.zsh
 
 # ===========================
 #  Uninstall Homebrew Packages
 # ===========================
 BREW_PACKAGES=(
-  "zsh"
   "fzf"
   "autojump"
   "zoxide"
@@ -85,17 +87,25 @@ for pkg in "${BREW_PACKAGES[@]}"; do
   uninstall_with_spinner "$pkg" "brew list --formula | grep -q '^$pkg$'" "brew remove --quiet $pkg"
 done
 
-# ===========================
-#  Switch Back to Bash
-# ===========================
-echo "🔄 Switching shell back to Bash..."
-chsh -s /bin/bash
-export SHELL=/bin/bash
+echo "✅ Zsh and all related configurations have been removed. Your terminal has been reset to its default state!"
 
-echo "✅ Zsh has been completely removed. Your terminal has been reset to its default state!"
+# ===========================
+#  Restore or create new .zshrc
+# ===========================
+# Restore the backup if it exists, otherwise create an empty .zshrc
+BACKUP_FILE=$(ls -t $HOME/.zshrc.bak_* 2>/dev/null | head -n 1)
+
+if [ -f "$BACKUP_FILE" ]; then
+  echo "🔄 Restoring previous .zshrc from backup..."
+  mv "$BACKUP_FILE" "$HOME/.zshrc"
+  rm -f "$BACKUP_FILE"
+else
+  echo "📝 No backup found. Creating a minimal .zshrc to prevent new user prompt."
+  echo "# Empty .zshrc to bypass new user installation prompt" >"$HOME/.zshrc"
+fi
 
 # ===========================
 #  Restart Shell
 # ===========================
 echo "🔄 Restarting shell..."
-exec bash
+exec zsh
