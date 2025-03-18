@@ -6,7 +6,7 @@ install_silently_with_spinner() {
   local name="$1"
   local check_cmd="$2"
   local install_cmd="$3"
-  local log_file="/tmp/install_${name// /_}.log" # Log file for each package
+  local log_file="/tmp/install_${name// /_}.log"
 
   if eval "$check_cmd"; then
     echo "✅ $name is already installed."
@@ -14,7 +14,7 @@ install_silently_with_spinner() {
   fi
 
   echo -n "📥 Installing $name"
-  eval "$install_cmd" >"$log_file" 2>&1 & # Capture output in a log file
+  eval "$install_cmd" >"$log_file" 2>&1 &
   PID=$!
 
   i=0
@@ -25,7 +25,6 @@ install_silently_with_spinner() {
     ((i++))
   done
 
-  # Check if installation succeeded
   if eval "$check_cmd"; then
     printf "\r📥 Installing $name ... ✅ Done!\n"
   else
@@ -34,14 +33,19 @@ install_silently_with_spinner() {
 }
 
 # ===========================
-#  Function: Install Git-Based Plugins
+#  Function: Install Git-Based Plugins or Themes
 # ===========================
 install_git_plugin() {
   local name="$1"
   local repo="$2"
-  local install_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/$name"
+  local type="$3"
 
-  # Ensure the plugins directory exists
+  if [[ "$type" == "theme" ]]; then
+    local install_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/$name"
+  else
+    local install_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/$name"
+  fi
+
   mkdir -p "$(dirname "$install_dir")"
 
   if [ ! -d "$install_dir" ]; then
@@ -56,12 +60,11 @@ install_git_plugin() {
 # ===========================
 install_brew_package() {
   local name="$1"
-  local post_install="$2" # Optional post-install command
+  local post_install="$2"
 
   if ! command -v "$name" &>/dev/null; then
     install_silently_with_spinner "$name" "command -v \"$name\" &>/dev/null" "brew install \"$name\""
 
-    # Run post-install command if provided
     if [ -n "$post_install" ]; then
       eval "$post_install" >/dev/null 2>&1
     fi
@@ -85,12 +88,11 @@ fi
 # ===========================
 #  Ensure Brew is Updated (Silent)
 # ===========================
-# Check when Homebrew was last updated
 BREW_LAST_UPDATE_FILE="$HOME/.brew_last_update"
 if [ ! -f "$BREW_LAST_UPDATE_FILE" ] || [ $(find "$BREW_LAST_UPDATE_FILE" -mtime +1) ]; then
   echo "🔄 Updating Homebrew..."
   brew update >/dev/null 2>&1
-  touch "$BREW_LAST_UPDATE_FILE" # Update timestamp
+  touch "$BREW_LAST_UPDATE_FILE"
 fi
 
 # ===========================
@@ -103,23 +105,51 @@ install_silently_with_spinner "Oh My Zsh" "[ -d \"$HOME/.oh-my-zsh\" ]" "RUNZSH=
 #  Define Plugins That Require Manual Installation
 # ===========================
 PLUGINS_TO_INSTALL=(
-  "autojump|brew|Navigate directories quickly using stored jumps"
-  "fzf|brew|Fuzzy file finder for quick searching"
-  "powerlevel10k|git|Highly customizable & fast Zsh theme"
-  "zoxide|brew|Smarter alternative to 'cd' for fast navigation"
-  "zsh-autosuggestions|git|Suggests previous commands as you type"
-  "zsh-completions|git|Expands Zsh autocompletions for many tools"
-  "zsh-defer|git|Speeds up Zsh startup by lazy-loading plugins"
-  "zsh-history-substring-search|git|Search history with partial matches"
-  "zsh-syntax-highlighting|git|Adds syntax highlighting to commands"
+  "autojump - Navigate directories quickly using stored jumps|autojump|brew"
+  "fzf - Fuzzy file finder for quick searching|fzf|brew"
+  "powerlevel10k - Highly customizable & fast Zsh theme|powerlevel10k|git"
+  "zoxide - Smarter alternative to 'cd' for fast navigation|zoxide|brew"
+  "zsh-autosuggestions - Suggests previous commands as you type|zsh-autosuggestions|git"
+  "zsh-completions - Expands Zsh autocompletions for many tools|zsh-completions|git"
+  "zsh-defer - Speeds up Zsh startup by lazy-loading plugins|zsh-defer|git"
+  "zsh-history-substring-search - Search history with partial matches|zsh-history-substring-search|git"
+  "zsh-syntax-highlighting - Adds syntax highlighting to commands|zsh-syntax-highlighting|git"
 )
-
 # ===========================
-#  Display Selection Menu (No Pagination)
+#  Display Selection Menu
 # ===========================
 echo "📦 Select additional plugins to install (use space to toggle, enter to confirm):"
 height=$((${#PLUGINS_TO_INSTALL[@]} + 2))
-SELECTION=$(printf "%s\n" "${PLUGINS_TO_INSTALL[@]}" | gum choose --no-limit --height="$height" | cut -d'|' -f1)
+SELECTION=$(printf "%s\n" "${PLUGINS_TO_INSTALL[@]}" | cut -d'|' -f1 | gum choose --no-limit --height="$height")
+
+# ===========================
+#  Install Selected Plugins and Themes
+# ===========================
+echo "Installing selections... (this may take a while)"
+
+for entry in "${PLUGINS_TO_INSTALL[@]}"; do
+  plugin_description=$(echo "$entry" | cut -d'|' -f1)
+  plugin_name=$(echo "$entry" | cut -d'|' -f2)
+  install_method=$(echo "$entry" | cut -d'|' -f3)
+
+  if echo "$SELECTION" | grep -q "$plugin_description"; then
+    if [[ "$install_method" == "git" ]]; then
+      if [[ "$plugin_name" == "powerlevel10k" ]]; then
+        install_git_plugin "$plugin_name" "https://github.com/romkatv/$plugin_name" "theme"
+      elif [[ "$plugin_name" == "zsh-defer" ]]; then
+        install_git_plugin "$plugin_name" "https://github.com/romkatv/$plugin_name" "plugin"
+      else
+        install_git_plugin "$plugin_name" "https://github.com/zsh-users/$plugin_name" "$plugin_type"
+      fi
+    elif [[ "$install_method" == "brew" ]]; then
+      if [[ "$plugin_name" == "fzf" ]]; then
+        install_brew_package "$plugin_name" "\"\$(brew --prefix)/opt/fzf/install\" --key-bindings --completion --no-update-rc"
+      else
+        install_brew_package "$plugin_name"
+      fi
+    fi
+  fi
+done
 
 # ===========================
 #  Prompt User to Add VS Code CLI
@@ -139,55 +169,6 @@ else
 fi
 
 # ===========================
-#  Uninstall Gum After Selection (Only If Installed)
-# ===========================
-if brew list --formula | grep -q "^gum\$"; then
-  brew uninstall --quiet gum >/dev/null 2>&1
-fi
-
-# ===========================
-#  Install Git-Based Plugins (Only If Selected)
-# ===========================
-if echo "$SELECTION" | grep -q "zsh-completions"; then
-  install_git_plugin "zsh-completions" "https://github.com/zsh-users/zsh-completions"
-fi
-
-if echo "$SELECTION" | grep -q "zsh-autosuggestions"; then
-  install_git_plugin "zsh-autosuggestions" "https://github.com/zsh-users/zsh-autosuggestions"
-fi
-
-if echo "$SELECTION" | grep -q "zsh-syntax-highlighting"; then
-  install_git_plugin "zsh-syntax-highlighting" "https://github.com/zsh-users/zsh-syntax-highlighting"
-fi
-
-if echo "$SELECTION" | grep -q "zsh-history-substring-search"; then
-  install_git_plugin "zsh-history-substring-search" "https://github.com/zsh-users/zsh-history-substring-search"
-fi
-
-if echo "$SELECTION" | grep -q "zsh-defer"; then
-  install_git_plugin "zsh-defer" "https://github.com/romkatv/zsh-defer"
-fi
-
-if echo "$SELECTION" | grep -q "powerlevel10k"; then
-  install_git_plugin "powerlevel10k" "https://github.com/romkatv/powerlevel10k" "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
-fi
-
-# ===========================
-#  Install Brew-Based Packages (Only If Selected)
-# ===========================
-if echo "$SELECTION" | grep -q "fzf"; then
-  install_brew_package "fzf" "\"\$(brew --prefix)/opt/fzf/install\" --key-bindings --completion --no-update-rc"
-fi
-
-if echo "$SELECTION" | grep -q "autojump"; then
-  install_brew_package "autojump"
-fi
-
-if echo "$SELECTION" | grep -q "zoxide"; then
-  install_brew_package "zoxide"
-fi
-
-# ===========================
 #  Generate .zshrc File with Configurations
 # ===========================
 echo "📝 Generating ~/.zshrc..."
@@ -202,7 +183,6 @@ echo "📝 Generating ~/.zshrc..."
 export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 EOF
 
-  # Conditionally add VS Code CLI support
   if [ "$ADD_VSCODE_CLI" = true ]; then
     cat <<'EOF'
 
@@ -213,13 +193,12 @@ EOF
 
   cat <<'EOF'
 
-
 # -------------- OH MY ZSH CONFIGURATION --------------
 export ZSH="$HOME/.oh-my-zsh"
 EOF
 
   if echo "$SELECTION" | grep -q "powerlevel10k"; then
-    cat <<'EOF' >>~/.zshrc
+    cat <<'EOF'
 
 # Set Powerlevel10k theme
 ZSH_THEME="powerlevel10k/powerlevel10k"
@@ -247,12 +226,20 @@ EOF
   cat <<'EOF'
 
 # -------------- PLUGINS --------------
-plugins=()
 EOF
 
-  for plugin in $SELECTION; do
-    echo "plugins+=($plugin)"
+  IFS=$'\n'
+  echo "plugins=("
+  for entry in "${PLUGINS_TO_INSTALL[@]}"; do
+    plugin_name=$(echo "$entry" | cut -d'|' -f2)
+    plugin_description=$(echo "$entry" | cut -d'|' -f1)
+
+    if echo "$SELECTION" | grep -q "$plugin_description"; then
+      echo "  \"$plugin_name\""
+    fi
   done
+  echo ")"
+  unset IFS
 
   cat <<'EOF'
 
@@ -340,7 +327,7 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \ . "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
 
 # -------------- HOMEBREW CONFIGURATION --------------
-if command -v brew &> /dev/null; then
+if command -v brew &>/dev/null; then
   eval "$(brew shellenv)"
 fi
 EOF
@@ -352,14 +339,14 @@ echo "✅ .zshrc file created successfully."
 #  Set Zsh as Default Shell
 # ===========================
 echo "🔄 Setting Zsh as the default shell..."
-chsh -s "$(which zsh)"
+ZSH_PATH=$(brew --prefix)/bin/zsh
+chsh -s "$ZSH_PATH"
 
 # ===========================
 #  Reload Zsh Configuration
 # ===========================
 echo "🔄 Zsh installation is complete!"
 
-# Ask user if they want to restart the shell now
 if gum confirm "Do you want to restart your shell now to apply changes?"; then
   echo "🔄 Restarting shell..."
   exec zsh

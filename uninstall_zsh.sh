@@ -38,13 +38,6 @@ uninstall_with_spinner() {
 }
 
 # ===========================
-#  Switch Back to Bash
-# ===========================
-echo "🔄 Switching shell back to Bash..."
-chsh -s /bin/bash
-export SHELL=/bin/bash
-
-# ===========================
 #  Uninstall Zsh Plugins & Themes First
 # ===========================
 ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
@@ -64,14 +57,10 @@ for entry in "${PLUGINS[@]}"; do
   uninstall_with_spinner "$name" "[ -d \"$ZSH_CUSTOM/$type/$name\" ]" "rm -rf $ZSH_CUSTOM/$type/$name"
 done
 
-echo "✅ Plugins and themes removed."
-
 # ===========================
 #  Uninstall Oh My Zsh
 # ===========================
 uninstall_with_spinner "Oh My Zsh" "[ -d \"$HOME/.oh-my-zsh\" ]" "rm -rf ~/.oh-my-zsh"
-
-echo "✅ Oh My Zsh removed."
 
 # ===========================
 #  Remove Configuration Files
@@ -79,8 +68,6 @@ echo "✅ Oh My Zsh removed."
 echo "🗑 Removing Zsh configuration files..."
 rm -f ~/.zshrc ~/.p10k.zsh ~/.zsh_history
 rm -rf ~/.zsh_cache
-
-echo "✅ Configuration files removed."
 
 # ===========================
 #  Uninstall Homebrew Packages
@@ -90,6 +77,7 @@ BREW_PACKAGES=(
   "fzf"
   "autojump"
   "zoxide"
+  "gum"
 )
 
 echo "🗑 Uninstalling Homebrew packages..."
@@ -98,9 +86,16 @@ for pkg in "${BREW_PACKAGES[@]}"; do
 done
 
 # ===========================
+#  Switch Back to Bash
+# ===========================
+echo "🔄 Switching shell back to Bash..."
+chsh -s /bin/bash
+export SHELL=/bin/bash
+
+echo "✅ Zsh has been completely removed. Your terminal has been reset to its default state!"
+
+# ===========================
 #  Restart Shell
 # ===========================
 echo "🔄 Restarting shell..."
 exec bash
-
-echo "✅ Zsh has been completely removed. Your terminal has been reset to its default state!"
