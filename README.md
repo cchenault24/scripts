@@ -11,15 +11,17 @@ This repository contains two scripts for **installing** and **uninstalling** a f
 
 ### ✨ **Features**
 - **Installs Zsh** and sets it as the default shell.
+- **Ensures Homebrew is installed** before proceeding.
 - **Installs Oh My Zsh** for plugin and theme management.
-- **Installs essential plugins** like:
+- **Installs essential plugins and themes with a selection menu**, including:
   - `autojump` (Quickly jump to directories)
   - `fzf` (Fuzzy search)
   - `zoxide` (Smarter `cd` alternative)
   - `zsh-autosuggestions`, `zsh-completions`, `zsh-syntax-highlighting`, etc.
-- **Installs Powerlevel10k (`p10k`) Theme** with instant prompt support.
+  - `powerlevel10k` theme (if selected)
 - **Configures `.zshrc`** with performance optimizations, aliases, and plugin settings.
 - **Prompts user** to add VS Code CLI (`code`) to PATH.
+- **Creates a backup** of the existing `.zshrc` before modifying it.
 
 ---
 
@@ -59,10 +61,12 @@ If you want to remove **Oh My Zsh, plugins, themes, and configurations** while k
 
 ### ✨ **What It Removes**
 ✅ **Oh My Zsh** and all installed plugins.  
-✅ **Powerlevel10k theme**.  
+✅ **Powerlevel10k theme** (if installed).  
 ✅ **Homebrew packages** (`fzf`, `autojump`, `zoxide`, `gum`).  
 ✅ **Configuration files** (`.zshrc`, `.p10k.zsh`, `.zsh_history`, etc.).  
 ✅ **Prevents `zsh-newuser-install` from prompting on restart**.  
+✅ **Restores previous `.zshrc` from backup if available**.  
+✅ **Removes VS Code CLI path modification if added**.  
 ❌ **Does NOT remove Zsh itself**.
 
 ---
