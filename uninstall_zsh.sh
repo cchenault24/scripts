@@ -39,7 +39,22 @@ uninstall_with_spinner() {
 }
 
 # ===========================
-#  Uninstall Zsh Plugins & Themes
+#  Remove Homebrew Packages Installed by Setup
+# ===========================
+BREW_PACKAGES=(
+  "fzf"
+  "autojump"
+  "zoxide"
+  "gum"
+)
+
+echo "🗑 Uninstalling Homebrew packages..."
+for pkg in "${BREW_PACKAGES[@]}"; do
+  uninstall_with_spinner "$pkg" "brew list --formula | grep -q '^$pkg$'" "brew remove --quiet $pkg"
+done
+
+# ===========================
+#  Remove Git-Based Plugins & Themes
 # ===========================
 ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
 PLUGINS=(
@@ -59,7 +74,7 @@ for entry in "${PLUGINS[@]}"; do
 done
 
 # ===========================
-#  Uninstall Oh My Zsh
+#  Remove Oh My Zsh
 # ===========================
 uninstall_with_spinner "Oh My Zsh" "[ -d \"$HOME/.oh-my-zsh\" ]" "rm -rf ~/.oh-my-zsh"
 
@@ -67,34 +82,13 @@ uninstall_with_spinner "Oh My Zsh" "[ -d \"$HOME/.oh-my-zsh\" ]" "rm -rf ~/.oh-m
 #  Remove Configuration Files
 # ===========================
 echo "🗑 Removing Zsh configuration files..."
-# Remove Zsh-related files (but not directories)
-rm -f ~/.zshrc ~/.zshenv ~/.zsh_history ~/.zsh_sessions ~/.p10k* ~/.config_p10k_once ~/.zprofile ~/.zlogin ~/.zcompdump* ~/.shell.pre-oh-my-zsh ~/.brew_last_update
-# Remove Zsh-related directories separately
-rm -rf ~/.zsh_cache ~/.zsh
+rm -f ~/.brew_last_update ~/.fzf.bash ~/.fzf.zsh ~/.zcompdump* ~/.zsh_history ~/.zshrc ~/.zshrc.bak_* ~/.zshrc.pre-oh-my-zsh* 
+rm -rf ~/.cache ~/.config ~/.zsh_cache ~/.zsh ~/.nvm ~/.oh-my-zsh ~/.zoxide
 
 # ===========================
-#  Uninstall Homebrew Packages
+#  Restore or Create Default .zshrc
 # ===========================
-BREW_PACKAGES=(
-  "fzf"
-  "autojump"
-  "zoxide"
-  "gum"
-)
-
-echo "🗑 Uninstalling Homebrew packages..."
-for pkg in "${BREW_PACKAGES[@]}"; do
-  uninstall_with_spinner "$pkg" "brew list --formula | grep -q '^$pkg$'" "brew remove --quiet $pkg"
-done
-
-echo "✅ Zsh and all related configurations have been removed. Your terminal has been reset to its default state!"
-
-# ===========================
-#  Restore or create new .zshrc
-# ===========================
-# Restore the backup if it exists, otherwise create an empty .zshrc
 BACKUP_FILE=$(ls -t $HOME/.zshrc.bak_* 2>/dev/null | head -n 1)
-
 if [ -f "$BACKUP_FILE" ]; then
   echo "🔄 Restoring previous .zshrc from backup..."
   mv "$BACKUP_FILE" "$HOME/.zshrc"
@@ -102,6 +96,14 @@ if [ -f "$BACKUP_FILE" ]; then
 else
   echo "📝 No backup found. Creating a minimal .zshrc to prevent new user prompt."
   echo "# Empty .zshrc to bypass new user installation prompt" >"$HOME/.zshrc"
+fi
+
+# ===========================
+#  Cleanup VS Code CLI Path if Modified
+# ===========================
+if grep -q "Visual Studio Code" ~/.zshrc; then
+  echo "🗑 Removing VS Code CLI path modification..."
+  sed -i '' '/Visual Studio Code/d' ~/.zshrc
 fi
 
 # ===========================
