@@ -233,18 +233,19 @@ EOF
 # -------------- PLUGINS --------------
 EOF
 
-  IFS=$'\n'
-  echo "plugins=("
+  echo -n "plugins=("
+  IFS=$'\n' # Ensure proper line splitting
   for entry in "${PLUGINS_TO_INSTALL[@]}"; do
     plugin_name=$(echo "$entry" | cut -d'|' -f2)
     plugin_description=$(echo "$entry" | cut -d'|' -f1)
+    plugin_type=$(echo "$entry" | cut -d'|' -f4)
 
-    if echo "$SELECTION" | grep -q "$plugin_description"; then
-      echo "  \"$plugin_name\""
+    if echo "$SELECTION" | grep -q "$plugin_description" && [[ "$plugin_type" == "plugin" ]]; then
+      echo -n "\"$plugin_name\" "
     fi
   done
-  echo ")"
-  unset IFS
+  echo ")"  # Close the array
+  unset IFS # Reset IFS after use
 
   cat <<'EOF'
 
@@ -354,9 +355,6 @@ echo "🔄 Zsh installation is complete!"
 
 if gum confirm "Do you want to restart your shell now to apply changes?"; then
   echo "🔄 Restarting shell..."
-  if echo "$SELECTION" | grep -q "powerlevel10k"; then
-    echo "You may see "plugin 'powerlevel10k' not found", ignore this"
-  fi
   exec zsh
 else
   echo "⚠️ You need to restart your shell for the changes to take effect."
