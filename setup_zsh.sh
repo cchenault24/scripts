@@ -174,6 +174,11 @@ fi
 echo "📝 Generating ~/.zshrc..."
 
 {
+  # Ensure Powerlevel10k Instant Prompt is disabled first if installed
+  if [[ -d "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" ]]; then
+    echo "typeset -g POWERLEVEL9K_INSTANT_PROMPT=off"
+  fi
+
   cat <<'EOF'
 #==============================================
 #              Zsh Configuration
@@ -349,6 +354,9 @@ echo "🔄 Zsh installation is complete!"
 
 if gum confirm "Do you want to restart your shell now to apply changes?"; then
   echo "🔄 Restarting shell..."
+  if echo "$SELECTION" | grep -q "powerlevel10k"; then
+    echo "You may see "plugin 'powerlevel10k' not found", ignore this"
+  fi
   exec zsh
 else
   echo "⚠️ You need to restart your shell for the changes to take effect."
