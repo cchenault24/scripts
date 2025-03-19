@@ -39,6 +39,17 @@ uninstall_with_spinner() {
 }
 
 # ===========================
+#  Reset Default Shell to Bash
+# ===========================
+echo "🔄 Resetting default shell to Bash..."
+if chsh -s /bin/bash 2>/dev/null; then
+  echo "✅ Default shell changed to Bash."
+else
+  echo "❌ Failed to change shell. You might need to manually run:"
+  echo "   chsh -s /bin/bash"
+fi
+
+# ===========================
 #  Remove Homebrew Packages Installed by Setup
 # ===========================
 BREW_PACKAGES=(
@@ -79,14 +90,19 @@ done
 uninstall_with_spinner "Oh My Zsh" "[ -d \"$HOME/.oh-my-zsh\" ]" "rm -rf ~/.oh-my-zsh"
 
 # ===========================
+#  Remove Zsh Itself
+# ===========================
+uninstall_with_spinner "Zsh" "command -v zsh &>/dev/null" "brew remove --quiet zsh"
+
+# ===========================
 #  Remove Configuration Files
 # ===========================
 echo "🗑 Removing Zsh configuration files..."
 rm -f ~/.brew_last_update ~/.fzf.bash ~/.fzf.zsh ~/.zcompdump* ~/.zsh_history ~/.zshrc ~/.zshrc.bak_* ~/.zshrc.pre-oh-my-zsh* 
-rm -rf ~/.cache ~/.config ~/.zsh_cache ~/.zsh ~/.nvm ~/.oh-my-zsh ~/.zoxide
+rm -rf ~/.zsh_cache ~/.zsh ~/.nvm ~/.oh-my-zsh ~/.zoxide
 
 # ===========================
-#  Restore or Create Default .zshrc
+#  Restore or Create Default .bashrc
 # ===========================
 BACKUP_FILE=$(ls -t $HOME/.zshrc.bak_* 2>/dev/null | head -n 1)
 if [ -f "$BACKUP_FILE" ]; then
@@ -94,20 +110,20 @@ if [ -f "$BACKUP_FILE" ]; then
   mv "$BACKUP_FILE" "$HOME/.zshrc"
   rm -f "$BACKUP_FILE"
 else
-  echo "📝 No backup found. Creating a minimal .zshrc to prevent new user prompt."
-  echo "# Empty .zshrc to bypass new user installation prompt" >"$HOME/.zshrc"
+  echo "📝 No backup found. Creating a minimal .bashrc to restore default behavior."
+  echo "# Default .bashrc" >"$HOME/.bashrc"
 fi
 
 # ===========================
 #  Cleanup VS Code CLI Path if Modified
 # ===========================
-if grep -q "Visual Studio Code" ~/.zshrc; then
+if grep -q "/Visual Studio Code.app/Contents/Resources/app/bin" ~/.zshrc; then
   echo "🗑 Removing VS Code CLI path modification..."
-  sed -i '' '/Visual Studio Code/d' ~/.zshrc
+  sed -i '' '/Visual Studio Code.app\/Contents\/Resources\/app\/bin/d' ~/.zshrc
 fi
 
 # ===========================
-#  Restart Shell
+#  Restart Shell (Back to Bash)
 # ===========================
 echo "🔄 Restarting shell..."
-exec zsh
+exec bash

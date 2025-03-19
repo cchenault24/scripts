@@ -395,15 +395,26 @@ EOF
 
 echo "✅ .zshrc file created successfully."
 
-# Reload Zsh Configuration
-echo "🔄 Zsh installation is complete!"
-if gum confirm "Do you want to restart your shell now to apply changes?"; then
-  echo "🔄 Restarting shell..."
-  exec zsh || echo "⚠️ Restart your shell manually: Run 'exec zsh' or open a new terminal."
+# ===========================
+#  Change Default Shell to Zsh and Restart Shell
+# ===========================
+echo
+echo "🔄 Changing default shell to Zsh..."
+
+# Check if the shell is already Zsh to avoid unnecessary changes
+if [[ "$SHELL" == "/bin/zsh" ]]; then
+  echo "✅ Zsh is already your default shell."
 else
-  echo "⚠️ You need to restart your shell for the changes to take effect."
-  echo "➡️ Run this command manually: exec zsh"
+  if chsh -s /bin/zsh 2>/dev/null; then
+    echo "✅ Default shell changed to Zsh!"
+  else
+    echo "❌ Failed to change shell. You might need to manually run:"
+    echo "   chsh -s /bin/zsh"
+  fi
 fi
+
+echo "🔄 Restarting shell..."
+exec zsh
 
 # ===========================
 #  Powerlevel10k Instructions
