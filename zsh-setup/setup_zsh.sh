@@ -29,6 +29,7 @@ INSTALL_OHMYZSH=true # Whether to install Oh My Zsh
 INSTALL_PLUGINS=true # Whether to install plugins
 CHANGE_SHELL=true    # Whether to change default shell to Zsh
 VERBOSE=true         # Whether to display verbose output
+DRY_RUN=false        # Whether to run in dry-run mode
 
 # Initialize INSTALLED_PLUGINS array
 INSTALLED_PLUGINS=()
@@ -47,9 +48,10 @@ Usage: $0 [options]
 Options:
   --no-backup         Skip backup of existing .zshrc
   --skip-ohmyzsh      Skip Oh My Zsh installation
-  --skip-plugins      Skip plugin installation
+  --skip-plugins     Skip plugin installation
   --no-shell-change   Do not change the default shell to Zsh
   --quiet             Suppress verbose output
+  --dry-run           Preview changes without executing (interactive)
   --help              Display this help message
 
 EOF
@@ -73,6 +75,9 @@ parse_arguments() {
             ;;
         --quiet)
             VERBOSE=false
+            ;;
+        --dry-run)
+            DRY_RUN=true
             ;;
         --help)
             print_usage
@@ -116,7 +121,11 @@ install_plugins_step() {
     # Run the main function from install_plugins.sh
     main
 
-    # Log installed plugins
+    # Sync arrays from state and log installed plugins
+    if command -v sync_arrays_from_state &>/dev/null; then
+        sync_arrays_from_state
+    fi
+    
     if [[ -n "${INSTALLED_PLUGINS[*]}" ]]; then
         log_message "Plugins installation complete. Installed plugins: ${#INSTALLED_PLUGINS[@]}"
     else
@@ -128,7 +137,12 @@ install_plugins_step() {
 generate_zshrc_step() {
     log_message "Generating new .zshrc configuration..."
 
-    # Export INSTALLED_PLUGINS for use in generate_zshrc.sh
+    # Sync arrays from state file
+    if command -v sync_arrays_from_state &>/dev/null; then
+        sync_arrays_from_state
+    fi
+    
+    # Export INSTALLED_PLUGINS for backward compatibility with generate_zshrc.sh
     export INSTALLED_PLUGINS
 
     # Source the generate_zshrc.sh script and call the generate function
@@ -142,7 +156,22 @@ generate_zshrc_step() {
 
 # Main function that orchestrates the entire setup process
 main() {
-    log_message "Starting Zsh setup..."
+    log_section "Zsh Setup"
+    
+    if is_dry_run; then
+        log_info "🔍 Running in DRY-RUN mode - no changes will be made"
+        echo ""
+    fi
+
+    # Validate configuration files
+    if [ -f "$SCRIPT_DIR/validate_config.sh" ]; then
+        if ! validate_all_configs "$SCRIPT_DIR"; then
+            log_error "Configuration validation failed. Please fix errors before proceeding."
+            if ! is_dry_run; then
+                exit 1
+            fi
+        fi
+    fi
 
     # Check system requirements
     check_system_requirements
@@ -162,6 +191,20 @@ main() {
         run_step "$description" "$function" "$flag"
     done
 
+    # Show dry-run summary and confirmation
+    if is_dry_run; then
+        show_dry_run_summary
+        preview_zshrc_changes
+        
+        if ! confirm_dry_run_operations; then
+            log_info "Dry-run cancelled. No changes made."
+            exit 0
+        fi
+        
+        log_info "Dry-run confirmed. Exiting (use without --dry-run to apply changes)."
+        exit 0
+    fi
+
     # Verify installation
     log_message "Verifying installation..."
     verify_installation
@@ -169,7 +212,7 @@ main() {
     # Display summary
     display_summary
 
-    log_message "Zsh setup completed successfully!"
+    log_success "Zsh setup completed successfully!"
     echo "====================================================="
     echo "✅ Setup complete! Please restart your terminal or run 'source ~/.zshrc' to apply changes."
     echo "====================================================="
@@ -185,6 +228,43 @@ if [ -f "$SCRIPT_DIR/setup_core.sh" ]; then
 else
     echo "Error: Required script setup_core.sh not found."
     exit 1
+fi
+
+# Load config first
+if [ -f "$SCRIPT_DIR/config.sh" ]; then
+    source "$SCRIPT_DIR/config.sh"
+fi
+
+# Load logger
+if [ -f "$SCRIPT_DIR/logger.sh" ]; then
+    source "$SCRIPT_DIR/logger.sh"
+fi
+
+# Source error handler and state manager
+if [ -f "$SCRIPT_DIR/error_handler.sh" ]; then
+    source "$SCRIPT_DIR/error_handler.sh"
+    # Set up error trap
+    setup_error_trap "Zsh setup script"
+fi
+
+if [ -f "$SCRIPT_DIR/state_manager.sh" ]; then
+    source "$SCRIPT_DIR/state_manager.sh"
+    # Initialize state
+    init_state "$SCRIPT_DIR"
+fi
+
+# Load dry-run utilities
+if [ -f "$SCRIPT_DIR/dry_run.sh" ]; then
+    source "$SCRIPT_DIR/dry_run.sh"
+    # Enable dry-run if requested
+    if [[ "$DRY_RUN" == "true" ]]; then
+        enable_dry_run
+    fi
+fi
+
+# Load config validation
+if [ -f "$SCRIPT_DIR/validate_config.sh" ]; then
+    source "$SCRIPT_DIR/validate_config.sh"
 fi
 
 # Source installation functions

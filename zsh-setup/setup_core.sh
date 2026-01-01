@@ -13,48 +13,40 @@
 #==============================================================================
 
 #------------------------------------------------------------------------------
-# Logging Functions
+# Logging Functions (use logger.sh if available, otherwise provide fallbacks)
 #------------------------------------------------------------------------------
 
-# Initialize the log file for the setup process
-init_log_file() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    echo "--- Zsh Setup Log ($(date)) ---" >"$LOG_FILE"
-    echo "System: $(uname -a)" >>"$LOG_FILE"
-    echo "User: $(whoami)" >>"$LOG_FILE"
-    echo "Script version: 1.0.0" >>"$LOG_FILE"
-    echo "----------------------------" >>"$LOG_FILE"
-}
+# Load logger if available
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+if [ -f "$SCRIPT_DIR/logger.sh" ]; then
+    source "$SCRIPT_DIR/logger.sh"
+else
+    # Fallback logging functions
+    init_log_file() {
+        mkdir -p "$(dirname "$LOG_FILE")"
+        echo "--- Zsh Setup Log ($(date)) ---" >"$LOG_FILE"
+        echo "System: $(uname -a)" >>"$LOG_FILE"
+        echo "User: $(whoami)" >>"$LOG_FILE"
+        echo "Script version: 2.0.0" >>"$LOG_FILE"
+        echo "----------------------------" >>"$LOG_FILE"
+    }
 
-# Log an informational message
-log_message() {
-    local message="$1"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    log_message() {
+        local message="$1"
+        local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+        mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
+        echo "[$timestamp] $message" >>"$LOG_FILE"
+        ${VERBOSE:-true} && echo "$message"
+    }
 
-    # Ensure log directory exists
-    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
-
-    # Always write to log file
-    echo "[$timestamp] $message" >>"$LOG_FILE"
-
-    # Only print to console if verbose mode is enabled
-    $VERBOSE && echo "$message"
-}
-
-# Log an error message
-log_error() {
-    local message="$1"
-    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-
-    # Ensure log directory exists
-    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
-
-    # Log to file with ERROR prefix
-    echo "[$timestamp] ERROR: $message" >>"$LOG_FILE"
-
-    # Always print errors to stderr
-    echo "ERROR: $message" >&2
-}
+    log_error() {
+        local message="$1"
+        local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+        mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
+        echo "[$timestamp] ERROR: $message" >>"$LOG_FILE"
+        echo "ERROR: $message" >&2
+    }
+fi
 
 #------------------------------------------------------------------------------
 # System Check Functions
@@ -136,9 +128,16 @@ _suggest_installation_command() {
 
 # Back up existing Zsh configuration files
 backup_zshrc() {
+    local backup_dir="${BACKUP_DIR:-$HOME/.zsh_backup}"
+    
+    # Skip if dry-run mode
+    if command -v is_dry_run &>/dev/null && is_dry_run; then
+        preview_file_operation "backup" "$HOME/.zshrc" "Backup existing .zshrc to $backup_dir"
+        return 0
+    fi
+    
     log_message "Backing up existing Zsh configuration..."
 
-    local backup_dir="$HOME/.zsh_backup"
     local timestamp=$(date "+%Y%m%d_%H%M%S")
     local files_backed_up=0
 
@@ -147,6 +146,12 @@ backup_zshrc() {
 
     # Files to backup
     local config_files=(".zshrc" ".zshenv" ".zprofile" ".zlogin" ".zlogout")
+    
+    # Use config if available
+    if [ -f "${SCRIPT_DIR:-}/config.sh" ]; then
+        source "${SCRIPT_DIR:-}/config.sh"
+        config_files=("${CONFIG_FILES_TO_BACKUP[@]}")
+    fi
 
     # Back up each file if it exists
     for file in "${config_files[@]}"; do
@@ -188,29 +193,57 @@ install_oh_my_zsh() {
     # Create a temporary installation script
     local install_script="/tmp/install_ohmyzsh.sh"
 
-    # Download the install script
+    # Download the install script with retry logic
     log_message "Downloading Oh My Zsh installer..."
-    if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$install_script"; then
-        log_error "Failed to download Oh My Zsh installer. Check your internet connection."
-        return 1
+    if command -v curl_download_with_retry &>/dev/null; then
+        if ! curl_download_with_retry \
+            "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" \
+            "$install_script" \
+            "Downloading Oh My Zsh installer"; then
+            log_error "Failed to download Oh My Zsh installer after retries."
+            return 1
+        fi
+    else
+        # Fallback to direct curl
+        if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$install_script"; then
+            log_error "Failed to download Oh My Zsh installer. Check your internet connection."
+            return 1
+        fi
     fi
 
     # Modify the install script to prevent it from changing the shell
     log_message "Preparing installer script..."
-    sed -i.bak 's/exec zsh -l/exit 0/g' "$install_script"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/exec zsh -l/exit 0/g' "$install_script"
+    else
+        sed -i 's/exec zsh -l/exit 0/g' "$install_script"
+    fi
 
-    # Run the installer
+    # Run the installer with retry logic
     log_message "Running Oh My Zsh installer..."
-    if ! sh "$install_script" --unattended; then
-        log_error "Oh My Zsh installation failed. Check logs for details."
-        return 1
+    if command -v execute_with_retry &>/dev/null; then
+        if ! execute_with_retry "Installing Oh My Zsh" sh "$install_script" --unattended; then
+            log_error "Oh My Zsh installation failed after retries. Check logs for details."
+            rm -f "$install_script" "$install_script.bak"
+            return 1
+        fi
+    else
+        if ! sh "$install_script" --unattended; then
+            log_error "Oh My Zsh installation failed. Check logs for details."
+            rm -f "$install_script" "$install_script.bak"
+            return 1
+        fi
     fi
 
     # Verify installation
     if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
         log_error "Oh My Zsh directory not found after installation. Something went wrong."
+        rm -f "$install_script" "$install_script.bak"
         return 1
     fi
+
+    # Cleanup
+    rm -f "$install_script" "$install_script.bak"
 
     log_message "✅ Oh My Zsh installed successfully."
     return 0
@@ -218,6 +251,13 @@ install_oh_my_zsh() {
 
 # Change the user's default shell to Zsh
 change_default_shell() {
+    # Skip if dry-run mode
+    if command -v is_dry_run &>/dev/null && is_dry_run; then
+        local zsh_path="${SYSTEM_ZSH_PATH:-$(which zsh)}"
+        preview_command "Change default shell" "chsh -s $zsh_path"
+        return 0
+    fi
+    
     log_message "Changing default shell to Zsh..."
 
     # Use the system Zsh path if available, otherwise use which

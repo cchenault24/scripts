@@ -20,7 +20,20 @@ DEFAULT_THEME="robbyrussell"
 # Standard plugins to include regardless of selection
 STANDARD_PLUGINS=("git")
 
-# Initialize INSTALLED_PLUGINS array if not defined
+# Load state manager if available
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+if [ -f "$SCRIPT_DIR/state_manager.sh" ]; then
+    source "$SCRIPT_DIR/state_manager.sh"
+    # Sync INSTALLED_PLUGINS from state file
+    if [ -f "$STATE_FILE" ]; then
+        INSTALLED_PLUGINS=()
+        while IFS= read -r plugin; do
+            [[ -n "$plugin" ]] && INSTALLED_PLUGINS+=("$plugin")
+        done < <(get_installed_plugins 2>/dev/null)
+    fi
+fi
+
+# Initialize INSTALLED_PLUGINS array if not defined (backward compatibility)
 INSTALLED_PLUGINS=${INSTALLED_PLUGINS:-()}
 
 #------------------------------------------------------------------------------
@@ -193,10 +206,15 @@ build_final_path() {
         export HOMEBREW_PREFIX="/usr/local"
     fi
 
-    # Python user installs
-    [[ -d "$HOME/Library/Python/3.12/bin" ]] && paths+=("$HOME/Library/Python/3.12/bin")
+    # Python user installs (detect dynamically)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Check for Python user install directories (macOS)
+        for python_dir in "$HOME/Library/Python"/*/bin; do
+            [[ -d "$python_dir" ]] && paths+=("$python_dir")
+        done
+    fi
 
-    # JAVA_HOME
+    # JAVA_HOME (only add once)
     if [[ -n "$JAVA_HOME" && -d "$JAVA_HOME/bin" ]]; then
         paths+=("$JAVA_HOME/bin")
     fi
@@ -215,11 +233,6 @@ build_final_path() {
 
     # Append existing $PATH
     paths+=($PATH)
-
-    # Add JAVA_HOME to $PATH
-    if [[ -n "$JAVA_HOME" && -d "$JAVA_HOME/bin" ]]; then
-        paths+=("$JAVA_HOME/bin")
-    fi
 
     # Deduplicate
     local deduped=()

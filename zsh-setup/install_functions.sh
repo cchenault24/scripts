@@ -7,20 +7,57 @@
 # installation methods (git, Homebrew, npm, Oh My Zsh).
 #==============================================================================
 
+# Ensure SCRIPT_DIR is set
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
+# Load shared utilities
+if [ -f "$SCRIPT_DIR/error_handler.sh" ]; then
+    source "$SCRIPT_DIR/error_handler.sh"
+fi
+
+if [ -f "$SCRIPT_DIR/state_manager.sh" ]; then
+    source "$SCRIPT_DIR/state_manager.sh"
+fi
+
 #------------------------------------------------------------------------------
 # Global Variables
 #------------------------------------------------------------------------------
 
 # Configuration files
-PLUGINS_CONF="${SCRIPT_DIR:-$(dirname "$0")}/plugins.conf"
-DEPENDENCIES_CONF="${SCRIPT_DIR:-$(dirname "$0")}/plugin_dependencies.conf"
-
-# Arrays for tracking installation results
-INSTALLED_PLUGINS=()
-FAILED_PLUGINS=()
+PLUGINS_CONF="${SCRIPT_DIR}/plugins.conf"
+DEPENDENCIES_CONF="${SCRIPT_DIR}/plugin_dependencies.conf"
 
 # Default log file
 LOG_FILE="${LOG_FILE:-/tmp/zsh_setup.log}"
+
+# Backward compatibility: Export arrays for scripts that still use them
+# These will be synced with state file
+INSTALLED_PLUGINS=()
+FAILED_PLUGINS=()
+
+# Sync arrays from state file
+sync_arrays_from_state() {
+    INSTALLED_PLUGINS=()
+    FAILED_PLUGINS=()
+    
+    if [ -f "$STATE_FILE" ]; then
+        while IFS= read -r plugin; do
+            [[ -n "$plugin" ]] && INSTALLED_PLUGINS+=("$plugin")
+        done < <(get_installed_plugins 2>/dev/null)
+        
+        while IFS= read -r plugin; do
+            [[ -n "$plugin" ]] && FAILED_PLUGINS+=("$plugin")
+        done < <(get_failed_plugins 2>/dev/null)
+    fi
+}
+
+# Initialize state if needed
+if [ -f "$SCRIPT_DIR/state_manager.sh" ]; then
+    if [ ! -f "$STATE_FILE" ]; then
+        init_state "$SCRIPT_DIR"
+    fi
+    sync_arrays_from_state
+fi
 
 #------------------------------------------------------------------------------
 # Utility Functions
@@ -244,11 +281,18 @@ install_git_plugin() {
     # Create directory structure
     mkdir -p "$(dirname "$plugin_path")"
 
-    # Clone the repository
+    # Clone the repository with retry logic
     log_message "Cloning from: $plugin_url to $plugin_path"
-    if git clone --depth=1 "$plugin_url" "$plugin_path" 2>>"$LOG_FILE"; then
+    if git_clone_with_retry "$plugin_url" "$plugin_path" "Installing ${plugin_type}: $plugin_name"; then
         log_message "✅ ${plugin_type} $plugin_name installed successfully"
-        INSTALLED_PLUGINS+=("$plugin_name")
+        
+        # Update state management
+        if command -v add_installed_plugin &>/dev/null; then
+            add_installed_plugin "$plugin_name" "git"
+        else
+            INSTALLED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
 
         # For powerlevel10k theme, create symlink if needed
         if [ "$plugin_name" = "powerlevel10k" ] && [ "$plugin_type" = "plugin" ]; then
@@ -261,7 +305,16 @@ install_git_plugin() {
         return 0
     else
         log_error "❌ Failed to install ${plugin_type}: $plugin_name from $plugin_url"
-        FAILED_PLUGINS+=("$plugin_name")
+        
+        # Update state management
+        if command -v add_failed_plugin &>/dev/null; then
+            add_failed_plugin "$plugin_name" "git" "Clone failed"
+        else
+            FAILED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
+        
+        handle_error $? "git clone $plugin_name" "Check network connection and repository URL"
         return 1
     fi
 }
@@ -288,18 +341,34 @@ install_brew_plugin() {
     # Check if already installed
     if brew list --formula 2>/dev/null | grep -qx "$package_name"; then
         log_message "✅ $plugin_name is already installed."
-        INSTALLED_PLUGINS+=("$plugin_name")
+        if command -v add_installed_plugin &>/dev/null; then
+            add_installed_plugin "$plugin_name" "brew"
+        else
+            INSTALLED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
         return 0
     fi
 
-    # Install the package
-    if brew install "$package_name"; then
+    # Install the package with retry
+    if execute_with_retry "Installing $plugin_name via Homebrew" brew install "$package_name"; then
         log_message "✅ Successfully installed $plugin_name via Homebrew."
-        INSTALLED_PLUGINS+=("$plugin_name")
+        if command -v add_installed_plugin &>/dev/null; then
+            add_installed_plugin "$plugin_name" "brew"
+        else
+            INSTALLED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
         return 0
     else
         log_error "❌ Failed to install plugin: $plugin_name"
-        FAILED_PLUGINS+=("$plugin_name")
+        if command -v add_failed_plugin &>/dev/null; then
+            add_failed_plugin "$plugin_name" "brew" "Brew install failed"
+        else
+            FAILED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
+        handle_error $? "brew install $plugin_name" "Check Homebrew installation and network connection"
         return 1
     fi
 }
@@ -313,11 +382,21 @@ install_omz_plugin() {
     # Check if the plugin exists in Oh My Zsh
     if [ -d "$HOME/.oh-my-zsh/plugins/$plugin_name" ]; then
         log_message "Plugin $plugin_name is available in Oh My Zsh."
-        INSTALLED_PLUGINS+=("$plugin_name")
+        if command -v add_installed_plugin &>/dev/null; then
+            add_installed_plugin "$plugin_name" "omz"
+        else
+            INSTALLED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
         return 0
     else
         log_error "Plugin $plugin_name is not available in Oh My Zsh."
-        FAILED_PLUGINS+=("$plugin_name")
+        if command -v add_failed_plugin &>/dev/null; then
+            add_failed_plugin "$plugin_name" "omz" "Plugin not found in Oh My Zsh"
+        else
+            FAILED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
         return 1
     fi
 }
@@ -348,13 +427,24 @@ install_npm_plugin() {
         install_cmd="npm install $package_name"
     fi
 
-    if $install_cmd 2>>"$LOG_FILE"; then
+    if execute_with_retry "Installing $plugin_name via npm" $install_cmd; then
         log_message "✅ Plugin $plugin_name installed successfully."
-        INSTALLED_PLUGINS+=("$plugin_name")
+        if command -v add_installed_plugin &>/dev/null; then
+            add_installed_plugin "$plugin_name" "npm"
+        else
+            INSTALLED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
         return 0
     else
         log_error "❌ Failed to install plugin: $plugin_name"
-        FAILED_PLUGINS+=("$plugin_name")
+        if command -v add_failed_plugin &>/dev/null; then
+            add_failed_plugin "$plugin_name" "npm" "npm install failed"
+        else
+            FAILED_PLUGINS+=("$plugin_name")
+        fi
+        sync_arrays_from_state
+        handle_error $? "npm install $plugin_name" "Check npm installation and network connection"
         return 1
     fi
 }

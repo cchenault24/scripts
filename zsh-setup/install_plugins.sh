@@ -21,6 +21,19 @@ else
   exit 1
 fi
 
+# Load error handler and state manager
+if [ -f "$SCRIPT_DIR/error_handler.sh" ]; then
+  source "$SCRIPT_DIR/error_handler.sh"
+fi
+
+if [ -f "$SCRIPT_DIR/state_manager.sh" ]; then
+  source "$SCRIPT_DIR/state_manager.sh"
+  # Initialize state if needed
+  if [ ! -f "$STATE_FILE" ]; then
+    init_state "$SCRIPT_DIR"
+  fi
+fi
+
 #------------------------------------------------------------------------------
 # Configuration Variables
 #------------------------------------------------------------------------------
@@ -129,36 +142,87 @@ load_plugin_configs() {
 # Dependency Resolution Functions
 #------------------------------------------------------------------------------
 
-# Resolve dependencies for a plugin
+# Track resolved dependencies to prevent circular dependencies
+declare -A RESOLVED_DEPS=()
+
+# Resolve dependencies for a plugin (with circular dependency detection)
 resolve_dependencies() {
   local plugin="$1"
+  local depth="${2:-0}"
+  local max_depth=10  # Prevent infinite recursion
+  
+  # Prevent infinite recursion
+  if [ "$depth" -gt "$max_depth" ]; then
+    echo "⚠️ Maximum dependency depth reached for $plugin. Possible circular dependency." >&2
+    return 1
+  fi
+  
+  # Check for circular dependencies
+  if [[ -n "${RESOLVED_DEPS[$plugin]}" ]]; then
+    echo "⚠️ Circular dependency detected involving $plugin. Skipping." >&2
+    return 0  # Return success to continue processing
+  fi
+  
+  # Mark as being resolved
+  RESOLVED_DEPS[$plugin]=1
+  
   local deps=$(get_plugin_dependencies "$plugin")
 
   # No dependencies to resolve
   [ -z "$deps" ] && return 0
 
-  # Split dependencies by space (get_plugin_dependencies converts commas to spaces)
-  read -ra deps_array <<<"$deps"
+  # Split dependencies by comma or space
+  local deps_array=()
+  if [[ "$deps" == *","* ]]; then
+    IFS=',' read -ra deps_array <<<"$deps"
+  else
+    read -ra deps_array <<<"$deps"
+  fi
 
   for dep in "${deps_array[@]}"; do
+    # Trim whitespace
+    dep=$(echo "$dep" | xargs)
     [ -z "$dep" ] && continue
 
     # Check if dependency is already in the selection
-    if ! echo "$SELECTION" | grep -q "$dep"; then
+    local dep_in_selection=false
+    for entry in "${PLUGINS_TO_INSTALL[@]}"; do
+      local entry_name=$(echo "$entry" | cut -d'|' -f2)
+      local entry_desc=$(echo "$entry" | cut -d'|' -f1)
+      
+      if [ "$entry_name" = "$dep" ]; then
+        # Check if this plugin description is already in SELECTION
+        if echo "$SELECTION" | grep -q "^${entry_desc}$"; then
+          dep_in_selection=true
+          break
+        fi
+      fi
+    done
+
+    if ! $dep_in_selection; then
       # Find the full description for this dependency
       local dep_desc=""
+      local dep_found=false
+      
       for entry in "${PLUGINS_TO_INSTALL[@]}"; do
         local entry_name=$(echo "$entry" | cut -d'|' -f2)
         if [ "$entry_name" = "$dep" ]; then
           dep_desc=$(echo "$entry" | cut -d'|' -f1)
+          dep_found=true
           break
         fi
       done
 
-      # Add dependency with description if found, otherwise just the name
-      local to_add="${dep_desc:-$dep}"
-      echo "📝 Plugin '$plugin' requires: $to_add, adding automatically"
-      SELECTION+=$'\n'"$to_add"
+      if $dep_found; then
+        # Add dependency with description
+        echo "📝 Plugin '$plugin' requires: $dep_desc, adding automatically"
+        SELECTION+=$'\n'"$dep_desc"
+        
+        # Recursively resolve dependencies of this dependency
+        resolve_dependencies "$dep" $((depth + 1))
+      else
+        echo "⚠️ Dependency '$dep' for plugin '$plugin' not found in available plugins. Skipping." >&2
+      fi
     fi
   done
 
@@ -193,70 +257,126 @@ record_installation() {
 # Plugin Installation Functions
 #------------------------------------------------------------------------------
 
-# Install plugins
+# Worker function for parallel plugin installation
+install_plugin_worker() {
+  local entry="$1"
+  [ -z "$entry" ] && return 1
+  
+  IFS='|' read -r description name type <<<"$entry"
+  
+  # Skip if already installed
+  if plugin_already_installed "$name"; then
+    echo "✅ Skipping already installed plugin: $name" >&2
+    record_installation "$name" 0 "already-installed"
+    return 0
+  fi
+
+  case "$type" in
+    "git")
+      local plugin_url=""
+      if [ "$name" = "powerlevel10k" ]; then
+        install_git_plugin "$name" "https://github.com/romkatv/$name" "theme"
+      elif [ "$name" = "zsh-defer" ]; then
+        install_git_plugin "$name" "https://github.com/romkatv/$name" "plugin"
+      elif [ "$name" = "nvm" ]; then
+        install_git_plugin "$name" "https://github.com/nvm-sh/$name" "plugin"
+      else
+        install_git_plugin "$name" "https://github.com/zsh-users/$name" "plugin"
+      fi
+      ;;
+    "omz")
+      install_omz_plugin "$name"
+      ;;
+    "npm")
+      install_npm_plugin "$name" "$name" "global"
+      ;;
+    *)
+      echo "⚠️ Unknown method: $type for $name" >&2
+      record_installation "$name" 1 "$type"
+      return 1
+      ;;
+  esac
+}
+
+# Install plugins with parallel execution
 install_plugins() {
   local plugins_to_process=("$@")
   local total=${#plugins_to_process[@]}
 
   echo "🔄 Installing $total plugins..."
 
-  # Separate Homebrew plugins for sequential installation
+  # Separate plugins by installation method
   local brew_plugins=()
-  local other_plugins=()
+  local parallel_plugins=()  # git, npm, omz plugins that can run in parallel
 
   for entry in "${plugins_to_process[@]}"; do
     local install_method=$(echo "$entry" | cut -d'|' -f3)
     if [ "$install_method" = "brew" ]; then
       brew_plugins+=("$entry")
     else
-      other_plugins+=("$entry")
+      parallel_plugins+=("$entry")
     fi
   done
 
-  # Git/NPM/OMZ plugins
-  for entry in "${other_plugins[@]}"; do
-    [ -z "$entry" ] && continue
-    IFS='|' read -r description name type <<<"$entry"
+  # Install parallel plugins using xargs -P or GNU parallel
+  if [ ${#parallel_plugins[@]} -gt 0 ]; then
+    echo "📦 Installing ${#parallel_plugins[@]} plugins in parallel (max $MAX_PARALLEL_INSTALLS concurrent)..."
+    
+    # Create a temporary script for parallel execution
+    local worker_script=$(mktemp)
+    cat > "$worker_script" <<'WORKER_EOF'
+#!/usr/bin/env bash
+SCRIPT_DIR="$1"
+ENTRY="$2"
 
-    if plugin_already_installed "$name"; then
-      echo "✅ Skipping already installed plugin: $name"
-      record_installation "$name" 0 "already-installed"
-      continue
+# Source required scripts
+source "$SCRIPT_DIR/install_functions.sh"
+source "$SCRIPT_DIR/error_handler.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/state_manager.sh" 2>/dev/null || true
+
+# Source install_plugins.sh functions
+source "$SCRIPT_DIR/install_plugins.sh"
+
+# Execute worker function
+install_plugin_worker "$ENTRY"
+WORKER_EOF
+    chmod +x "$worker_script"
+    
+    # Check for GNU parallel first
+    if command -v parallel &>/dev/null; then
+      # Use GNU parallel
+      printf '%s\n' "${parallel_plugins[@]}" | \
+        parallel -j "$MAX_PARALLEL_INSTALLS" --tag "$worker_script" "$SCRIPT_DIR" {}
+    else
+      # Use xargs -P as fallback
+      printf '%s\n' "${parallel_plugins[@]}" | \
+        xargs -P "$MAX_PARALLEL_INSTALLS" -I {} "$worker_script" "$SCRIPT_DIR" "{}"
     fi
+    
+    # Cleanup
+    rm -f "$worker_script"
+  fi
 
-    case "$type" in
-      "git")
-        if [ "$name" = "powerlevel10k" ]; then
-          install_git_plugin "$name" "https://github.com/romkatv/$name" "theme"
-        elif [ "$name" = "zsh-defer" ]; then
-          install_git_plugin "$name" "https://github.com/romkatv/$name" "plugin"
-        elif [ "$name" = "nvm" ]; then
-          install_git_plugin "$name" "https://github.com/nvm-sh/$name" "plugin"
-        else
-          install_git_plugin "$name" "https://github.com/zsh-users/$name" "plugin"
-        fi
-        ;;
-      "omz") install_omz_plugin "$name" ;;
-      "npm") install_npm_plugin "$name" "$name" "global" ;;
-      *)
-        echo "⚠️ Unknown method: $type for $name"
-        record_installation "$name" 1 "$type"
-        ;;
-    esac
-  done
+  # Install Homebrew plugins sequentially (brew doesn't handle parallel well)
+  if [ ${#brew_plugins[@]} -gt 0 ]; then
+    echo "🍺 Installing ${#brew_plugins[@]} Homebrew packages sequentially..."
+    for entry in "${brew_plugins[@]}"; do
+      local name=$(echo "$entry" | cut -d'|' -f2)
 
-  # Homebrew plugins
-  for entry in "${brew_plugins[@]}"; do
-    local name=$(echo "$entry" | cut -d'|' -f2)
+      if brew_plugin_installed "$name"; then
+        echo "✅ Skipping already installed Homebrew plugin: $name"
+        record_installation "$name" 0 "already-installed"
+        continue
+      fi
 
-    if brew_plugin_installed "$name"; then
-      echo "✅ Skipping already installed Homebrew plugin: $name"
-      record_installation "$name" 0 "already-installed"
-      continue
-    fi
-
-    install_brew_plugin "$name" "$name"
-  done
+      install_brew_plugin "$name" "$name"
+    done
+  fi
+  
+  # Sync arrays from state after all installations
+  if command -v sync_arrays_from_state &>/dev/null; then
+    sync_arrays_from_state
+  fi
 }
 
 #------------------------------------------------------------------------------
@@ -506,8 +626,18 @@ show_installation_summary() {
 
 # Main function that orchestrates the plugin installation process
 main() {
-  # Add error handling trap
-  trap 'echo "Error on line $LINENO"; exit 1' ERR
+  # Set up error handling
+  if command -v setup_error_trap &>/dev/null; then
+    setup_error_trap "Plugin installation"
+  else
+    trap 'echo "Error on line $LINENO"; exit 1' ERR
+  fi
+  
+  # Skip if dry-run mode
+  if command -v is_dry_run &>/dev/null && is_dry_run; then
+    echo "🔍 Dry-run mode: Plugin installation would be performed here"
+    return 0
+  fi
 
   # Step 1: Load plugin configurations
   load_plugin_configs
