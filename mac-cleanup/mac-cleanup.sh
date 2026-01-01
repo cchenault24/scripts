@@ -63,6 +63,29 @@ show_spinner() {
   fi
 }
 
+# Show progress bar for long operations
+show_progress() {
+  local current=$1
+  local total=$2
+  local message="${3:-Progress}"
+  
+  if command -v gum &> /dev/null && [[ -t 1 ]]; then
+    local percent=$((current * 100 / total))
+    echo "$percent" | gum progress --title "$message" --width 50 --percent
+  else
+    local percent=$((current * 100 / total))
+    local filled=$((percent / 2))
+    local empty=$((50 - filled))
+    printf "\r$message ["
+    printf "%${filled}s" | tr ' ' '='
+    printf "%${empty}s" | tr ' ' ' '
+    printf "] %d%%" $percent
+    if [[ $current -eq $total ]]; then
+      echo ""
+    fi
+  fi
+}
+
 # Set color variables
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -76,6 +99,7 @@ NC='\033[0m' # No Color
 BACKUP_DIR="$HOME/.mac-cleanup-backups/$(date +%Y-%m-%d-%H-%M-%S)"
 GUM_INSTALLED_BY_SCRIPT=false
 DRY_RUN=false
+QUIET_MODE=false
 LOG_FILE=""
 TOTAL_SPACE_SAVED=0
 declare -A SPACE_SAVED_BY_OPERATION
@@ -377,6 +401,9 @@ backup() {
     print_info "Backing up $path..."
     log_message "INFO" "Creating backup: $path -> $backup_name"
     
+    # Save backup metadata for undo functionality
+    echo "$path|$backup_name|$(date '+%Y-%m-%d %H:%M:%S')" >> "$BACKUP_DIR/backup_manifest.txt" 2>/dev/null
+    
     if [[ -d "$path" ]]; then
       # Use a background process for large directories
       tar -czf "$BACKUP_DIR/${backup_name}.tar.gz" -C "$(dirname "$path")" "$(basename "$path")" 2>/dev/null &
@@ -407,6 +434,161 @@ backup() {
   fi
   
   return 0
+}
+
+# List available backup sessions
+list_backups() {
+  local backup_base="$HOME/.mac-cleanup-backups"
+  
+  if [[ ! -d "$backup_base" ]]; then
+    print_warning "No backup directory found."
+    return 1
+  fi
+  
+  local backups=($(find "$backup_base" -mindepth 1 -maxdepth 1 -type d | sort -r))
+  
+  if [[ ${#backups[@]} -eq 0 ]]; then
+    print_warning "No backup sessions found."
+    return 1
+  fi
+  
+  print_info "Available backup sessions:"
+  local index=1
+  for backup_dir in "${backups[@]}"; do
+    local backup_name=$(basename "$backup_dir")
+    local backup_date=$(echo "$backup_name" | sed 's/-/ /g' | awk '{print $1"-"$2"-"$3" "$4":"$5":"$6}')
+    local backup_size=$(calculate_size "$backup_dir")
+    print_message "$CYAN" "  $index. $backup_date ($backup_size)"
+    index=$((index + 1))
+  done
+  
+  return 0
+}
+
+# Undo cleanup - restore from backup
+undo_cleanup() {
+  print_header "Undo Cleanup"
+  
+  list_backups || return 1
+  
+  local backup_base="$HOME/.mac-cleanup-backups"
+  local backups=($(find "$backup_base" -mindepth 1 -maxdepth 1 -type d | sort -r))
+  
+  if [[ ${#backups[@]} -eq 0 ]]; then
+    return 1
+  fi
+  
+  print_info "Select a backup session to restore:"
+  local backup_options=()
+  for backup_dir in "${backups[@]}"; do
+    local backup_name=$(basename "$backup_dir")
+    local backup_date=$(echo "$backup_name" | sed 's/-/ /g' | awk '{print $1"-"$2"-"$3" "$4":"$5":"$6}')
+    backup_options+=("$backup_date")
+  done
+  
+  local selected=$(printf "%s\n" "${backup_options[@]}" | gum choose --height=10)
+  
+  if [[ -z "$selected" ]]; then
+    print_warning "No backup selected. Cancelling undo."
+    return 1
+  fi
+  
+  # Find the selected backup directory
+  local selected_backup=""
+  local index=1
+  for backup_dir in "${backups[@]}"; do
+    local backup_name=$(basename "$backup_dir")
+    local backup_date=$(echo "$backup_name" | sed 's/-/ /g' | awk '{print $1"-"$2"-"$3" "$4":"$5":"$6}')
+    if [[ "$backup_date" == "$selected" ]]; then
+      selected_backup="$backup_dir"
+      break
+    fi
+    index=$((index + 1))
+  done
+  
+  if [[ -z "$selected_backup" ]] || [[ ! -d "$selected_backup" ]]; then
+    print_error "Selected backup not found."
+    return 1
+  fi
+  
+  print_warning "This will restore files from the backup session."
+  if ! gum confirm "Are you sure you want to restore from this backup?"; then
+    print_info "Restore cancelled."
+    return 1
+  fi
+  
+  # Check for backup manifest
+  local manifest_file="$selected_backup/backup_manifest.txt"
+  if [[ -f "$manifest_file" ]]; then
+    print_info "Found backup manifest. Restoring files..."
+    local restored=0
+    local failed=0
+    
+    while IFS='|' read -r original_path backup_name backup_date; do
+      if [[ -z "$original_path" ]] || [[ -z "$backup_name" ]]; then
+        continue
+      fi
+      
+      local backup_file="$selected_backup/${backup_name}.tar.gz"
+      if [[ ! -f "$backup_file" ]]; then
+        backup_file="$selected_backup/${backup_name}"
+      fi
+      
+      if [[ -f "$backup_file" ]]; then
+        print_info "Restoring $original_path..."
+        
+        if [[ "$backup_file" == *.tar.gz ]]; then
+          # Extract tar.gz backup
+          local parent_dir=$(dirname "$original_path")
+          mkdir -p "$parent_dir" 2>/dev/null
+          tar -xzf "$backup_file" -C "$parent_dir" 2>/dev/null && {
+            print_success "Restored $original_path"
+            restored=$((restored + 1))
+            log_message "SUCCESS" "Restored: $original_path"
+          } || {
+            print_error "Failed to restore $original_path"
+            failed=$((failed + 1))
+            log_message "ERROR" "Failed to restore: $original_path"
+          }
+        else
+          # Copy file backup
+          mkdir -p "$(dirname "$original_path")" 2>/dev/null
+          cp "$backup_file" "$original_path" 2>/dev/null && {
+            print_success "Restored $original_path"
+            restored=$((restored + 1))
+            log_message "SUCCESS" "Restored: $original_path"
+          } || {
+            print_error "Failed to restore $original_path"
+            failed=$((failed + 1))
+            log_message "ERROR" "Failed to restore: $original_path"
+          }
+        fi
+      else
+        print_warning "Backup file not found: $backup_name"
+        failed=$((failed + 1))
+      fi
+    done < "$manifest_file"
+    
+    print_header "Restore Summary"
+    print_success "Restored $restored file(s)"
+    if [[ $failed -gt 0 ]]; then
+      print_warning "Failed to restore $failed file(s)"
+    fi
+  else
+    print_warning "Backup manifest not found. Attempting to restore all backups..."
+    print_info "Restoring all files from backup directory..."
+    
+    for backup_file in "$selected_backup"/*.tar.gz; do
+      if [[ -f "$backup_file" ]]; then
+        local backup_name=$(basename "$backup_file" .tar.gz)
+        print_info "Restoring $backup_name..."
+        # Note: Without manifest, we can't determine original path, so this is limited
+        print_warning "Cannot determine original path without manifest. Manual restoration may be needed."
+      fi
+    done
+  fi
+  
+  print_success "Undo operation completed."
 }
 
 # Safely remove a directory or file
@@ -736,6 +918,114 @@ clean_chrome_cache() {
   fi
 }
 
+# Clean Firefox cache
+clean_firefox_cache() {
+  print_header "Cleaning Firefox Cache"
+  
+  local firefox_base="$HOME/Library/Application Support/Firefox"
+  local firefox_found=false
+  local total_space_freed=0
+  
+  # Clean main Firefox cache
+  local firefox_cache_dir="$HOME/Library/Caches/Firefox"
+  if [[ -d "$firefox_cache_dir" ]]; then
+    firefox_found=true
+    local space_before=$(calculate_size_bytes "$firefox_cache_dir")
+    backup "$firefox_cache_dir" "firefox_cache"
+    safe_clean_dir "$firefox_cache_dir" "Firefox cache"
+    local space_after=$(calculate_size_bytes "$firefox_cache_dir")
+    total_space_freed=$((total_space_freed + space_before - space_after))
+    print_success "Cleaned Firefox cache."
+  fi
+  
+  # Find and clean all Firefox profiles
+  if [[ -d "$firefox_base" ]]; then
+    firefox_found=true
+    for profile_dir in "$firefox_base"/Profiles/*/; do
+      if [[ -d "$profile_dir" ]]; then
+        local profile_name=$(basename "$profile_dir")
+        local profile_dirs=(
+          "$profile_dir/cache2"
+          "$profile_dir/startupCache"
+          "$profile_dir/OfflineCache"
+        )
+        
+        for dir in "${profile_dirs[@]}"; do
+          if [[ -d "$dir" ]]; then
+            local space_before=$(calculate_size_bytes "$dir")
+            backup "$dir" "firefox_${profile_name}_$(basename "$dir")"
+            safe_clean_dir "$dir" "Firefox $profile_name $(basename "$dir")"
+            local space_after=$(calculate_size_bytes "$dir")
+            total_space_freed=$((total_space_freed + space_before - space_after))
+            print_success "Cleaned Firefox $profile_name $(basename "$dir")."
+          fi
+        done
+      fi
+    done
+  fi
+  
+  if [[ "$firefox_found" == false ]]; then
+    print_warning "Firefox does not appear to be installed or has never been run."
+  else
+    SPACE_SAVED_BY_OPERATION["Firefox Cache"]=$total_space_freed
+    print_warning "You may need to restart Firefox for changes to take effect"
+  fi
+}
+
+# Clean Edge cache
+clean_edge_cache() {
+  print_header "Cleaning Microsoft Edge Cache"
+  
+  local edge_base="$HOME/Library/Application Support/Microsoft Edge"
+  local edge_found=false
+  local total_space_freed=0
+  
+  # Clean main Edge cache
+  local edge_cache_dir="$HOME/Library/Caches/com.microsoft.edgemac"
+  if [[ -d "$edge_cache_dir" ]]; then
+    edge_found=true
+    local space_before=$(calculate_size_bytes "$edge_cache_dir")
+    backup "$edge_cache_dir" "edge_cache"
+    safe_clean_dir "$edge_cache_dir" "Edge cache"
+    local space_after=$(calculate_size_bytes "$edge_cache_dir")
+    total_space_freed=$((total_space_freed + space_before - space_after))
+    print_success "Cleaned Edge cache."
+  fi
+  
+  # Find and clean all Edge profiles (similar to Chrome)
+  if [[ -d "$edge_base" ]]; then
+    edge_found=true
+    for profile_dir in "$edge_base"/*/; do
+      if [[ -d "$profile_dir" ]]; then
+        local profile_name=$(basename "$profile_dir")
+        local profile_dirs=(
+          "$profile_dir/Cache"
+          "$profile_dir/Code Cache"
+          "$profile_dir/Service Worker"
+        )
+        
+        for dir in "${profile_dirs[@]}"; do
+          if [[ -d "$dir" ]]; then
+            local space_before=$(calculate_size_bytes "$dir")
+            backup "$dir" "edge_${profile_name}_$(basename "$dir")"
+            safe_clean_dir "$dir" "Edge $profile_name $(basename "$dir")"
+            local space_after=$(calculate_size_bytes "$dir")
+            total_space_freed=$((total_space_freed + space_before - space_after))
+            print_success "Cleaned Edge $profile_name $(basename "$dir")."
+          fi
+        done
+      fi
+    done
+  fi
+  
+  if [[ "$edge_found" == false ]]; then
+    print_warning "Microsoft Edge does not appear to be installed or has never been run."
+  else
+    SPACE_SAVED_BY_OPERATION["Microsoft Edge Cache"]=$total_space_freed
+    print_warning "You may need to restart Edge for changes to take effect"
+  fi
+}
+
 # Clean Application Container Caches
 clean_container_caches() {
   print_header "Cleaning Application Container Caches"
@@ -911,6 +1201,163 @@ clean_homebrew_cache() {
   fi
 }
 
+# Clean npm cache
+clean_npm_cache() {
+  print_header "Cleaning npm Cache"
+  
+  if ! command -v npm &> /dev/null; then
+    print_warning "npm is not installed."
+    return
+  fi
+  
+  local total_space_freed=0
+  local npm_cache_dir=$(npm config get cache 2>/dev/null || echo "$HOME/.npm")
+  
+  if [[ -d "$npm_cache_dir" ]]; then
+    local space_before=$(calculate_size_bytes "$npm_cache_dir")
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+      print_info "[DRY RUN] Would clean npm cache ($(format_bytes $space_before))"
+      log_message "DRY_RUN" "Would clean npm cache"
+    else
+      backup "$npm_cache_dir" "npm_cache"
+      npm cache clean --force 2>&1 | log_message "INFO"
+      local space_after=$(calculate_size_bytes "$npm_cache_dir")
+      total_space_freed=$((space_before - space_after))
+      SPACE_SAVED_BY_OPERATION["npm Cache"]=$total_space_freed
+      print_success "npm cache cleaned."
+      log_message "SUCCESS" "npm cache cleaned (freed $(format_bytes $total_space_freed))"
+    fi
+  else
+    print_warning "npm cache directory not found."
+  fi
+  
+  # Clean yarn cache if available
+  if command -v yarn &> /dev/null; then
+    local yarn_cache_dir=$(yarn cache dir 2>/dev/null || echo "$HOME/.yarn/cache")
+    if [[ -d "$yarn_cache_dir" ]]; then
+      local space_before=$(calculate_size_bytes "$yarn_cache_dir")
+      
+      if [[ "$DRY_RUN" == "true" ]]; then
+        print_info "[DRY RUN] Would clean yarn cache ($(format_bytes $space_before))"
+        log_message "DRY_RUN" "Would clean yarn cache"
+      else
+        backup "$yarn_cache_dir" "yarn_cache"
+        yarn cache clean 2>&1 | log_message "INFO"
+        local space_after=$(calculate_size_bytes "$yarn_cache_dir")
+        local yarn_space_freed=$((space_before - space_after))
+        total_space_freed=$((total_space_freed + yarn_space_freed))
+        SPACE_SAVED_BY_OPERATION["npm Cache"]=$total_space_freed
+        print_success "yarn cache cleaned."
+        log_message "SUCCESS" "yarn cache cleaned (freed $(format_bytes $yarn_space_freed))"
+      fi
+    fi
+  fi
+}
+
+# Clean pip cache
+clean_pip_cache() {
+  print_header "Cleaning pip Cache"
+  
+  if ! command -v pip &> /dev/null && ! command -v pip3 &> /dev/null; then
+    print_warning "pip is not installed."
+    return
+  fi
+  
+  local pip_cmd="pip3"
+  if command -v pip &> /dev/null; then
+    pip_cmd="pip"
+  fi
+  
+  local pip_cache_dir=$($pip_cmd cache dir 2>/dev/null || echo "$HOME/Library/Caches/pip")
+  local total_space_freed=0
+  
+  if [[ -d "$pip_cache_dir" ]]; then
+    local space_before=$(calculate_size_bytes "$pip_cache_dir")
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+      print_info "[DRY RUN] Would clean pip cache ($(format_bytes $space_before))"
+      log_message "DRY_RUN" "Would clean pip cache"
+    else
+      backup "$pip_cache_dir" "pip_cache"
+      $pip_cmd cache purge 2>&1 | log_message "INFO"
+      local space_after=$(calculate_size_bytes "$pip_cache_dir")
+      total_space_freed=$((space_before - space_after))
+      SPACE_SAVED_BY_OPERATION["pip Cache"]=$total_space_freed
+      print_success "pip cache cleaned."
+      log_message "SUCCESS" "pip cache cleaned (freed $(format_bytes $total_space_freed))"
+    fi
+  else
+    print_warning "pip cache directory not found."
+  fi
+}
+
+# Clean Gradle cache
+clean_gradle_cache() {
+  print_header "Cleaning Gradle Cache"
+  
+  local gradle_cache_dir="$HOME/.gradle/caches"
+  local gradle_wrapper_dir="$HOME/.gradle/wrapper"
+  local total_space_freed=0
+  
+  if [[ -d "$gradle_cache_dir" ]]; then
+    local space_before=$(calculate_size_bytes "$gradle_cache_dir")
+    backup "$gradle_cache_dir" "gradle_cache"
+    safe_clean_dir "$gradle_cache_dir" "Gradle cache"
+    local space_after=$(calculate_size_bytes "$gradle_cache_dir")
+    total_space_freed=$((total_space_freed + space_before - space_after))
+    print_success "Cleaned Gradle cache."
+  fi
+  
+  if [[ -d "$gradle_wrapper_dir" ]]; then
+    local space_before=$(calculate_size_bytes "$gradle_wrapper_dir")
+    backup "$gradle_wrapper_dir" "gradle_wrapper"
+    safe_clean_dir "$gradle_wrapper_dir" "Gradle wrapper"
+    local space_after=$(calculate_size_bytes "$gradle_wrapper_dir")
+    total_space_freed=$((total_space_freed + space_before - space_after))
+    print_success "Cleaned Gradle wrapper cache."
+  fi
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_warning "Gradle cache not found."
+  else
+    SPACE_SAVED_BY_OPERATION["Gradle Cache"]=$total_space_freed
+  fi
+}
+
+# Clean Maven cache
+clean_maven_cache() {
+  print_header "Cleaning Maven Cache"
+  
+  local maven_repo_dir="$HOME/.m2/repository"
+  local total_space_freed=0
+  
+  if [[ -d "$maven_repo_dir" ]]; then
+    print_warning "Cleaning Maven repository will require re-downloading dependencies on next build."
+    
+    if [[ "$DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean the Maven repository?"; then
+      local space_before=$(calculate_size_bytes "$maven_repo_dir")
+      
+      if [[ "$DRY_RUN" == "true" ]]; then
+        print_info "[DRY RUN] Would clean Maven repository ($(format_bytes $space_before))"
+        log_message "DRY_RUN" "Would clean Maven repository"
+      else
+        backup "$maven_repo_dir" "maven_repository"
+        safe_clean_dir "$maven_repo_dir" "Maven repository"
+        local space_after=$(calculate_size_bytes "$maven_repo_dir")
+        total_space_freed=$((space_before - space_after))
+        SPACE_SAVED_BY_OPERATION["Maven Cache"]=$total_space_freed
+        print_success "Maven repository cleaned."
+        log_message "SUCCESS" "Maven repository cleaned (freed $(format_bytes $total_space_freed))"
+      fi
+    else
+      print_info "Skipping Maven cache cleanup"
+    fi
+  else
+    print_warning "Maven repository not found."
+  fi
+}
+
 # Flush DNS Cache
 flush_dns_cache() {
   print_header "Flushing DNS Cache"
@@ -926,9 +1373,297 @@ flush_dns_cache() {
   fi
 }
 
+# Clean Docker cache
+clean_docker_cache() {
+  print_header "Cleaning Docker Cache"
+  
+  if ! command -v docker &> /dev/null; then
+    print_warning "Docker is not installed."
+    return
+  fi
+  
+  if ! docker info &> /dev/null; then
+    print_warning "Docker is not running. Please start Docker Desktop and try again."
+    return
+  fi
+  
+  print_warning "This will remove unused Docker images, containers, volumes, and build cache."
+  print_warning "This may require re-downloading images and rebuilding containers."
+  
+  if [[ "$DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean Docker cache?"; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      print_info "[DRY RUN] Would clean Docker cache"
+      print_info "[DRY RUN] Would run: docker system prune -a --volumes -f"
+      log_message "DRY_RUN" "Would clean Docker cache"
+    else
+      print_info "Cleaning Docker cache (this may take a while)..."
+      log_message "INFO" "Starting Docker cleanup"
+      
+      # Get disk usage before
+      local docker_info=$(docker system df --format "{{.Size}}" 2>/dev/null | head -1)
+      
+      # Clean unused data
+      docker system prune -a --volumes -f 2>&1 | log_message "INFO"
+      
+      # Get disk usage after
+      local docker_info_after=$(docker system df --format "{{.Size}}" 2>/dev/null | head -1)
+      
+      print_success "Docker cache cleaned."
+      log_message "SUCCESS" "Docker cache cleaned"
+      SPACE_SAVED_BY_OPERATION["Docker Cache"]=0  # Docker doesn't report exact bytes freed easily
+    fi
+  else
+    print_info "Skipping Docker cache cleanup"
+  fi
+}
+
+# Clean Xcode data
+clean_xcode_data() {
+  print_header "Cleaning Xcode Data"
+  
+  print_warning "⚠️ CAUTION: Cleaning Xcode data will remove derived data, archives, and device support."
+  print_warning "This may require Xcode to rebuild projects and re-index."
+  
+  if [[ "$DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean Xcode data?"; then
+    local total_space_freed=0
+    
+    # Xcode Derived Data
+    local derived_data_dir="$HOME/Library/Developer/Xcode/DerivedData"
+    if [[ -d "$derived_data_dir" ]]; then
+      local space_before=$(calculate_size_bytes "$derived_data_dir")
+      backup "$derived_data_dir" "xcode_derived_data"
+      safe_clean_dir "$derived_data_dir" "Xcode Derived Data"
+      local space_after=$(calculate_size_bytes "$derived_data_dir")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned Xcode Derived Data."
+    fi
+    
+    # Xcode Archives
+    local archives_dir="$HOME/Library/Developer/Xcode/Archives"
+    if [[ -d "$archives_dir" ]]; then
+      print_warning "Archives contain built apps. Consider backing up important archives first."
+      if [[ "$DRY_RUN" == "true" ]] || gum confirm "Do you want to clean Xcode Archives?"; then
+        local space_before=$(calculate_size_bytes "$archives_dir")
+        backup "$archives_dir" "xcode_archives"
+        safe_clean_dir "$archives_dir" "Xcode Archives"
+        local space_after=$(calculate_size_bytes "$archives_dir")
+        total_space_freed=$((total_space_freed + space_before - space_after))
+        print_success "Cleaned Xcode Archives."
+      fi
+    fi
+    
+    # Xcode Device Support
+    local device_support_dir="$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+    if [[ -d "$device_support_dir" ]]; then
+      local space_before=$(calculate_size_bytes "$device_support_dir")
+      backup "$device_support_dir" "xcode_device_support"
+      safe_clean_dir "$device_support_dir" "Xcode Device Support"
+      local space_after=$(calculate_size_bytes "$device_support_dir")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned Xcode Device Support."
+    fi
+    
+    # Xcode Caches
+    local xcode_caches_dir="$HOME/Library/Caches/com.apple.dt.Xcode"
+    if [[ -d "$xcode_caches_dir" ]]; then
+      local space_before=$(calculate_size_bytes "$xcode_caches_dir")
+      backup "$xcode_caches_dir" "xcode_caches"
+      safe_clean_dir "$xcode_caches_dir" "Xcode Caches"
+      local space_after=$(calculate_size_bytes "$xcode_caches_dir")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned Xcode Caches."
+    fi
+    
+    if [[ $total_space_freed -eq 0 ]]; then
+      print_warning "No Xcode data found to clean."
+    else
+      SPACE_SAVED_BY_OPERATION["Xcode Data"]=$total_space_freed
+      print_warning "You may need to rebuild Xcode projects after this cleanup."
+    fi
+  else
+    print_info "Skipping Xcode data cleanup"
+  fi
+}
+
+# Clean Node.js module caches
+clean_node_modules() {
+  print_header "Cleaning Node.js Module Caches"
+  
+  print_warning "⚠️ CAUTION: This will clean Node.js module caches."
+  print_warning "Cleaning node_modules directories requires re-running npm/yarn install."
+  
+  local total_space_freed=0
+  
+  # Clean global node_modules cache locations
+  local node_paths=(
+    "$HOME/.node_modules"
+    "$HOME/.npm-global"
+  )
+  
+  for node_path in "${node_paths[@]}"; do
+    if [[ -d "$node_path" ]]; then
+      local space_before=$(calculate_size_bytes "$node_path")
+      backup "$node_path" "node_$(basename "$node_path")"
+      safe_clean_dir "$node_path" "Node.js $(basename "$node_path")"
+      local space_after=$(calculate_size_bytes "$node_path")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned $node_path."
+    fi
+  done
+  
+  # Optional: Clean node_modules in common locations (with strong warning)
+  if [[ "$DRY_RUN" != "true" ]] && gum confirm "Do you want to clean node_modules directories? (WARNING: Requires re-install)"; then
+    print_warning "Searching for node_modules directories (this may take a while)..."
+    
+    # Limit search to common project locations to avoid taking too long
+    local search_paths=(
+      "$HOME/Projects"
+      "$HOME/Development"
+      "$HOME/workspace"
+      "$HOME/Documents"
+    )
+    
+    local found_count=0
+    for search_path in "${search_paths[@]}"; do
+      if [[ -d "$search_path" ]]; then
+        find "$search_path" -type d -name "node_modules" -maxdepth 5 2>/dev/null | while read node_modules_dir; do
+          if [[ -d "$node_modules_dir" ]]; then
+            found_count=$((found_count + 1))
+            local parent_dir=$(dirname "$node_modules_dir")
+            local project_name=$(basename "$parent_dir")
+            local size=$(calculate_size "$node_modules_dir")
+            
+            if gum confirm "Clean node_modules in $project_name ($size)?"; then
+              local space_before=$(calculate_size_bytes "$node_modules_dir")
+              backup "$node_modules_dir" "node_modules_${project_name}"
+              safe_remove "$node_modules_dir" "node_modules in $project_name"
+              local space_freed=$space_before
+              total_space_freed=$((total_space_freed + space_freed))
+              print_success "Cleaned node_modules in $project_name."
+              log_message "SUCCESS" "Cleaned node_modules: $node_modules_dir (freed $(format_bytes $space_freed))"
+            fi
+          fi
+        done
+      fi
+    done
+    
+    if [[ $found_count -eq 0 ]]; then
+      print_info "No node_modules directories found in common locations."
+    fi
+  fi
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_warning "No Node.js module caches found to clean."
+  else
+    SPACE_SAVED_BY_OPERATION["Node.js Modules"]=$total_space_freed
+    print_warning "You may need to run 'npm install' or 'yarn install' in affected projects."
+  fi
+}
+
 # --------------------------------------------------------------------------
 # MAIN SCRIPT
 # --------------------------------------------------------------------------
+
+# Generate LaunchAgent plist for scheduling
+generate_launchagent() {
+  local schedule="$1"  # daily, weekly, monthly
+  local script_path="$2"
+  local plist_name="com.mac-cleanup.agent"
+  local plist_path="$HOME/Library/LaunchAgents/${plist_name}.plist"
+  
+  # Determine interval based on schedule
+  local interval=86400  # daily default
+  case "$schedule" in
+    daily)
+      interval=86400
+      ;;
+    weekly)
+      interval=604800
+      ;;
+    monthly)
+      interval=2592000
+      ;;
+    *)
+      print_error "Invalid schedule: $schedule (must be daily, weekly, or monthly)"
+      return 1
+      ;;
+  esac
+  
+  # Create LaunchAgent plist
+  cat > "$plist_path" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$plist_name</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>$script_path</string>
+    <string>--quiet</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>$interval</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>$HOME/.mac-cleanup-backups/scheduled.log</string>
+  <key>StandardErrorPath</key>
+  <string>$HOME/.mac-cleanup-backups/scheduled-error.log</string>
+</dict>
+</plist>
+EOF
+  
+  print_success "LaunchAgent plist created at: $plist_path"
+  print_info "To activate the schedule, run:"
+  print_message "$CYAN" "  launchctl load $plist_path"
+  print_info "To remove the schedule, run:"
+  print_message "$CYAN" "  launchctl unload $plist_path"
+  
+  return 0
+}
+
+# Setup scheduling
+setup_schedule() {
+  print_header "Setup Scheduled Cleanup"
+  
+  print_info "Select a schedule frequency:"
+  local schedule=$(echo -e "daily\nweekly\nmonthly" | gum choose)
+  
+  if [[ -z "$schedule" ]]; then
+    print_warning "Schedule setup cancelled."
+    return 1
+  fi
+  
+  # Get script path
+  local script_path="$0"
+  if [[ ! "$script_path" =~ ^/ ]]; then
+    # Relative path, make it absolute
+    script_path="$(cd "$(dirname "$script_path")" && pwd)/$(basename "$script_path")"
+  fi
+  
+  # Select cleanup operations for scheduled runs
+  print_info "Select cleanup operations for scheduled runs (space to select, enter to confirm):"
+  print_warning "Note: Scheduled runs will use default safe operations."
+  
+  # Generate LaunchAgent
+  if generate_launchagent "$schedule" "$script_path"; then
+    print_success "Scheduled cleanup configured for $schedule runs."
+    print_info "The cleanup will run automatically every $schedule."
+    
+    if gum confirm "Do you want to load the schedule now?"; then
+      launchctl load "$HOME/Library/LaunchAgents/com.mac-cleanup.agent.plist" 2>/dev/null && {
+        print_success "Schedule activated successfully!"
+      } || {
+        print_error "Failed to activate schedule. You may need to run: launchctl load $HOME/Library/LaunchAgents/com.mac-cleanup.agent.plist"
+      }
+    fi
+  else
+    print_error "Failed to create schedule."
+    return 1
+  fi
+}
 
 # Parse command line arguments
 parse_arguments() {
@@ -938,11 +1673,27 @@ parse_arguments() {
         DRY_RUN=true
         shift
         ;;
+      --undo)
+        undo_cleanup
+        exit $?
+        ;;
+      --schedule)
+        setup_schedule
+        exit $?
+        ;;
+      --quiet)
+        # Quiet mode for automated runs - skip interactive prompts
+        QUIET_MODE=true
+        shift
+        ;;
       --help|-h)
         echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
         echo "  --dry-run    Preview operations without making changes"
+        echo "  --undo       Restore files from a previous backup"
+        echo "  --schedule   Setup automated scheduling (daily/weekly/monthly)"
+        echo "  --quiet      Run in quiet mode (for automated runs)"
         echo "  --help, -h   Show this help message"
         exit 0
         ;;
@@ -997,12 +1748,21 @@ main() {
   cleanup_functions["Temporary Files"]="clean_temp_files"
   cleanup_functions["Safari Cache"]="clean_safari_cache"
   cleanup_functions["Chrome Cache"]="clean_chrome_cache"
+  cleanup_functions["Firefox Cache"]="clean_firefox_cache"
+  cleanup_functions["Microsoft Edge Cache"]="clean_edge_cache"
   cleanup_functions["Application Container Caches"]="clean_container_caches"
   cleanup_functions["Saved Application States"]="clean_saved_states"
   cleanup_functions["Developer Tool Temp Files"]="clean_dev_tool_temp"
   cleanup_functions["Corrupted Preference Lockfiles"]="clean_pref_lockfiles"
   cleanup_functions["Empty Trash"]="empty_trash"
   cleanup_functions["Homebrew Cache"]="clean_homebrew_cache"
+  cleanup_functions["npm Cache"]="clean_npm_cache"
+  cleanup_functions["pip Cache"]="clean_pip_cache"
+  cleanup_functions["Gradle Cache"]="clean_gradle_cache"
+  cleanup_functions["Maven Cache"]="clean_maven_cache"
+  cleanup_functions["Docker Cache"]="clean_docker_cache"
+  cleanup_functions["Xcode Data"]="clean_xcode_data"
+  cleanup_functions["Node.js Modules"]="clean_node_modules"
   cleanup_functions["Flush DNS Cache"]="flush_dns_cache"
   
   # Build option list with sizes for display
@@ -1058,6 +1818,44 @@ main() {
           size="0B"
         fi
         ;;
+      "Firefox Cache")
+        local firefox_size=0
+        if [[ -d "$HOME/Library/Caches/Firefox" ]]; then
+          firefox_size=$(calculate_size_bytes "$HOME/Library/Caches/Firefox")
+        fi
+        if [[ -d "$HOME/Library/Application Support/Firefox" ]]; then
+          for profile_dir in "$HOME/Library/Application Support/Firefox/Profiles"/*/; do
+            if [[ -d "$profile_dir" ]]; then
+              firefox_size=$((firefox_size + $(calculate_size_bytes "$profile_dir/cache2" 2>/dev/null || echo "0")))
+              firefox_size=$((firefox_size + $(calculate_size_bytes "$profile_dir/startupCache" 2>/dev/null || echo "0")))
+            fi
+          done
+        fi
+        if [[ $firefox_size -gt 0 ]]; then
+          size=$(format_bytes $firefox_size)
+        else
+          size="0B"
+        fi
+        ;;
+      "Microsoft Edge Cache")
+        local edge_size=0
+        if [[ -d "$HOME/Library/Caches/com.microsoft.edgemac" ]]; then
+          edge_size=$(calculate_size_bytes "$HOME/Library/Caches/com.microsoft.edgemac")
+        fi
+        if [[ -d "$HOME/Library/Application Support/Microsoft Edge" ]]; then
+          for profile_dir in "$HOME/Library/Application Support/Microsoft Edge"/*/; do
+            if [[ -d "$profile_dir" ]]; then
+              edge_size=$((edge_size + $(calculate_size_bytes "$profile_dir/Cache" 2>/dev/null || echo "0")))
+              edge_size=$((edge_size + $(calculate_size_bytes "$profile_dir/Code Cache" 2>/dev/null || echo "0")))
+            fi
+          done
+        fi
+        if [[ $edge_size -gt 0 ]]; then
+          size=$(format_bytes $edge_size)
+        else
+          size="0B"
+        fi
+        ;;
       "Application Container Caches")
         size=$(calculate_size "$HOME/Library/Containers")
         ;;
@@ -1066,6 +1864,67 @@ main() {
         ;;
       "Empty Trash")
         size=$(calculate_size "$HOME/.Trash")
+        ;;
+      "npm Cache")
+        local npm_cache_dir=$(npm config get cache 2>/dev/null || echo "$HOME/.npm")
+        size=$(calculate_size "$npm_cache_dir")
+        ;;
+      "pip Cache")
+        local pip_cmd="pip3"
+        if command -v pip &> /dev/null; then
+          pip_cmd="pip"
+        fi
+        local pip_cache_dir=$($pip_cmd cache dir 2>/dev/null || echo "$HOME/Library/Caches/pip")
+        size=$(calculate_size "$pip_cache_dir")
+        ;;
+      "Gradle Cache")
+        local gradle_size=0
+        if [[ -d "$HOME/.gradle/caches" ]]; then
+          gradle_size=$(calculate_size_bytes "$HOME/.gradle/caches")
+        fi
+        if [[ -d "$HOME/.gradle/wrapper" ]]; then
+          gradle_size=$((gradle_size + $(calculate_size_bytes "$HOME/.gradle/wrapper")))
+        fi
+        if [[ $gradle_size -gt 0 ]]; then
+          size=$(format_bytes $gradle_size)
+        else
+          size="0B"
+        fi
+        ;;
+      "Maven Cache")
+        size=$(calculate_size "$HOME/.m2/repository")
+        ;;
+      "Docker Cache")
+        if command -v docker &> /dev/null && docker info &> /dev/null; then
+          size="N/A"  # Docker doesn't report size easily
+        else
+          size="0B"
+        fi
+        ;;
+      "Xcode Data")
+        local xcode_size=0
+        if [[ -d "$HOME/Library/Developer/Xcode/DerivedData" ]]; then
+          xcode_size=$((xcode_size + $(calculate_size_bytes "$HOME/Library/Developer/Xcode/DerivedData")))
+        fi
+        if [[ -d "$HOME/Library/Developer/Xcode/Archives" ]]; then
+          xcode_size=$((xcode_size + $(calculate_size_bytes "$HOME/Library/Developer/Xcode/Archives")))
+        fi
+        if [[ $xcode_size -gt 0 ]]; then
+          size=$(format_bytes $xcode_size)
+        else
+          size="0B"
+        fi
+        ;;
+      "Node.js Modules")
+        local node_size=0
+        if [[ -d "$HOME/.node_modules" ]]; then
+          node_size=$((node_size + $(calculate_size_bytes "$HOME/.node_modules")))
+        fi
+        if [[ $node_size -gt 0 ]]; then
+          size=$(format_bytes $node_size)
+        else
+          size="0B"
+        fi
         ;;
       *)
         size="N/A"

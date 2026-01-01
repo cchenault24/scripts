@@ -2,7 +2,7 @@
 
 An interactive, safety-focused utility script to clean temporary files, caches, and logs on macOS systems.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-3.0.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## Overview
@@ -14,12 +14,15 @@ Key features:
 - 🔒 Built-in safety measures and confirmations
 - 📦 Automatic backups of cleaned data (skips empty directories)
 - 🎨 Color-coded output for better readability
-- 🧰 Comprehensive cleaning options
+- 🧰 Comprehensive cleaning options (20+ cleanup targets)
 - 🤖 Smart detection of installed applications
 - 📊 Disk space calculation and savings summary
 - 🧪 Dry-run mode to preview operations without making changes
 - 📝 Comprehensive operation logging
 - 🔐 Secure sudo-based admin operations with auto-detection
+- ↩️ Undo functionality to restore from backups
+- 📈 Progress bars for long-running operations
+- ⏰ Built-in scheduling for automated cleanup
 
 ## System Requirements
 
@@ -58,6 +61,9 @@ Key features:
    Or with options:
    ```bash
    ./mac-cleanup.sh --dry-run    # Preview operations without making changes
+   ./mac-cleanup.sh --undo       # Restore files from a previous backup
+   ./mac-cleanup.sh --schedule   # Setup automated scheduling
+   ./mac-cleanup.sh --quiet      # Run in quiet mode (for automation)
    ./mac-cleanup.sh --help       # Show help message
    ```
 
@@ -79,19 +85,37 @@ The script can clean the following areas of your macOS system:
 - **System Logs** - Cleans system log files in `/var/log` (requires admin privileges)
 - **Temporary Files** - Cleans temporary files in `/tmp`, `$TMPDIR`, and application temp directories
 
-### Application-Specific
+### Browser Caches
 
 - **Safari Cache** - Cleans Safari browser cache and web data
 - **Chrome Cache** - Cleans Google Chrome browser cache and web data (all profiles, not just Default)
+- **Firefox Cache** - Cleans Firefox browser cache and web data (all profiles)
+- **Microsoft Edge Cache** - Cleans Microsoft Edge browser cache and web data (all profiles)
+
+### Package Manager Caches
+
+- **Homebrew Cache** - Cleans Homebrew package manager cache
+- **npm Cache** - Cleans npm and yarn package manager caches
+- **pip Cache** - Cleans Python pip cache
+- **Gradle Cache** - Cleans Gradle build cache and wrapper caches
+- **Maven Cache** - Cleans Maven local repository cache
+
+### Development Tools
+
+- **Developer Tool Temp Files** - Cleans temporary files from IntelliJ IDEA and VS Code
+- **Xcode Data** - Cleans Xcode derived data, archives, and device support files (with warnings)
+- **Node.js Modules** - Cleans Node.js module caches (optional node_modules cleanup with confirmation)
+- **Docker Cache** - Cleans unused Docker images, containers, volumes, and build cache
+
+### Application-Specific
+
 - **Application Container Caches** - Cleans cache files in application containers
 - **Saved Application States** - Cleans saved application states
-- **Developer Tool Temp Files** - Cleans temporary files from IntelliJ IDEA and VS Code
 
 ### System Maintenance
 
 - **Corrupted Preference Lockfiles** - Removes orphaned preference lockfiles
 - **Empty Trash** - Empties the user's Trash
-- **Homebrew Cache** - Cleans Homebrew package manager cache
 - **Flush DNS Cache** - Flushes the DNS cache
 
 ## Safety Features
@@ -109,12 +133,30 @@ The script includes several safety measures to protect your system:
 - **Space Saved Summary** - Shows total disk space reclaimed and breakdown by operation
 - **Operation Logging** - Comprehensive logging of all operations to a log file in the backup directory
 - **Secure Admin Operations** - Uses sudo with credential caching and auto-detects admin user
+- **Undo Functionality** - Restore files from previous backups using `--undo` flag
+- **Progress Bars** - Visual progress indicators for long-running operations
+- **Automated Scheduling** - Setup daily, weekly, or monthly automated cleanup runs
 
 ## Backup and Restoration
 
 Before cleaning any files, the script automatically creates backups in `~/.mac-cleanup-backups/` with a timestamp. Empty directories are skipped to improve performance.
 
-To restore from a backup:
+### Automatic Restoration
+
+Use the `--undo` flag to interactively restore from a previous backup:
+
+```bash
+./mac-cleanup.sh --undo
+```
+
+This will:
+1. List all available backup sessions with dates and sizes
+2. Let you select which backup to restore
+3. Restore all files from that backup session
+
+### Manual Restoration
+
+To manually restore from a backup:
 1. Navigate to the backup directory:
    ```bash
    cd ~/.mac-cleanup-backups/YYYY-MM-DD-HH-MM-SS/
@@ -124,7 +166,9 @@ To restore from a backup:
    tar -xzf backup_name.tar.gz -C /destination/path/
    ```
 
-The backup directory also contains a `cleanup.log` file with detailed information about all operations performed.
+The backup directory also contains:
+- `cleanup.log` - Detailed information about all operations performed
+- `backup_manifest.txt` - List of all backed up files and their original paths
 
 ## Dependencies
 
@@ -133,7 +177,38 @@ The script depends on [gum](https://github.com/charmbracelet/gum) for the intera
 ## Command Line Options
 
 - `--dry-run` - Preview all operations without making any changes. Useful for seeing what would be cleaned and how much space would be freed.
+- `--undo` - Restore files from a previous backup session. Lists available backups and allows interactive selection.
+- `--schedule` - Setup automated scheduling for cleanup. Generates LaunchAgent plist files for daily, weekly, or monthly runs.
+- `--quiet` - Run in quiet mode (for automated/scheduled runs). Skips interactive prompts where possible.
 - `--help` or `-h` - Display help message and exit.
+
+## Automated Scheduling
+
+The script supports automated scheduling using macOS LaunchAgents:
+
+1. Run the scheduling setup:
+   ```bash
+   ./mac-cleanup.sh --schedule
+   ```
+
+2. Select your preferred schedule (daily, weekly, or monthly)
+
+3. The script will generate a LaunchAgent plist file at:
+   ```
+   ~/Library/LaunchAgents/com.mac-cleanup.agent.plist
+   ```
+
+4. Activate the schedule:
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.mac-cleanup.agent.plist
+   ```
+
+5. To remove the schedule:
+   ```bash
+   launchctl unload ~/Library/LaunchAgents/com.mac-cleanup.agent.plist
+   ```
+
+Scheduled runs will execute in quiet mode and log results to `~/.mac-cleanup-backups/scheduled.log`.
 
 ## Troubleshooting
 
@@ -147,6 +222,9 @@ If you encounter any issues:
    brew install gum
    ```
 5. **Check Logs**: Review the `cleanup.log` file in the backup directory for detailed information about operations and any errors.
+6. **Docker Cleanup**: Ensure Docker Desktop is running before attempting Docker cache cleanup.
+7. **Xcode Cleanup**: Cleaning Xcode data may require rebuilding projects. Consider backing up important archives first.
+8. **Node Modules**: Cleaning node_modules requires re-running `npm install` or `yarn install` in affected projects.
 
 ## License
 
