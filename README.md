@@ -4,6 +4,7 @@ A collection of high-quality shell scripts designed to improve and streamline yo
 
 - 🧼 **macOS Cleanup Utility**: An interactive script to clean temporary files, caches, logs, and more—safely and effectively.
 - ⚙️ **Zsh Setup Scripts**: A set of scripts to automate the installation and configuration of Zsh, Oh My Zsh, and popular plugins.
+- 📡 **Home Network Monitor**: A production-quality installer that transforms a Mac mini into a self-hosted network monitoring appliance using Gatus and ntfy.
 
 ---
 
@@ -34,16 +35,34 @@ Automates the setup of a powerful Zsh environment with Oh My Zsh, plugins, and s
 - Auto-generated `.zshrc` file
 - Clean uninstallation with backup options
 
-📄 [Read the full Zsh Setup Scripts README](./zsh-setup-scripts/README.md)
+📄 [Read the full Zsh Setup Scripts README](./zsh-setup/README.md)
+
+### 3. Home Network Monitor
+
+A production-quality installer script that sets up a self-hosted network monitoring solution on macOS using Docker Compose.
+
+**Features:**
+
+- Automatic dependency management (Xcode CLI Tools, Homebrew, Docker Desktop)
+- Network auto-detection (router IP, AdGuard DNS ports)
+- Docker Compose orchestration for Gatus and ntfy monitoring services
+- Optional LaunchAgent for automatic startup on boot
+- Idempotent installation (safe to re-run)
+- Complete uninstall with clean rollback
+- Comprehensive logging and error handling
+- Input validation and sanitization
+
+📄 [Read the full Home Network Monitor README](./home-netmon/README.md)
 
 ---
 
 ## ⚙️ System Requirements
 
-| Tool                    | macOS | Linux | Zsh | Git | Homebrew |
-|-------------------------|:-----:|:-----:|:---:|:---:|:--------:|
-| macOS Cleanup Utility   | ✅    | ❌    | ✅  | ❌  | ✅       |
-| Zsh Setup Scripts       | ✅    | ✅    | ✅  | ✅  | Optional |
+| Tool                    | macOS | Linux | Zsh | Git | Homebrew | Docker |
+|-------------------------|:-----:|:-----:|:---:|:---:|:--------:|:------:|
+| macOS Cleanup Utility   | ✅    | ❌    | ✅  | ❌  | ✅       | ❌     |
+| Zsh Setup Scripts       | ✅    | ✅    | ✅  | ✅  | Optional | ❌     |
+| Home Network Monitor    | ✅    | ❌    | ❌  | ❌  | Optional | ✅     |
 
 ---
 
@@ -60,7 +79,16 @@ chmod +x ~/mac-cleanup.zsh
 ### Zsh Setup Scripts
 ```bash
 git clone https://github.com/yourusername/mac-productivity-tools.git
-cd mac-productivity-tools/zsh-setup-scripts
+cd mac-productivity-tools/zsh-setup
 chmod +x *.sh
 ./setup_zsh.sh
 ```
+
+### Home Network Monitor
+```bash
+cd /path/to/scripts/home-netmon
+chmod +x setup-home-netmon.sh
+./setup-home-netmon.sh
+```
+
+Follow the interactive prompts to install Gatus and ntfy monitoring services. The script will handle all dependencies automatically.
