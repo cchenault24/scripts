@@ -71,17 +71,18 @@ A production-quality installer script that sets up a self-hosted network monitor
 ### macOS Cleanup Utility
 
 ```bash
-curl -o ~/mac-cleanup.zsh https://raw.githubusercontent.com/yourusername/mac-productivity-tools/main/mac-cleanup/mac-cleanup.zsh
-chmod +x ~/mac-cleanup.zsh
-~/mac-cleanup.zsh
+git clone https://github.com/yourusername/scripts.git
+cd scripts/mac-cleanup
+chmod +x mac-cleanup.sh
+./mac-cleanup.sh
 ```
 
 ### Zsh Setup Scripts
 ```bash
-git clone https://github.com/yourusername/mac-productivity-tools.git
-cd mac-productivity-tools/zsh-setup
-chmod +x *.sh
-./setup_zsh.sh
+git clone https://github.com/yourusername/scripts.git
+cd scripts/zsh-setup
+chmod +x bin/zsh-setup
+./bin/zsh-setup install
 ```
 
 ### Home Network Monitor

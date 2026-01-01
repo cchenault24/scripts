@@ -7,7 +7,7 @@ An interactive, safety-focused utility script to clean temporary files, caches, 
 
 ## Overview
 
-The macOS Cleanup Utility (`mac-cleanup.zsh`) is a comprehensive, interactive cleanup tool designed to help macOS users free up disk space by safely removing temporary files, application caches, logs, and other unnecessary data that accumulates over time.
+The macOS Cleanup Utility (`mac-cleanup.sh`) is a comprehensive, interactive cleanup tool designed to help macOS users free up disk space by safely removing temporary files, application caches, logs, and other unnecessary data that accumulates over time.
 
 Key features:
 - 🔍 Interactive selection of cleanup operations with size preview
@@ -38,7 +38,8 @@ Key features:
 
 1. Clone or download the repository:
    ```bash
-   git clone https://github.com/yourusername/mac-cleanup.git
+   git clone https://github.com/yourusername/scripts.git
+   cd scripts/mac-cleanup
    cd mac-cleanup
    ```
 

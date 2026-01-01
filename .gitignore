@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Backup files
+*.old
+*.bak
+*.backup
+*~
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project-specific
+# macOS Cleanup backups
+.mac-cleanup-backups/
+
+# Home Network Monitor
+home-netmon/
+*.env.local
+
+# Zsh Setup state
+.zsh-setup-state.json
+
+# Test artifacts
+test-results/
+coverage/

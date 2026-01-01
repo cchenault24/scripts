@@ -14,16 +14,26 @@ This project provides a streamlined way to set up a powerful Zsh environment wit
 - **Backup & Safety**: Automatically backs up existing configurations
 - **Clean Uninstallation**: Complete removal option if you want to revert changes
 
-## Included Scripts
+## Architecture
 
-- `setup_zsh.sh`: Main entry point that orchestrates the entire setup process
-- `setup_core.sh`: Core utility functions for system checks, backups, and shell management
-- `install_plugins.sh`: Handles the installation of Zsh plugins from various sources
-- `install_functions.sh`: Helper functions for plugin installation and verification
-- `generate_zshrc.sh`: Creates a customized `.zshrc` file based on installed plugins
-- `uninstall_zsh.sh`: Removes Oh My Zsh, plugins, and configurations if needed
-- `plugins.conf`: Configuration file listing available plugins
-- `plugin_dependencies.conf`: Mapping of plugin dependencies
+This project uses a modern, modular architecture with namespaced functions. See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed information.
+
+### Main Entry Point
+
+- `bin/zsh-setup`: Unified CLI entry point for all commands
+
+### Key Components
+
+- **Commands**: Individual command implementations in `commands/`
+- **Core Libraries**: Infrastructure in `lib/core/` (bootstrap, config, logger, errors)
+- **Plugin System**: Plugin management in `lib/plugins/` (registry, resolver, installer, manager)
+- **State Management**: JSON-based state store in `lib/state/`
+- **Configuration**: Config management in `lib/config/` (validator, backup, generator)
+- **System Operations**: System utilities in `lib/system/` (package manager, validation, shell)
+
+### Legacy Support
+
+The old `setup_zsh.sh` script is preserved for backward compatibility and routes to the new system.
 
 ## Supported Plugins
 
@@ -46,41 +56,79 @@ The scripts can install and configure many popular Zsh plugins including:
 
 1. Clone this repository:
 
-   ```
-   git clone https://github.com/yourusername/zsh-setup-scripts.git
-   ```
-
-2. Navigate to the directory:
-
-   ```
-   cd zsh-setup-scripts
+   ```bash
+   git clone https://github.com/yourusername/scripts.git
+   cd scripts/zsh-setup
    ```
 
-3. Make the scripts executable:
+2. Make the CLI executable:
 
-   ```
-   chmod +x *.sh
-   ```
-
-4. Run the setup script:
-   ```
-   ./setup_zsh.sh
+   ```bash
+   chmod +x bin/zsh-setup
    ```
 
-## Usage Options
+3. (Optional) Add to PATH for global access:
 
-The main setup script accepts several command-line options:
+   ```bash
+   # Add to ~/.zshrc or ~/.bashrc
+   export PATH="$PATH:$(pwd)/bin"
+   ```
+
+4. Run the setup:
+
+   ```bash
+   ./bin/zsh-setup install
+   ```
+
+   Or if added to PATH:
+
+   ```bash
+   zsh-setup install
+   ```
+
+## Usage
+
+### New CLI Interface
+
+The project uses a unified CLI interface:
+
+```bash
+# Install Zsh, Oh My Zsh, and plugins
+zsh-setup install [options]
+
+# Update installed plugins
+zsh-setup update
+
+# Remove a specific plugin
+zsh-setup remove <plugin-name>
+
+# Check installation status
+zsh-setup status
+
+# Monitor performance
+zsh-setup monitor [type]
+
+# Self-heal issues
+zsh-setup heal
+
+# Uninstall completely
+zsh-setup uninstall
+
+# Show help
+zsh-setup help
+```
+
+### Command Options
+
+Install command options:
 
 ```
-./setup_zsh.sh [options]
-
-Options:
-  --no-backup         Skip backup of existing .zshrc
-  --skip-ohmyzsh      Skip Oh My Zsh installation
-  --skip-plugins      Skip plugin installation
-  --no-shell-change   Do not change the default shell to Zsh
-  --quiet             Suppress verbose output
-  --help              Display this help message
+--no-backup         Skip backup of existing .zshrc
+--skip-ohmyzsh      Skip Oh My Zsh installation
+--skip-plugins      Skip plugin installation
+--no-shell-change   Do not change the default shell to Zsh
+--quiet             Suppress verbose output
+--dry-run           Preview changes without executing
 ```
 
 ## Customization
@@ -112,15 +160,21 @@ plugin_name=dependency1,dependency2,...
 
 If you want to revert all changes and remove the Zsh configuration:
 
+```bash
+zsh-setup uninstall
 ```
-./uninstall_zsh.sh
+
+Or using the direct path:
+
+```bash
+./bin/zsh-setup uninstall
 ```
 
 This will:
 
 - Remove Oh My Zsh and all installed plugins
 - Delete Zsh configuration files
-- Reset your default shell to Bash
+- Reset your default shell to Bash (optional)
 - Optionally remove Homebrew packages that were installed as dependencies
 
 ## Troubleshooting

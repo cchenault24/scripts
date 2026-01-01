@@ -52,7 +52,7 @@ Examples:
   zsh-setup monitor startup-time
   zsh-setup heal
 
-For more information, see: https://github.com/yourusername/zsh-setup
+For more information, see: https://github.com/yourusername/scripts/tree/main/zsh-setup
 EOF
 }
 
