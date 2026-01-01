@@ -2,7 +2,7 @@
 
 An interactive, safety-focused utility script to clean temporary files, caches, and logs on macOS systems.
 
-![Version](https://img.shields.io/badge/version-3.0.0-blue)
+![Version](https://img.shields.io/badge/version-4.0.0-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
 ## Overview
@@ -23,6 +23,7 @@ Key features:
 - ↩️ Undo functionality to restore from backups
 - 📈 Progress bars for long-running operations
 - ⏰ Built-in scheduling for automated cleanup
+- 🔌 Modular plugin-based architecture for easy extension
 
 ## System Requirements
 
@@ -35,20 +36,45 @@ Key features:
 
 ### Quick Install
 
-1. Download the script:
+1. Clone or download the repository:
    ```bash
-   curl -o ~/mac-cleanup.zsh https://raw.githubusercontent.com/yourusername/mac-cleanup/main/mac-cleanup.zsh
+   git clone https://github.com/yourusername/mac-cleanup.git
+   cd mac-cleanup
    ```
 
-2. Make it executable:
+2. Make the script executable:
    ```bash
-   chmod +x ~/mac-cleanup.zsh
+   chmod +x mac-cleanup.sh
    ```
 
 3. Run the script:
    ```bash
-   ~/mac-cleanup.zsh
+   ./mac-cleanup.sh
    ```
+
+### Directory Structure
+
+The script uses a modular plugin-based architecture:
+
+```
+mac-cleanup/
+├── mac-cleanup.sh          # Main entry point
+├── lib/                    # Core libraries
+│   ├── core.sh            # State management, plugin registry
+│   ├── ui.sh              # UI functions
+│   ├── utils.sh           # Utility functions
+│   ├── backup.sh          # Backup/restore
+│   └── admin.sh           # Admin operations
+├── plugins/               # Cleanup operation plugins
+│   ├── browsers/         # Browser cache plugins
+│   ├── package-managers/ # Package manager plugins
+│   ├── development/      # Development tool plugins
+│   ├── system/           # System cleanup plugins
+│   └── maintenance/      # Maintenance plugins
+└── features/             # Additional features
+    ├── undo.sh           # Undo functionality
+    └── schedule.sh       # Scheduling
+```
 
 ## Usage
 
@@ -230,9 +256,37 @@ If you encounter any issues:
 
 This script is released under the MIT License. See the LICENSE file for details.
 
+## Plugin Development
+
+The script uses a plugin-based architecture, making it easy to add new cleanup operations:
+
+1. Create a new plugin file in the appropriate category directory (e.g., `plugins/browsers/`)
+2. Implement your cleanup function
+3. Register the plugin using `register_plugin "Plugin Name" "category" "function_name" "requires_admin"`
+4. The plugin will be automatically discovered and added to the menu
+
+Example plugin structure:
+```bash
+#!/bin/zsh
+# plugins/example/my_plugin.sh
+
+clean_my_cache() {
+  print_header "Cleaning My Cache"
+  # Your cleanup logic here
+  track_space_saved "My Cache" $space_freed
+}
+
+register_plugin "My Cache" "example" "clean_my_cache" "false"
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+The modular architecture makes it easy to:
+- Add new cleanup operations (create a plugin)
+- Improve existing functionality (modify the relevant library or plugin)
+- Fix bugs (targeted fixes in specific modules)
 
 ## Disclaimer
 
