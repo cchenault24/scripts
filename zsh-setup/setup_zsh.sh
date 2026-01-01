@@ -48,10 +48,14 @@ Usage: $0 [options]
 Options:
   --no-backup         Skip backup of existing .zshrc
   --skip-ohmyzsh      Skip Oh My Zsh installation
-  --skip-plugins     Skip plugin installation
+  --skip-plugins      Skip plugin installation
   --no-shell-change   Do not change the default shell to Zsh
   --quiet             Suppress verbose output
   --dry-run           Preview changes without executing (interactive)
+  --update            Update installed plugins
+  --remove <plugin>   Remove a specific plugin
+  --monitor           Run monitoring and diagnostics
+  --self-heal         Run self-healing to fix issues
   --help              Display this help message
 
 EOF
@@ -78,6 +82,52 @@ parse_arguments() {
             ;;
         --dry-run)
             DRY_RUN=true
+            ;;
+        --update)
+            if [ -f "$SCRIPT_DIR/update_plugins.sh" ]; then
+                source "$SCRIPT_DIR/update_plugins.sh"
+                main
+                exit $?
+            else
+                log_error "update_plugins.sh not found"
+                exit 1
+            fi
+            ;;
+        --remove)
+            shift
+            if [ -z "$1" ]; then
+                log_error "--remove requires a plugin name"
+                print_usage
+                exit 1
+            fi
+            if [ -f "$SCRIPT_DIR/remove_plugins.sh" ]; then
+                source "$SCRIPT_DIR/remove_plugins.sh"
+                main "$1"
+                exit $?
+            else
+                log_error "remove_plugins.sh not found"
+                exit 1
+            fi
+            ;;
+        --monitor)
+            if [ -f "$SCRIPT_DIR/monitor.sh" ]; then
+                source "$SCRIPT_DIR/monitor.sh"
+                main "${2:-all}"
+                exit $?
+            else
+                log_error "monitor.sh not found"
+                exit 1
+            fi
+            ;;
+        --self-heal)
+            if [ -f "$SCRIPT_DIR/self_heal.sh" ]; then
+                source "$SCRIPT_DIR/self_heal.sh"
+                main "${2:-false}"
+                exit $?
+            else
+                log_error "self_heal.sh not found"
+                exit 1
+            fi
             ;;
         --help)
             print_usage

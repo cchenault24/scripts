@@ -34,6 +34,11 @@ if [ -f "$SCRIPT_DIR/state_manager.sh" ]; then
   fi
 fi
 
+# Load package manager utilities
+if [ -f "$SCRIPT_DIR/package_manager.sh" ]; then
+  source "$SCRIPT_DIR/package_manager.sh"
+fi
+
 #------------------------------------------------------------------------------
 # Configuration Variables
 #------------------------------------------------------------------------------
@@ -644,6 +649,15 @@ main() {
 
   # Step 2: Install base components (Zsh and Oh My Zsh)
   install_base_components
+  
+  # Step 2.5: Check and install missing system dependencies
+  if command -v detect_package_manager &>/dev/null; then
+    local pm=$(detect_package_manager)
+    if [[ "$pm" != "unknown" ]]; then
+      log_info "Package manager detected: $(get_package_manager_name)"
+      # Check for common dependencies will be done per-plugin
+    fi
+  fi
 
   # Step 3: Show plugin selection menu
   show_plugin_selection_menu
@@ -667,6 +681,11 @@ main() {
       selected_plugins+=("$entry")
       # Resolve dependencies
       resolve_dependencies "$plugin_name"
+      
+      # Install system dependencies if needed
+      if command -v install_plugin_dependencies &>/dev/null; then
+        install_plugin_dependencies "$plugin_name"
+      fi
     fi
   done
 

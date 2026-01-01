@@ -23,6 +23,7 @@ init_state() {
   "installed_plugins": [],
   "failed_plugins": [],
   "installation_order": [],
+  "plugins": {},
   "metadata": {
     "script_dir": "$script_dir",
     "start_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
@@ -132,11 +133,12 @@ PYTHON_SCRIPT
     fi
 }
 
-# Add plugin to installed list
+# Add plugin to installed list with version tracking
 add_installed_plugin() {
     local plugin_name="$1"
     local method="${2:-unknown}"
     local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local version="${3:-unknown}"
     
     # Read current installed plugins
     local current_plugins
@@ -168,8 +170,8 @@ PYTHON_SCRIPT
     
     # Add to installation order
     if command -v jq &>/dev/null; then
-        jq --arg plugin "$plugin_name" --arg method "$method" --arg ts "$timestamp" \
-           '.installation_order += [{"plugin": $plugin, "method": $method, "timestamp": $ts}]' \
+        jq --arg plugin "$plugin_name" --arg method "$method" --arg ts "$timestamp" --arg version "$version" \
+           '.installation_order += [{"plugin": $plugin, "method": $method, "timestamp": $ts, "version": $version}]' \
            "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
     elif command -v python3 &>/dev/null; then
         python3 <<PYTHON_SCRIPT
@@ -180,11 +182,57 @@ with open('$STATE_FILE', 'r') as f:
 data['installation_order'].append({
     "plugin": '$plugin_name',
     "method": '$method',
-    "timestamp": '$timestamp'
+    "timestamp": '$timestamp',
+    "version": '$version'
 })
+# Update plugin version tracking
+if 'plugins' not in data:
+    data['plugins'] = {}
+if '$plugin_name' not in data['plugins']:
+    data['plugins']['$plugin_name'] = {}
+data['plugins']['$plugin_name']['version'] = '$version'
+data['plugins']['$plugin_name']['last_checked'] = '$timestamp'
 with open('$STATE_FILE', 'w') as f:
     json.dump(data, f, indent=2)
 PYTHON_SCRIPT
+    fi
+}
+
+# Update plugin version
+update_plugin_version() {
+    local plugin_name="$1"
+    local version="$2"
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    if command -v jq &>/dev/null; then
+        jq --arg plugin "$plugin_name" --arg version "$version" --arg ts "$timestamp" \
+           '.plugins[$plugin].version = $version | .plugins[$plugin].last_checked = $ts' \
+           "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    elif command -v python3 &>/dev/null; then
+        python3 <<PYTHON_SCRIPT
+import json
+with open('$STATE_FILE', 'r') as f:
+    data = json.load(f)
+if 'plugins' not in data:
+    data['plugins'] = {}
+if '$plugin_name' not in data['plugins']:
+    data['plugins']['$plugin_name'] = {}
+data['plugins']['$plugin_name']['version'] = '$version'
+data['plugins']['$plugin_name']['last_checked'] = '$timestamp'
+with open('$STATE_FILE', 'w') as f:
+    json.dump(data, f, indent=2)
+PYTHON_SCRIPT
+    fi
+}
+
+# Get plugin version from state
+get_plugin_version_from_state() {
+    local plugin_name="$1"
+    
+    if command -v jq &>/dev/null; then
+        jq -r ".plugins[\"$plugin_name\"].version // empty" "$STATE_FILE" 2>/dev/null
+    elif command -v python3 &>/dev/null; then
+        python3 -c "import json; data = json.load(open('$STATE_FILE')); print(data.get('plugins', {}).get('$plugin_name', {}).get('version', ''))" 2>/dev/null
     fi
 }
 

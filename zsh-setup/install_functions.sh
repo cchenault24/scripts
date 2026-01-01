@@ -286,9 +286,15 @@ install_git_plugin() {
     if git_clone_with_retry "$plugin_url" "$plugin_path" "Installing ${plugin_type}: $plugin_name"; then
         log_message "✅ ${plugin_type} $plugin_name installed successfully"
         
+        # Get version (commit hash)
+        local version="unknown"
+        if [[ -d "$plugin_path/.git" ]]; then
+            version=$(cd "$plugin_path" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+        fi
+        
         # Update state management
         if command -v add_installed_plugin &>/dev/null; then
-            add_installed_plugin "$plugin_name" "git"
+            add_installed_plugin "$plugin_name" "git" "$version"
         else
             INSTALLED_PLUGINS+=("$plugin_name")
         fi
@@ -323,6 +329,32 @@ install_git_plugin() {
 install_brew_plugin() {
     local plugin_name="$1"
     local package_name="$2"
+
+    # Use package manager integration if available
+    if command -v install_package &>/dev/null; then
+        if install_package "$package_name" "Installing $plugin_name via Homebrew"; then
+            local version="unknown"
+            if command -v get_package_version &>/dev/null; then
+                version=$(get_package_version "$package_name")
+            fi
+            
+            if command -v add_installed_plugin &>/dev/null; then
+                add_installed_plugin "$plugin_name" "brew" "$version"
+            else
+                INSTALLED_PLUGINS+=("$plugin_name")
+            fi
+            sync_arrays_from_state
+            return 0
+        else
+            if command -v add_failed_plugin &>/dev/null; then
+                add_failed_plugin "$plugin_name" "brew" "Installation failed"
+            else
+                FAILED_PLUGINS+=("$plugin_name")
+            fi
+            sync_arrays_from_state
+            return 1
+        fi
+    fi
 
     log_message "📦 Installing plugin: $plugin_name via Homebrew..."
 
