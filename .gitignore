@@ -35,8 +35,11 @@ temp/
 home-netmon/
 *.env.local
 
-# Zsh Setup state
+# Zsh Setup state and logs
 .zsh-setup-state.json
+zsh-setup/*.log
+zsh-setup/robbyrussell
+zsh-setup/*[0-9]*
 
 # Test artifacts
 test-results/

@@ -17,8 +17,25 @@ fi
 
 export ZSH_SETUP_ROOT
 
-# Track loaded modules to prevent circular dependencies
-declare -A ZSH_SETUP_LOADED_MODULES=()
+# Track loaded modules to prevent circular dependencies (bash 3.2 compatible)
+ZSH_SETUP_LOADED_MODULES=""
+
+# Check if module is loaded (bash 3.2 compatible)
+zsh_setup::core::bootstrap::is_loaded() {
+    local module="$1"
+    case ":$ZSH_SETUP_LOADED_MODULES:" in
+        *":$module:"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Mark module as loaded (bash 3.2 compatible)
+zsh_setup::core::bootstrap::mark_loaded() {
+    local module="$1"
+    if ! zsh_setup::core::bootstrap::is_loaded "$module"; then
+        ZSH_SETUP_LOADED_MODULES="${ZSH_SETUP_LOADED_MODULES}:${module}"
+    fi
+}
 
 #------------------------------------------------------------------------------
 # Module Loading
@@ -30,7 +47,7 @@ zsh_setup::core::bootstrap::load_module() {
     local module_path=""
     
     # Check if already loaded
-    if [[ -n "${ZSH_SETUP_LOADED_MODULES[$module]:-}" ]]; then
+    if zsh_setup::core::bootstrap::is_loaded "$module"; then
         return 0
     fi
     
@@ -118,7 +135,7 @@ zsh_setup::core::bootstrap::load_module() {
     
     # Load the module
     source "$module_path"
-    ZSH_SETUP_LOADED_MODULES[$module]=1
+    zsh_setup::core::bootstrap::mark_loaded "$module"
     
     return 0
 }
