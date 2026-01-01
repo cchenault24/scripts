@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+#==============================================================================
+# zsh-setup - Unified CLI Entry Point
+#
+# Main entry point for all zsh-setup commands
+#==============================================================================
+
+# Determine root directory
+ZSH_SETUP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export ZSH_SETUP_ROOT
+
+# Load bootstrap
+source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh"
+
+# Initialize
+zsh_setup::core::bootstrap::init || exit 1
+
+#------------------------------------------------------------------------------
+# Command Router
+#------------------------------------------------------------------------------
+
+# Show help
+show_help() {
+    cat <<EOF
+zsh-setup - Zsh Configuration Management Tool
+
+Usage: zsh-setup <command> [options]
+
+Commands:
+  install          Install Zsh, Oh My Zsh, and plugins
+  update           Update installed plugins
+  remove <plugin>  Remove a specific plugin
+  monitor [type]   Run monitoring and diagnostics
+  heal             Run self-healing to fix issues
+  uninstall        Remove Zsh setup completely
+  status           Show current installation status
+  help             Show this help message
+
+Options:
+  --no-backup         Skip backup of existing .zshrc
+  --skip-ohmyzsh      Skip Oh My Zsh installation
+  --skip-plugins      Skip plugin installation
+  --no-shell-change   Do not change the default shell to Zsh
+  --quiet             Suppress verbose output
+  --dry-run           Preview changes without executing
+
+Examples:
+  zsh-setup install
+  zsh-setup update
+  zsh-setup remove powerlevel10k
+  zsh-setup monitor startup-time
+  zsh-setup heal
+
+For more information, see: https://github.com/yourusername/zsh-setup
+EOF
+}
+
+# Route to command
+main() {
+    local command="${1:-help}"
+    shift || true
+    
+    case "$command" in
+        install|setup)
+            source "$ZSH_SETUP_ROOT/commands/install.sh"
+            zsh_setup::commands::install::execute "$@"
+            ;;
+        update)
+            source "$ZSH_SETUP_ROOT/commands/update.sh"
+            zsh_setup::commands::update::execute "$@"
+            ;;
+        remove|uninstall-plugin)
+            if [[ -z "$1" ]]; then
+                zsh_setup::core::logger::error "Plugin name required for remove command"
+                show_help
+                exit 1
+            fi
+            source "$ZSH_SETUP_ROOT/commands/remove.sh"
+            zsh_setup::commands::remove::execute "$@"
+            ;;
+        monitor|check|diagnose)
+            source "$ZSH_SETUP_ROOT/commands/monitor.sh"
+            zsh_setup::commands::monitor::execute "$@"
+            ;;
+        heal|self-heal|fix)
+            source "$ZSH_SETUP_ROOT/commands/heal.sh"
+            zsh_setup::commands::heal::execute "$@"
+            ;;
+        uninstall|remove-all)
+            source "$ZSH_SETUP_ROOT/commands/uninstall.sh"
+            zsh_setup::commands::uninstall::execute "$@"
+            ;;
+        status|info)
+            source "$ZSH_SETUP_ROOT/commands/status.sh"
+            zsh_setup::commands::status::execute "$@"
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            zsh_setup::core::logger::error "Unknown command: $command"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"
