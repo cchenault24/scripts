@@ -87,10 +87,8 @@ check_system_requirements() {
     # Check for selection tools (optional)
     if command -v fzf &>/dev/null; then
         log_message "✓ Selection tool available: fzf $(fzf --version)"
-    elif command -v gum &>/dev/null; then
-        log_message "✓ Selection tool available: gum $(gum --version)"
     else
-        log_message "ⓘ No selection tool (fzf/gum) found. Will use fallback selection method."
+        log_message "ⓘ No selection tool (fzf) found. Will use fallback selection method."
     fi
 
     # Exit if required tools are missing

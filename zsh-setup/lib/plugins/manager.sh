@@ -140,11 +140,11 @@ zsh_setup::plugins::manager::_show_selection_menu() {
         done < "$plugins_file"
     fi
     
-    # Use gum if available, otherwise fallback
-    if command -v gum &>/dev/null; then
+    # Use fzf if available, otherwise fallback
+    if command -v fzf &>/dev/null; then
         local height=$((${#plugins[@]} + 2))
         height=$((height > 20 ? 20 : height))
-        printf '%s\n' "${plugins[@]}" | cut -d'|' -f1 | gum choose --no-limit --height="$height"
+        printf '%s\n' "${plugins[@]}" | cut -d'|' -f1 | fzf --multi --height="$height"
     else
         # Basic menu
         echo "Select plugins to install (comma-separated numbers, or 'all'):"

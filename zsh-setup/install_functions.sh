@@ -65,7 +65,6 @@ fi
 
 # Determine which selection tool to use based on available commands
 get_selection_tool() {
-    command -v gum &>/dev/null && echo "gum" && return
     command -v fzf &>/dev/null && echo "fzf" && return
     echo "fallback"
 }
@@ -170,22 +169,6 @@ select_plugins() {
     local selection_tool=$(get_selection_tool)
 
     case "$selection_tool" in
-    "gum")
-        # Use gum for interactive selection
-        local plugin_names=()
-        for plugin in "${plugins[@]}"; do
-            IFS='|' read -r name _ _ description <<<"$plugin"
-            plugin_names+=("$name - $description")
-        done
-
-        # Display plugin selection with gum
-        local selected_indices=$(gum choose --no-limit "${plugin_names[@]}" | cut -d ' ' -f1)
-
-        # Process selected plugins
-        for index in $selected_indices; do
-            selected_plugins+=("${plugins[$index]}")
-        done
-        ;;
     "fzf")
         # Use fzf for interactive selection
         local plugin_names=()
@@ -542,7 +525,7 @@ verify_plugins() {
         "powerlevel10k")
             _verify_powerlevel10k || ((issues++))
             ;;
-        "autojump" | "fzf" | "zoxide" | "bat" | "exa" | "fd" | "ripgrep" | "gum")
+        "autojump" | "fzf" | "zoxide" | "bat" | "exa" | "fd" | "ripgrep")
             _verify_brew_package "$plugin_name" || ((issues++))
             ;;
         *)

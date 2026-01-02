@@ -519,25 +519,25 @@ install_base_components() {
 
 # Show an interactive menu for selecting plugins to install
 show_plugin_selection_menu() {
-  # Check if gum is installed for nice UI
-  if ! command -v gum &>/dev/null; then
-    echo "📦 Installing gum for interactive selection..."
-    install_silently_with_spinner "gum" "command -v gum &>/dev/null" "brew install gum"
+  # Check if fzf is installed for nice UI
+  if ! command -v fzf &>/dev/null; then
+    echo "📦 Installing fzf for interactive selection..."
+    install_silently_with_spinner "fzf" "command -v fzf &>/dev/null" "brew install fzf"
 
-    # Fall back to basic selection if gum installation fails
-    if ! command -v gum &>/dev/null; then
-      echo "⚠️ Could not install gum. Using basic selection instead."
+    # Fall back to basic selection if fzf installation fails
+    if ! command -v fzf &>/dev/null; then
+      echo "⚠️ Could not install fzf. Using basic selection instead."
       _show_basic_selection_menu
       return
     fi
   fi
 
-  # Use gum for selection UI
-  echo "📦 Select plugins to install (use space to toggle, enter to confirm):"
+  # Use fzf for selection UI
+  echo "📦 Select plugins to install (use Tab to select multiple, Enter to confirm):"
   local height=$((${#PLUGINS_TO_INSTALL[@]} + 2))
   height=$((height > 20 ? 20 : height)) # Cap height at 20
 
-  SELECTION=$(printf "%s\n" "${PLUGINS_TO_INSTALL[@]}" | cut -d'|' -f1 | gum choose --no-limit --height="$height")
+  SELECTION=$(printf "%s\n" "${PLUGINS_TO_INSTALL[@]}" | cut -d'|' -f1 | fzf --multi --height="$height")
 
   # Log selection
   echo "$(date +"%Y-%m-%d %H:%M:%S") - 🔍 User selected the following plugins:" >>"$INSTALLATION_LOG"

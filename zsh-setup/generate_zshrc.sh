@@ -117,18 +117,18 @@ determine_editor() {
 }
 
 set_java_home_mac() {
-    local GUM_WAS_INSTALLED=false
-    local GUM_AVAILABLE=false
+    local FZF_WAS_INSTALLED=false
+    local FZF_AVAILABLE=false
 
-    if command -v gum >/dev/null; then
-        GUM_AVAILABLE=true
+    if command -v fzf >/dev/null; then
+        FZF_AVAILABLE=true
     else
-        log "Installing gum silently..."
-        if brew install gum >/dev/null 2>&1; then
-            GUM_AVAILABLE=true
-            GUM_WAS_INSTALLED=true
+        log "Installing fzf silently..."
+        if brew install fzf >/dev/null 2>&1; then
+            FZF_AVAILABLE=true
+            FZF_WAS_INSTALLED=true
         else
-            log "⚠️  Failed to install gum. Falling back to standard prompt."
+            log "⚠️  Failed to install fzf. Falling back to standard prompt."
         fi
     fi
 
@@ -158,8 +158,8 @@ set_java_home_mac() {
     done
 
     local selected=""
-    if [[ "$GUM_AVAILABLE" == true ]]; then
-        selected=$(printf "%s\n" "${choices[@]}" | gum choose --header="Select a Java version to use:")
+    if [[ "$FZF_AVAILABLE" == true ]]; then
+        selected=$(printf "%s\n" "${choices[@]}" | fzf --header="Select a Java version to use:")
     else
         echo "Multiple Java versions found:"
         for i in "${!choices[@]}"; do
@@ -182,8 +182,8 @@ set_java_home_mac() {
         log "JAVA_HOME set to $JAVA_HOME"
     fi
 
-    if [[ "$GUM_WAS_INSTALLED" == true ]]; then
-        trap 'log "Removing gum..."; brew uninstall --force gum >/dev/null 2>&1' EXIT
+    if [[ "$FZF_WAS_INSTALLED" == true ]]; then
+        trap 'log "Removing fzf..."; brew uninstall --force fzf >/dev/null 2>&1' EXIT
     fi
 }
 

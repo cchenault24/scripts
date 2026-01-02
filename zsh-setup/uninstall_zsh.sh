@@ -108,7 +108,6 @@ load_plugins_list() {
                 "exa|brew"
                 "fd|brew"
                 "ripgrep|brew"
-                "gum|brew"
             )
         }
     fi
