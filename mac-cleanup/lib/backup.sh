@@ -33,6 +33,14 @@ backup() {
         log_message "INFO" "Skipped backup of empty directory: $path"
         return 0
       fi
+      
+      # Skip backup for very small directories (< 1MB) to save time
+      local dir_size=$(calculate_size_bytes "$path" 2>/dev/null || echo "0")
+      if [[ -n "$dir_size" && "$dir_size" =~ ^[0-9]+$ && $dir_size -lt 1048576 ]]; then
+        print_info "Skipping backup of small directory (< 1MB): $path"
+        log_message "INFO" "Skipped backup of small directory: $path ($(format_bytes $dir_size))"
+        return 0
+      fi
     fi
     
     print_info "Backing up $path..."
@@ -49,8 +57,9 @@ backup() {
     echo "$path|$backup_name|$timestamp" >> "$MC_BACKUP_DIR/backup_manifest.txt" 2>/dev/null
     
     if [[ -d "$path" ]]; then
+      # Use faster compression level (gzip -1) for better performance
       # Use a background process for large directories
-      tar -czf "$MC_BACKUP_DIR/${backup_name}.tar.gz" -C "$(dirname "$path")" "$(basename "$path")" 2>/dev/null &
+      tar -c -C "$(dirname "$path")" "$(basename "$path")" 2>/dev/null | gzip -1 > "$MC_BACKUP_DIR/${backup_name}.tar.gz" 2>/dev/null &
       local pid=$!
       show_spinner "Creating backup of $(basename "$path")" $pid
       

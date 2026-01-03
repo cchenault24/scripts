@@ -94,6 +94,32 @@ show_progress() {
   fi
 }
 
+# Show detailed progress bar with operation name
+show_detailed_progress() {
+  local current=$1
+  local total=$2
+  local operation="$3"
+  
+  local percent=$((current * 100 / total))
+  local filled=$((percent / 2))
+  local empty=$((50 - filled))
+  
+  # Truncate operation name if too long
+  local display_op="$operation"
+  if [[ ${#display_op} -gt 40 ]]; then
+    display_op="${display_op:0:37}..."
+  fi
+  
+  printf "\r\033[K"
+  printf "\r${CYAN}Cleaning:${NC} %-40s [%s%s] %d%% (%d/%d)" \
+    "$display_op" \
+    "$(printf "%${filled}s" | tr ' ' '=')" \
+    "$(printf "%${empty}s" | tr ' ' ' ')" \
+    "$percent" \
+    "$current" \
+    "$total"
+}
+
 # Determine which selection tool to use (fzf required)
 mc_get_selection_tool() {
   if command -v fzf &> /dev/null; then
@@ -170,10 +196,22 @@ cleanup_gum() {
 mc_confirm() {
   local prompt="$1"
   local response
-  if [[ -t 0 ]]; then
-    read -q "?$prompt (y/n) " response
-    echo ""
-    [[ "$response" == "y" || "$response" == "Y" ]]
+  
+  # Check if stdin is available and we're in an interactive terminal
+  # Also check if we're in a background job (jobs[%] would be set)
+  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+    # Check if we can actually read from stdin by trying a non-blocking test
+    # In background processes, read will hang even if -t 0 returns true
+    # So we use a timeout and catch any errors
+    if read -t 10 -q "?$prompt (y/n) " response 2>/dev/null; then
+      echo ""
+      [[ "$response" == "y" || "$response" == "Y" ]]
+    else
+      # If read times out or fails, we're likely in a non-interactive context
+      # This can happen in background processes even if -t 0 is true
+      echo ""
+      return 1
+    fi
   else
     # Non-interactive: default to no
     return 1

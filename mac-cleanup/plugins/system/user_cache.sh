@@ -10,8 +10,21 @@ clean_user_cache() {
   local space_before=$(calculate_size_bytes "$cache_dir")
   
   backup "$cache_dir" "user_caches"
-  find "$cache_dir" -maxdepth 1 -type d ! -path "$cache_dir" | while read dir; do
-    safe_clean_dir "$dir" "$(basename "$dir") cache"
+  
+  # Collect all cache directories first
+  local cache_dirs=()
+  while IFS= read -r dir; do
+    [[ -n "$dir" && -d "$dir" ]] && cache_dirs+=("$dir")
+  done < <(find "$cache_dir" -maxdepth 1 -type d ! -path "$cache_dir" 2>/dev/null)
+  
+  local total_items=${#cache_dirs[@]}
+  local current_item=0
+  
+  for dir in "${cache_dirs[@]}"; do
+    current_item=$((current_item + 1))
+    local dir_name=$(basename "$dir")
+    update_operation_progress $current_item $total_items "$dir_name"
+    safe_clean_dir "$dir" "$dir_name cache"
   done
   
   local space_after=$(calculate_size_bytes "$cache_dir")

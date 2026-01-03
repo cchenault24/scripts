@@ -11,7 +11,17 @@ clean_temp_files() {
   
   for temp_dir in "${temp_dirs[@]}"; do
     if [[ -d "$temp_dir" ]]; then
-      local space_before=$(calculate_size_bytes "$temp_dir")
+      # For /tmp, calculate size excluding files that will be skipped
+      local space_before=0
+      if [[ "$temp_dir" == "/tmp" ]]; then
+        # Calculate size of files that will actually be cleaned
+        local find_output=$(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" -print0 2>/dev/null | xargs -0 du -sk 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+        if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
+          space_before=$((find_output * 1024))
+        fi
+      else
+        space_before=$(calculate_size_bytes "$temp_dir")
+      fi
       backup "$temp_dir" "temp_files_$(basename "$temp_dir")"
       
       # Skip certain system files in /tmp
@@ -21,15 +31,23 @@ clean_temp_files() {
             safe_remove "$item" "$(basename "$item")"
           done
         }
+        # Invalidate cache after manual cleanup
+        invalidate_size_cache "$temp_dir"
       else
         safe_clean_dir "$temp_dir" "$(basename "$temp_dir")"
       fi
       
+      # Clear cache and recalculate to get accurate space_after
+      invalidate_size_cache "$temp_dir"
       local space_after=$(calculate_size_bytes "$temp_dir")
       local space_freed=$((space_before - space_after))
       total_space_freed=$((total_space_freed + space_freed))
       
-      print_success "Cleaned $temp_dir."
+      if [[ $space_freed -gt 0 ]]; then
+        print_success "Cleaned $temp_dir (freed $(format_bytes $space_freed))."
+      else
+        print_info "No files to clean in $temp_dir (already empty)."
+      fi
     fi
   done
   

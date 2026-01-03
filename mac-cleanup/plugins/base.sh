@@ -30,6 +30,13 @@ track_space_saved() {
   # Also update the total space saved if it's not already being tracked
   # (some plugins use safe_clean_dir/safe_remove which already update the total)
   MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + space_bytes))
+  
+  # If we're in a background process, write to space tracking file
+  # This allows the parent process to read the space saved data
+  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+    # Append to file: plugin_name|space_bytes
+    echo "$plugin_name|$space_bytes" >> "$MC_SPACE_TRACKING_FILE" 2>/dev/null || true
+  fi
 }
 
 # Helper function to get space saved for a plugin

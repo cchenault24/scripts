@@ -25,6 +25,8 @@ clean_edge_cache() {
   # Find and clean all Edge profiles (similar to Chrome)
   if [[ -d "$edge_base" ]]; then
     edge_found=true
+    # Collect all directories to clean first
+    local all_dirs=()
     for profile_dir in "$edge_base"/*/; do
       if [[ -d "$profile_dir" ]]; then
         local profile_name=$(basename "$profile_dir")
@@ -33,18 +35,28 @@ clean_edge_cache() {
           "$profile_dir/Code Cache"
           "$profile_dir/Service Worker"
         )
-        
         for dir in "${profile_dirs[@]}"; do
-          if [[ -d "$dir" ]]; then
-            local space_before=$(calculate_size_bytes "$dir")
-            backup "$dir" "edge_${profile_name}_$(basename "$dir")"
-            safe_clean_dir "$dir" "Edge $profile_name $(basename "$dir")"
-            local space_after=$(calculate_size_bytes "$dir")
-            total_space_freed=$((total_space_freed + space_before - space_after))
-            print_success "Cleaned Edge $profile_name $(basename "$dir")."
-          fi
+          [[ -d "$dir" ]] && all_dirs+=("$dir|$profile_name")
         done
       fi
+    done
+    
+    local total_items=${#all_dirs[@]}
+    local current_item=0
+    
+    for dir_info in "${all_dirs[@]}"; do
+      current_item=$((current_item + 1))
+      local dir=$(echo "$dir_info" | cut -d'|' -f1)
+      local profile_name=$(echo "$dir_info" | cut -d'|' -f2)
+      local dir_name=$(basename "$dir")
+      update_operation_progress $current_item $total_items "$profile_name/$dir_name"
+      
+      local space_before=$(calculate_size_bytes "$dir")
+      backup "$dir" "edge_${profile_name}_$dir_name"
+      safe_clean_dir "$dir" "Edge $profile_name $dir_name"
+      local space_after=$(calculate_size_bytes "$dir")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned Edge $profile_name $dir_name."
     done
   fi
   

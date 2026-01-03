@@ -29,15 +29,22 @@ clean_safari_cache() {
   # Store initial total to calculate what safe_clean_dir adds (to avoid double-counting)
   local initial_total=$MC_TOTAL_SPACE_SAVED
   
+  local total_items=${#safari_cache_dirs[@]}
+  local current_item=0
+  
   for dir in "${safari_cache_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
+      current_item=$((current_item + 1))
       dirs_processed=$((dirs_processed + 1))
+      local dir_name=$(basename "$dir")
+      update_operation_progress $current_item $total_items "$dir_name"
+      
       local space_before=$(calculate_size_bytes "$dir")
       # Check if directory has meaningful content (more than just directory overhead ~4KB)
       if [[ $space_before -gt 4096 ]]; then
         dirs_with_content=$((dirs_with_content + 1))
-        backup "$dir" "safari_$(basename "$dir")"
-        safe_clean_dir "$dir" "Safari $(basename "$dir")"
+        backup "$dir" "safari_$dir_name"
+        safe_clean_dir "$dir" "Safari $dir_name"
         local space_after=$(calculate_size_bytes "$dir")
         local space_freed=$((space_before - space_after))
         total_space_freed=$((total_space_freed + space_freed))

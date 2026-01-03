@@ -36,6 +36,9 @@ mc_core_init() {
   # Create backup directory
   create_backup_dir
   
+  # Clear size calculation cache to ensure fresh calculations
+  clear_size_cache
+  
   # Initialize log file
   MC_LOG_FILE="$MC_BACKUP_DIR/cleanup.log"
   log_message "INFO" "Starting macOS cleanup utility"

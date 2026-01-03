@@ -10,8 +10,21 @@ clean_app_logs() {
   local space_before=$(calculate_size_bytes "$logs_dir")
   
   backup "$logs_dir" "application_logs"
-  find "$logs_dir" -maxdepth 1 -type d ! -path "$logs_dir" | while read dir; do
-    safe_clean_dir "$dir" "$(basename "$dir") logs"
+  
+  # Collect all log directories first
+  local log_dirs=()
+  while IFS= read -r dir; do
+    [[ -n "$dir" && -d "$dir" ]] && log_dirs+=("$dir")
+  done < <(find "$logs_dir" -maxdepth 1 -type d ! -path "$logs_dir" 2>/dev/null)
+  
+  local total_items=${#log_dirs[@]}
+  local current_item=0
+  
+  for dir in "${log_dirs[@]}"; do
+    current_item=$((current_item + 1))
+    local dir_name=$(basename "$dir")
+    update_operation_progress $current_item $total_items "$dir_name"
+    safe_clean_dir "$dir" "$dir_name logs"
   done
   
   local space_after=$(calculate_size_bytes "$logs_dir")
@@ -27,37 +40,56 @@ clean_system_logs() {
   print_warning "⚠️ CAUTION: System logs can be important for troubleshooting system issues"
   print_warning "Only proceed if you understand the potential consequences"
   
-  if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to clean system logs?"; then
+  # Check if we're in an interactive environment
+  local is_interactive=false
+  if [[ -t 0 ]] && [[ -t 1 ]]; then
+    is_interactive=true
+  fi
+  
+  # In non-interactive mode (background process), skip confirmations since user already selected this
+  local should_proceed=false
+  if [[ "$MC_DRY_RUN" == "true" ]]; then
+    should_proceed=true
+  elif [[ "$is_interactive" == "true" ]]; then
+    if mc_confirm "Are you sure you want to clean system logs?"; then
+      print_warning "This operation requires administrative privileges"
+      if mc_confirm "Do you want to continue?"; then
+        should_proceed=true
+      fi
+    fi
+  else
+    # Non-interactive: user already selected this, so proceed
+    # But still show the warning
     print_warning "This operation requires administrative privileges"
+    print_info "Proceeding with system logs cleanup (non-interactive mode)"
+    should_proceed=true
+  fi
+  
+  if [[ "$should_proceed" == "true" ]]; then
+    local logs_dir="/var/log"
+    local space_before=0
     
-    if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to continue?"; then
-      local logs_dir="/var/log"
-      local space_before=0
-      
-      if [[ "$MC_DRY_RUN" != "true" ]]; then
-        space_before=$(sudo sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" || echo "0")
-      fi
-      
-      backup "$logs_dir" "system_logs"
-      
-      if [[ "$MC_DRY_RUN" == "true" ]]; then
-        print_info "[DRY RUN] Would clean system logs"
-        log_message "DRY_RUN" "Would clean system logs"
-      else
-        # Clean log files without removing them (zero their size instead)
-        run_as_admin "find $logs_dir -type f -name \"*.log\" -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
-        
-        # Clean archived logs
-        run_as_admin "find $logs_dir -type f -name \"*.log.*\" -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
-        
-        local space_after=$(sudo sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" || echo "0")
-        local space_freed=$((space_before - space_after))
-        track_space_saved "System Logs" $space_freed
-        
-        print_success "System logs cleaned."
-      fi
+    if [[ "$MC_DRY_RUN" != "true" ]]; then
+      space_before=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
+    fi
+    
+    backup "$logs_dir" "system_logs"
+    
+    if [[ "$MC_DRY_RUN" == "true" ]]; then
+      print_info "[DRY RUN] Would clean system logs"
+      log_message "DRY_RUN" "Would clean system logs"
     else
-      print_info "Skipping system logs cleanup"
+      # Clean log files without removing them (zero their size instead)
+      run_as_admin "find $logs_dir -type f -name \"*.log\" -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
+      
+      # Clean archived logs
+      run_as_admin "find $logs_dir -type f -name \"*.log.*\" -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
+      
+      local space_after=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
+      local space_freed=$((space_before - space_after))
+      track_space_saved "System Logs" $space_freed
+      
+      print_success "System logs cleaned."
     fi
   else
     print_info "Skipping system logs cleanup"

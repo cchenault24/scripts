@@ -97,7 +97,7 @@ load_plugins() {
   fi
 }
 
-# Async sweep function - runs in background to calculate plugin sizes
+# Async sweep function - runs in background to calculate plugin sizes in parallel
 run_async_sweep() {
   local sweep_file="$1"
   local script_dir="$2"
@@ -113,55 +113,101 @@ run_async_sweep() {
   # Create temp file for results
   > "$sweep_file"
   
-  # Calculate sizes for all plugins
+  # Calculate sizes for all plugins in parallel
+  local pids=()
+  local temp_files=()
+  local plugin_index=0
+  
   for plugin_name in "${plugin_list[@]}"; do
-    local size_bytes=0
-    # Call the function - it should be available from parent shell
-    size_bytes=$(calculate_plugin_size_bytes "$plugin_name" 2>/dev/null || echo "0")
-    local size_formatted=""
+    # Create temp file for this plugin's result
+    local temp_file="/tmp/mac-cleanup-sweep-$$-$plugin_index.tmp"
+    temp_files+=("$temp_file")
     
-    # Ensure size_bytes is numeric
-    if [[ -z "$size_bytes" || ! "$size_bytes" =~ ^[0-9]+$ ]]; then
-      size_bytes=0
+    # Calculate size in background
+    (
+      local size_bytes=$(calculate_plugin_size_bytes "$plugin_name" 2>/dev/null || echo "0")
+      local size_formatted=""
+      
+      # Ensure size_bytes is numeric
+      size_bytes=$(echo "$size_bytes" | tr -d '[:space:]')
+      if [[ -z "$size_bytes" || ! "$size_bytes" =~ ^[0-9]+$ ]]; then
+        size_bytes=0
+      fi
+      
+      if [[ $size_bytes -gt 0 ]]; then
+        size_formatted=$(format_bytes $size_bytes 2>/dev/null || echo "0B")
+      else
+        size_formatted="0B"
+      fi
+      
+      # Write to temp file: plugin_name|size_bytes|size_formatted
+      printf "%s|%s|%s\n" "$plugin_name" "$size_bytes" "$size_formatted" > "$temp_file" 2>/dev/null || true
+    ) &
+    pids+=($!)
+    plugin_index=$((plugin_index + 1))
+  done
+  
+  # Wait for all parallel calculations to complete
+  for pid in "${pids[@]}"; do
+    wait $pid 2>/dev/null || true
+  done
+  
+  # Combine results into sweep file
+  for temp_file in "${temp_files[@]}"; do
+    if [[ -f "$temp_file" ]]; then
+      cat "$temp_file" >> "$sweep_file" 2>/dev/null || true
+      rm -f "$temp_file" 2>/dev/null || true
     fi
-    
-    if [[ $size_bytes -gt 0 ]]; then
-      size_formatted=$(format_bytes $size_bytes 2>/dev/null || echo "0B")
-    else
-      size_formatted="0B"
-    fi
-    
-    # Write to temp file: plugin_name|size_bytes|size_formatted
-    # Use printf for more reliable output
-    printf "%s|%s|%s\n" "$plugin_name" "$size_bytes" "$size_formatted" >> "$sweep_file" 2>/dev/null || true
   done
   
   # Write completion marker
   echo "SWEEP_COMPLETE" >> "$sweep_file" 2>/dev/null || true
 }
 
-# Calculate size in bytes for a plugin
+# Calculate size in bytes for a plugin (with early exits for non-existent paths)
 calculate_plugin_size_bytes() {
   local plugin_name="$1"
   local size_bytes=0
   
   case "$plugin_name" in
     "User Cache")
-      size_bytes=$(calculate_size_bytes "$HOME/Library/Caches")
+      [[ -d "$HOME/Library/Caches" ]] && size_bytes=$(calculate_size_bytes "$HOME/Library/Caches")
       ;;
     "System Cache")
-      size_bytes=$(calculate_size_bytes "/Library/Caches")
+      [[ -d "/Library/Caches" ]] && size_bytes=$(calculate_size_bytes "/Library/Caches")
       ;;
     "Application Logs")
-      size_bytes=$(calculate_size_bytes "$HOME/Library/Logs")
+      [[ -d "$HOME/Library/Logs" ]] && size_bytes=$(calculate_size_bytes "$HOME/Library/Logs")
       ;;
     "System Logs")
-      size_bytes=$(calculate_size_bytes "/var/log")
+      # Calculate size of only .log files (matching what cleanup actually removes/truncates)
+      # System logs cleanup only affects .log and .log.* files, not the entire /var/log directory
+      if [[ -d "/var/log" ]]; then
+        # Calculate size of .log files and .log.* files
+        local log_files_size=0
+        # Use find to get total size of log files (requires sudo, but we can try without for size calculation)
+        local find_output=$(find "/var/log" -type f \( -name "*.log" -o -name "*.log.*" \) -exec du -sk {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+        if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
+          log_files_size=$((find_output * 1024))
+        fi
+        size_bytes=$log_files_size
+      fi
       ;;
     "Temporary Files")
       for temp_dir in "/tmp" "$TMPDIR" "$HOME/Library/Application Support/Temp"; do
         if [[ -d "$temp_dir" ]]; then
-          local dir_size=$(calculate_size_bytes "$temp_dir")
+          local dir_size=0
+          # For /tmp, calculate size excluding files that cleanup will skip (.X* and com.apple.*)
+          if [[ "$temp_dir" == "/tmp" ]]; then
+            # Calculate size of files that will actually be cleaned (exclude .X* and com.apple.*)
+            local find_output=$(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" -print0 2>/dev/null | xargs -0 du -sk 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+            if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
+              dir_size=$((find_output * 1024))
+            fi
+          else
+            # For other temp dirs, calculate full size
+            dir_size=$(calculate_size_bytes "$temp_dir")
+          fi
           if [[ -n "$dir_size" && "$dir_size" =~ ^[0-9]+$ ]]; then
             size_bytes=$((size_bytes + dir_size))
           fi
@@ -169,7 +215,19 @@ calculate_plugin_size_bytes() {
       done
       ;;
     "Safari Cache")
-      size_bytes=$(calculate_size_bytes "$HOME/Library/Caches/com.apple.Safari")
+      # Calculate size of all Safari cache directories (matching what cleanup actually removes)
+      local safari_dirs=(
+        "$HOME/Library/Caches/com.apple.Safari"
+        "$HOME/Library/Safari/LocalStorage"
+        "$HOME/Library/Safari/Databases"
+        "$HOME/Library/Safari/ServiceWorkers"
+      )
+      for dir in "${safari_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+          local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+          [[ "$dir_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + dir_size))
+        fi
+      done
       ;;
     "Chrome Cache")
       local chrome_size=0
@@ -179,12 +237,18 @@ calculate_plugin_size_bytes() {
       if [[ -d "$HOME/Library/Application Support/Google/Chrome" ]]; then
         for profile_dir in "$HOME/Library/Application Support/Google/Chrome"/*/; do
           if [[ -d "$profile_dir" ]]; then
-            local cache_size=$(calculate_size_bytes "$profile_dir/Cache" 2>/dev/null || echo "0")
-            local code_cache_size=$(calculate_size_bytes "$profile_dir/Code Cache" 2>/dev/null || echo "0")
-            local sw_size=$(calculate_size_bytes "$profile_dir/Service Worker" 2>/dev/null || echo "0")
-            [[ "$cache_size" =~ ^[0-9]+$ ]] && chrome_size=$((chrome_size + cache_size))
-            [[ "$code_cache_size" =~ ^[0-9]+$ ]] && chrome_size=$((chrome_size + code_cache_size))
-            [[ "$sw_size" =~ ^[0-9]+$ ]] && chrome_size=$((chrome_size + sw_size))
+            [[ -d "$profile_dir/Cache" ]] && {
+              local cache_size=$(calculate_size_bytes "$profile_dir/Cache" 2>/dev/null || echo "0")
+              [[ "$cache_size" =~ ^[0-9]+$ ]] && chrome_size=$((chrome_size + cache_size))
+            }
+            [[ -d "$profile_dir/Code Cache" ]] && {
+              local code_cache_size=$(calculate_size_bytes "$profile_dir/Code Cache" 2>/dev/null || echo "0")
+              [[ "$code_cache_size" =~ ^[0-9]+$ ]] && chrome_size=$((chrome_size + code_cache_size))
+            }
+            [[ -d "$profile_dir/Service Worker" ]] && {
+              local sw_size=$(calculate_size_bytes "$profile_dir/Service Worker" 2>/dev/null || echo "0")
+              [[ "$sw_size" =~ ^[0-9]+$ ]] && chrome_size=$((chrome_size + sw_size))
+            }
           fi
         done
       fi
@@ -198,10 +262,14 @@ calculate_plugin_size_bytes() {
       if [[ -d "$HOME/Library/Application Support/Firefox" ]]; then
         for profile_dir in "$HOME/Library/Application Support/Firefox/Profiles"/*/; do
           if [[ -d "$profile_dir" ]]; then
-            local cache2_size=$(calculate_size_bytes "$profile_dir/cache2" 2>/dev/null || echo "0")
-            local startup_size=$(calculate_size_bytes "$profile_dir/startupCache" 2>/dev/null || echo "0")
-            [[ "$cache2_size" =~ ^[0-9]+$ ]] && firefox_size=$((firefox_size + cache2_size))
-            [[ "$startup_size" =~ ^[0-9]+$ ]] && firefox_size=$((firefox_size + startup_size))
+            [[ -d "$profile_dir/cache2" ]] && {
+              local cache2_size=$(calculate_size_bytes "$profile_dir/cache2" 2>/dev/null || echo "0")
+              [[ "$cache2_size" =~ ^[0-9]+$ ]] && firefox_size=$((firefox_size + cache2_size))
+            }
+            [[ -d "$profile_dir/startupCache" ]] && {
+              local startup_size=$(calculate_size_bytes "$profile_dir/startupCache" 2>/dev/null || echo "0")
+              [[ "$startup_size" =~ ^[0-9]+$ ]] && firefox_size=$((firefox_size + startup_size))
+            }
           fi
         done
       fi
@@ -215,35 +283,53 @@ calculate_plugin_size_bytes() {
       if [[ -d "$HOME/Library/Application Support/Microsoft Edge" ]]; then
         for profile_dir in "$HOME/Library/Application Support/Microsoft Edge"/*/; do
           if [[ -d "$profile_dir" ]]; then
-            local edge_cache_size=$(calculate_size_bytes "$profile_dir/Cache" 2>/dev/null || echo "0")
-            local edge_code_size=$(calculate_size_bytes "$profile_dir/Code Cache" 2>/dev/null || echo "0")
-            [[ "$edge_cache_size" =~ ^[0-9]+$ ]] && edge_size=$((edge_size + edge_cache_size))
-            [[ "$edge_code_size" =~ ^[0-9]+$ ]] && edge_size=$((edge_size + edge_code_size))
+            [[ -d "$profile_dir/Cache" ]] && {
+              local edge_cache_size=$(calculate_size_bytes "$profile_dir/Cache" 2>/dev/null || echo "0")
+              [[ "$edge_cache_size" =~ ^[0-9]+$ ]] && edge_size=$((edge_size + edge_cache_size))
+            }
+            [[ -d "$profile_dir/Code Cache" ]] && {
+              local edge_code_size=$(calculate_size_bytes "$profile_dir/Code Cache" 2>/dev/null || echo "0")
+              [[ "$edge_code_size" =~ ^[0-9]+$ ]] && edge_size=$((edge_size + edge_code_size))
+            }
           fi
         done
       fi
       size_bytes=$edge_size
       ;;
     "Application Container Caches")
-      size_bytes=$(calculate_size_bytes "$HOME/Library/Containers")
+      # Calculate size of only the Caches subdirectories (matching what cleanup actually removes)
+      if [[ -d "$HOME/Library/Containers" ]]; then
+        local cache_size=0
+        while IFS= read -r cache_dir; do
+          [[ -n "$cache_dir" && -d "$cache_dir" ]] && {
+            local dir_size=$(calculate_size_bytes "$cache_dir" 2>/dev/null || echo "0")
+            [[ "$dir_size" =~ ^[0-9]+$ ]] && cache_size=$((cache_size + dir_size))
+          }
+        done < <(find "$HOME/Library/Containers" -type d -name "Caches" 2>/dev/null)
+        size_bytes=$cache_size
+      fi
       ;;
     "Saved Application States")
-      size_bytes=$(calculate_size_bytes "$HOME/Library/Saved Application State")
+      [[ -d "$HOME/Library/Saved Application State" ]] && size_bytes=$(calculate_size_bytes "$HOME/Library/Saved Application State")
       ;;
     "Empty Trash")
-      size_bytes=$(calculate_size_bytes "$HOME/.Trash")
+      [[ -d "$HOME/.Trash" ]] && size_bytes=$(calculate_size_bytes "$HOME/.Trash")
       ;;
     "npm Cache")
-      local npm_cache_dir=$(npm config get cache 2>/dev/null || echo "$HOME/.npm")
-      size_bytes=$(calculate_size_bytes "$npm_cache_dir")
+      if command -v npm &> /dev/null; then
+        local npm_cache_dir=$(npm config get cache 2>/dev/null || echo "$HOME/.npm")
+        [[ -d "$npm_cache_dir" ]] && size_bytes=$(calculate_size_bytes "$npm_cache_dir")
+      fi
       ;;
     "pip Cache")
       local pip_cmd="pip3"
       if command -v pip &> /dev/null; then
         pip_cmd="pip"
       fi
-      local pip_cache_dir=$($pip_cmd cache dir 2>/dev/null || echo "$HOME/Library/Caches/pip")
-      size_bytes=$(calculate_size_bytes "$pip_cache_dir")
+      if command -v "$pip_cmd" &> /dev/null; then
+        local pip_cache_dir=$($pip_cmd cache dir 2>/dev/null || echo "$HOME/Library/Caches/pip")
+        [[ -d "$pip_cache_dir" ]] && size_bytes=$(calculate_size_bytes "$pip_cache_dir")
+      fi
       ;;
     "Gradle Cache")
       local gradle_size=0
@@ -257,38 +343,31 @@ calculate_plugin_size_bytes() {
       size_bytes=$gradle_size
       ;;
     "Maven Cache")
-      size_bytes=$(calculate_size_bytes "$HOME/.m2/repository")
+      [[ -d "$HOME/.m2/repository" ]] && size_bytes=$(calculate_size_bytes "$HOME/.m2/repository")
       ;;
     "Docker Cache")
-      local docker_size=0
-      if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
-        local docker_data_dirs=(
-          "$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"
-          "$HOME/Library/Containers/com.docker.docker/Data"
-          "$HOME/.docker"
-        )
-        for docker_dir in "${docker_data_dirs[@]}"; do
-          if [[ -e "$docker_dir" ]]; then
-            local dir_size=$(calculate_size_bytes "$docker_dir" 2>/dev/null || echo "0")
-            [[ "$dir_size" =~ ^[0-9]+$ ]] && docker_size=$((docker_size + dir_size))
-            if [[ "$docker_dir" == *"Docker.raw" ]]; then
-              break
-            fi
-          fi
-        done
-      fi
-      size_bytes=$docker_size
+      # Docker cleanup uses 'docker system prune' which cleans Docker's internal data
+      # This is different from file system directories. The cleanup function doesn't track
+      # exact bytes freed (returns 0), so we also return 0 here for consistency.
+      # Note: docker system df could be used, but it's complex to parse and may not
+      # accurately reflect what will be cleaned by 'docker system prune'.
+      size_bytes=0
       ;;
     "Xcode Data")
+      # Calculate size of all Xcode data directories (matching what cleanup actually removes)
       local xcode_size=0
-      if [[ -d "$HOME/Library/Developer/Xcode/DerivedData" ]]; then
-        local derived_data_size=$(calculate_size_bytes "$HOME/Library/Developer/Xcode/DerivedData")
-        [[ "$derived_data_size" =~ ^[0-9]+$ ]] && xcode_size=$((xcode_size + derived_data_size))
-      fi
-      if [[ -d "$HOME/Library/Developer/Xcode/Archives" ]]; then
-        local archives_size=$(calculate_size_bytes "$HOME/Library/Developer/Xcode/Archives")
-        [[ "$archives_size" =~ ^[0-9]+$ ]] && xcode_size=$((xcode_size + archives_size))
-      fi
+      local xcode_dirs=(
+        "$HOME/Library/Developer/Xcode/DerivedData"
+        "$HOME/Library/Developer/Xcode/Archives"
+        "$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+        "$HOME/Library/Caches/com.apple.dt.Xcode"
+      )
+      for dir in "${xcode_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+          local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+          [[ "$dir_size" =~ ^[0-9]+$ ]] && xcode_size=$((xcode_size + dir_size))
+        fi
+      done
       size_bytes=$xcode_size
       ;;
     "Node.js Modules")
@@ -321,18 +400,42 @@ calculate_plugin_size_bytes() {
       size_bytes=$brew_cache_size
       ;;
     "Developer Tool Temp Files")
+      # Calculate size matching what cleanup actually removes
+      # For JetBrains: only subdirectories named "caches" or maxdepth 1 directories
+      # For VS Code: specific cache directories
       local dev_tool_size=0
-      local jetbrains_dirs=(
+      
+      # JetBrains: calculate size of subdirectories that will be cleaned
+      # The cleanup finds: directories named "caches" OR maxdepth 1 directories
+      # We use an associative array to avoid double-counting
+      typeset -A counted_jetbrains_dirs
+      local jetbrains_base_dirs=(
         "$HOME/Library/Caches/JetBrains"
         "$HOME/Library/Application Support/JetBrains"
         "$HOME/Library/Logs/JetBrains"
       )
-      for dir in "${jetbrains_dirs[@]}"; do
-        if [[ -d "$dir" ]]; then
-          local dir_size=$(calculate_size_bytes "$dir")
-          [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
+      for base_dir in "${jetbrains_base_dirs[@]}"; do
+        if [[ -d "$base_dir" ]]; then
+          # Find maxdepth 1 directories (direct children) - matching cleanup logic
+          while IFS= read -r dir; do
+            if [[ -d "$dir" && "$dir" != "$base_dir" && -z "${counted_jetbrains_dirs[$dir]:-}" ]]; then
+              counted_jetbrains_dirs[$dir]=1
+              local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+              [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
+            fi
+          done < <(find "$base_dir" -maxdepth 1 -type d 2>/dev/null)
+          # Find all "caches" subdirectories (at any depth) - matching cleanup logic
+          while IFS= read -r dir; do
+            if [[ -d "$dir" && "$dir" != "$base_dir" && -z "${counted_jetbrains_dirs[$dir]:-}" ]]; then
+              counted_jetbrains_dirs[$dir]=1
+              local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+              [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
+            fi
+          done < <(find "$base_dir" -type d -name "caches" 2>/dev/null)
         fi
       done
+      
+      # VS Code: specific cache directories (matching cleanup exactly)
       local vscode_dirs=(
         "$HOME/Library/Application Support/Code/Cache"
         "$HOME/Library/Application Support/Code/CachedData"
@@ -343,7 +446,7 @@ calculate_plugin_size_bytes() {
       )
       for dir in "${vscode_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
-          local dir_size=$(calculate_size_bytes "$dir")
+          local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
           [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
         fi
       done
@@ -512,32 +615,98 @@ main() {
   typeset -A plugin_sizes_bytes
   typeset -A plugin_sizes_formatted
   
-  # Always calculate synchronously to ensure we have reliable results
-  # The async sweep runs in background for speed, but we calculate here for accuracy
-  if [[ ${#plugin_array[@]} -gt 0 ]]; then
-    print_info "Calculating sizes for ${#plugin_array[@]} plugins..."
+  # Try to use async sweep results first
+  local sweep_results_available=false
+  if [[ -f "$sweep_file" ]]; then
+    # Check if sweep completed successfully
+    if grep -q "SWEEP_COMPLETE" "$sweep_file" 2>/dev/null; then
+      sweep_results_available=true
+      # Parse sweep results
+      while IFS='|' read -r plugin_name size_bytes size_formatted; do
+        # Skip completion marker
+        [[ "$plugin_name" == "SWEEP_COMPLETE" ]] && continue
+        
+        # Clean and validate size_bytes
+        size_bytes=$(echo "$size_bytes" | tr -d '[:space:]')
+        
+        # Use arithmetic evaluation to check if numeric
+        local arithmetic_result=0
+        if (( size_bytes + 0 == size_bytes )) 2>/dev/null; then
+          arithmetic_result=1
+        fi
+        
+        if [[ -n "$plugin_name" && -n "$size_bytes" && $arithmetic_result -eq 1 ]]; then
+          plugin_sizes_bytes["$plugin_name"]=$size_bytes
+          plugin_sizes_formatted["$plugin_name"]="$size_formatted"
+        else
+          plugin_sizes_bytes["$plugin_name"]=0
+          plugin_sizes_formatted["$plugin_name"]="0B"
+        fi
+      done < "$sweep_file"
+    fi
   fi
   
-  for plugin_name in "${plugin_array[@]}"; do
-    local size_bytes=$(calculate_plugin_size_bytes "$plugin_name" 2>/dev/null || echo "0")
-    
-    # Clean and validate size_bytes - strip whitespace and check if numeric
-    size_bytes=$(echo "$size_bytes" | tr -d '[:space:]')
-    
-    # Use arithmetic evaluation to check if numeric (more reliable in zsh)
-    local arithmetic_result=0
-    if (( size_bytes + 0 == size_bytes )) 2>/dev/null; then
-      arithmetic_result=1
+  # If async sweep didn't complete or results are incomplete, calculate missing ones
+  if [[ "$sweep_results_available" != "true" ]] || [[ ${#plugin_sizes_bytes[@]} -lt ${#plugin_array[@]} ]]; then
+    if [[ ${#plugin_array[@]} -gt 0 ]]; then
+      local missing_count=$((${#plugin_array[@]} - ${#plugin_sizes_bytes[@]}))
+      if [[ $missing_count -gt 0 ]]; then
+        print_info "Calculating sizes for $missing_count plugins..."
+      fi
     fi
     
-    if [[ -n "$size_bytes" && $arithmetic_result -eq 1 ]]; then
-      plugin_sizes_bytes["$plugin_name"]=$size_bytes
-      plugin_sizes_formatted["$plugin_name"]=$(format_bytes $size_bytes 2>/dev/null || echo "0B")
-    else
-      plugin_sizes_bytes["$plugin_name"]=0
-      plugin_sizes_formatted["$plugin_name"]="0B"
-    fi
-  done
+    # Calculate sizes for plugins not in results (in parallel)
+    local pids=()
+    local temp_files=()
+    local plugin_index=0
+    
+    for plugin_name in "${plugin_array[@]}"; do
+      # Skip if we already have a result
+      if [[ -n "${plugin_sizes_bytes[$plugin_name]:-}" ]]; then
+        continue
+      fi
+      
+      # Create temp file for this plugin's result
+      local temp_file="/tmp/mac-cleanup-size-$$-$plugin_index.tmp"
+      temp_files+=("$temp_file")
+      
+      # Calculate size in background
+      (
+        local size_bytes=$(calculate_plugin_size_bytes "$plugin_name" 2>/dev/null || echo "0")
+        size_bytes=$(echo "$size_bytes" | tr -d '[:space:]')
+        local arithmetic_result=0
+        if (( size_bytes + 0 == size_bytes )) 2>/dev/null; then
+          arithmetic_result=1
+        fi
+        
+        if [[ -n "$size_bytes" && $arithmetic_result -eq 1 ]]; then
+          echo "$plugin_name|$size_bytes|$(format_bytes $size_bytes 2>/dev/null || echo "0B")" > "$temp_file"
+        else
+          echo "$plugin_name|0|0B" > "$temp_file"
+        fi
+      ) &
+      pids+=($!)
+      plugin_index=$((plugin_index + 1))
+    done
+    
+    # Wait for all parallel calculations to complete
+    for pid in "${pids[@]}"; do
+      wait $pid 2>/dev/null || true
+    done
+    
+    # Read results from temp files
+    for temp_file in "${temp_files[@]}"; do
+      if [[ -f "$temp_file" ]]; then
+        while IFS='|' read -r plugin_name size_bytes size_formatted; do
+          if [[ -n "$plugin_name" ]]; then
+            plugin_sizes_bytes["$plugin_name"]=$size_bytes
+            plugin_sizes_formatted["$plugin_name"]="$size_formatted"
+          fi
+        done < "$temp_file"
+        rm -f "$temp_file" 2>/dev/null || true
+      fi
+    done
+  fi
   
   # Clean up sweep file if it exists
   rm -f "$sweep_file" 2>/dev/null || true
@@ -834,50 +1003,254 @@ main() {
   echo ""
   print_info "Starting cleanup operations..."
   
-  # Create temp file to capture cleanup output
+  # Create temp files for cleanup output, progress tracking, and space tracking
   local cleanup_output_file="/tmp/mac-cleanup-output-$$.tmp"
-  > "$cleanup_output_file"
+  local progress_file="/tmp/mac-cleanup-progress-$$.tmp"
+  local space_tracking_file="/tmp/mac-cleanup-space-$$.tmp"
+  : > "$cleanup_output_file" 2>&1 || true
+  : > "$progress_file" 2>&1 || true
+  : > "$space_tracking_file" 2>&1 || true
   
-  # Run cleanup with spinner
+  local total_operations=${#selected_options[@]}
+  
+  # Run cleanup with progress tracking
+  # Set MC_NON_INTERACTIVE flag since we're running in background
+  # This prevents interactive prompts from hanging
   (
+    export MC_NON_INTERACTIVE=true
+    export MC_SPACE_TRACKING_FILE="$space_tracking_file"
+    export MC_PROGRESS_FILE="$progress_file"
+    local current_op=0
     for option in "${selected_options[@]}"; do
+      current_op=$((current_op + 1))
+      # Write progress update BEFORE starting the operation
+      # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
+      echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
+      
       local function=$(mc_get_plugin_function "$option")
       if [[ -n "$function" ]]; then
         $function >> "$cleanup_output_file" 2>&1
         sync_globals
+        # Write progress update AFTER completing the operation
+        echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
       else
         print_error "Unknown cleanup function for: $option" >> "$cleanup_output_file"
         log_message "ERROR" "Unknown cleanup function for: $option"
+        # Still mark as completed even if function not found
+        echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
       fi
     done
+    # Mark completion
+    echo "$total_operations|$total_operations|Complete|0|0|" > "$progress_file"
   ) &
   local cleanup_pid=$!
   
-  # Show spinner while cleanup runs
-  local spin='⣾⣽⣻⢿⡿⣟⣯⣷'
-  local i=0
-  
+  # Show progress bar while cleanup runs
   (
+    
+    # Check if we can use colors and progress bar (stderr must be a TTY)
+    local use_colors=false
+    local use_progress_bar=false
+    if [[ -t 2 ]]; then
+      use_colors=true
+      use_progress_bar=true
+    fi
+    
+    # Set up color codes (use %b format for printf to interpret escape sequences)
+    local cyan_code=""
+    local reset_code=""
+    if [[ "$use_colors" == "true" ]]; then
+      cyan_code="\033[0;36m"
+      reset_code="\033[0m"
+    fi
+    
+    # Show initial progress state (0%)
+    if [[ "$use_progress_bar" == "true" ]]; then
+      printf '\r\033[K' >&2
+      printf '%b[0/%d] Starting... %s 0%%%b' \
+        "$cyan_code" \
+        "$total_operations" \
+        "$(printf "%40s" | tr ' ' '░')" \
+        "$reset_code" >&2
+    else
+      printf '\r[0/%d] Starting... 0%%' "$total_operations" >&2
+    fi
+    
+    # Track last displayed operation to avoid redundant updates
+    local last_operation=""
+    local last_percent=-1
+    
+    local loop_count=0
     while kill -0 $cleanup_pid 2>/dev/null; do
-      i=$(((i + 3) % ${#spin}))
-      printf "\r* Cleaning. Please wait... %s" "${spin:$i:3}" >&2
-      sleep 0.1
+      loop_count=$((loop_count + 1))
+      
+      if [[ -f "$progress_file" ]]; then
+        local progress_line=$(cat "$progress_file" 2>/dev/null || echo "")
+        
+        if [[ -n "$progress_line" ]]; then
+          local current=$(echo "$progress_line" | cut -d'|' -f1)
+          local total=$(echo "$progress_line" | cut -d'|' -f2)
+          local operation=$(echo "$progress_line" | cut -d'|' -f3)
+          local current_item=$(echo "$progress_line" | cut -d'|' -f4)
+          local total_items=$(echo "$progress_line" | cut -d'|' -f5)
+          local item_name=$(echo "$progress_line" | cut -d'|' -f6-)
+          
+          if [[ -n "$current" && -n "$total" && "$current" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]]; then
+            # Calculate overall percentage
+            # Base: operations completed (current-1) / total operations
+            # Add: current operation progress (current_item / total_items) / total operations
+            local overall_percent=0
+            
+            if [[ "$operation" == "Complete" ]]; then
+              overall_percent=100
+            else
+              # Calculate base progress from completed operations
+              local base_percent=0
+              if [[ $current -gt 1 ]]; then
+                base_percent=$(((current - 1) * 100 / total))
+              fi
+              
+              # Calculate progress within current operation
+              local operation_percent=0
+              if [[ -n "$total_items" && "$total_items" =~ ^[0-9]+$ && $total_items -gt 0 ]]; then
+                if [[ -n "$current_item" && "$current_item" =~ ^[0-9]+$ ]]; then
+                  operation_percent=$((current_item * 100 / total_items))
+                fi
+              fi
+              
+              # Add current operation's contribution to overall progress
+              local operation_contribution=$((operation_percent / total))
+              overall_percent=$((base_percent + operation_contribution))
+              
+              # Cap at 100%
+              [[ $overall_percent -gt 100 ]] && overall_percent=100
+            fi
+            
+            # Build display string with item-level info if available
+            local display_op="$operation"
+            if [[ -n "$total_items" && "$total_items" =~ ^[0-9]+$ && $total_items -gt 0 ]]; then
+              if [[ -n "$current_item" && "$current_item" =~ ^[0-9]+$ ]]; then
+                local item_display=""
+                if [[ -n "$item_name" && "$item_name" != "" ]]; then
+                  # Truncate item name if too long
+                  local short_item_name="$item_name"
+                  if [[ ${#short_item_name} -gt 20 ]]; then
+                    short_item_name="${short_item_name:0:17}..."
+                  fi
+                  item_display=" ($current_item/$total_items: $short_item_name)"
+                else
+                  item_display=" ($current_item/$total_items)"
+                fi
+                display_op="${operation}${item_display}"
+              fi
+            fi
+            
+            # Truncate operation name if too long
+            if [[ ${#display_op} -gt 50 ]]; then
+              display_op="${display_op:0:47}..."
+            fi
+            
+            # Only update if operation, item, or percent changed (reduce flicker)
+            local progress_key="${operation}|${current_item}|${total_items}"
+            if [[ "$progress_key" != "$last_operation" || $overall_percent != $last_percent ]]; then
+              last_operation="$progress_key"
+              last_percent=$overall_percent
+              
+              if [[ "$use_progress_bar" == "true" ]]; then
+                # Use progress bar with colors
+                local filled=$((overall_percent * 40 / 100))
+                local empty=$((40 - filled))
+                local bar_chars=""
+                if [[ $filled -gt 0 ]]; then
+                  bar_chars=$(printf "%${filled}s" | tr ' ' '█')
+                fi
+                if [[ $empty -gt 0 ]]; then
+                  bar_chars="${bar_chars}$(printf "%${empty}s" | tr ' ' '░')"
+                fi
+                
+                # Clear line and print progress (use %b to interpret escape sequences)
+                printf '\r\033[K' >&2
+                printf '%b[%d/%d] %s... %s %d%%%b' \
+                  "$cyan_code" \
+                  "$current" \
+                  "$total" \
+                  "$display_op" \
+                  "$bar_chars" \
+                  "$overall_percent" \
+                  "$reset_code" >&2
+              else
+                # Simple text output for non-TTY
+                printf '\r[%d/%d] %s... %d%%' \
+                  "$current" \
+                  "$total" \
+                  "$display_op" \
+                  "$overall_percent" >&2
+              fi
+            fi
+          fi
+        fi
+      fi
+      sleep 0.15
     done
+    # Clear the progress line completely
+    printf '\r\033[K' >&2
   ) &
-  local spinner_pid=$!
+  local progress_pid=$!
   
   # Wait for cleanup to complete
   wait $cleanup_pid
+  local wait_exit_code=$?
   
-  # Stop spinner and clear line
-  kill $spinner_pid 2>/dev/null || true
-  wait $spinner_pid 2>/dev/null || true
-  printf "\r\033[K" >&2
+  # Read space saved data from background process
+  # Aggregate by plugin name since safe_clean_dir may write multiple entries
+  if [[ -f "$space_tracking_file" ]]; then
+    local total_from_file=0
+    # Use associative array to aggregate by plugin name
+    typeset -A space_by_plugin
+    local file_content=$(cat "$space_tracking_file" 2>/dev/null || echo "")
+    while IFS='|' read -r plugin_name space_bytes; do
+      if [[ -n "$plugin_name" && -n "$space_bytes" && "$space_bytes" =~ ^[0-9]+$ ]]; then
+        # Aggregate by plugin name (sum if multiple entries exist)
+        local current_value="${space_by_plugin[$plugin_name]:-0}"
+        space_by_plugin["$plugin_name"]=$((current_value + space_bytes))
+      fi
+    done < "$space_tracking_file" 2>/dev/null || true
+    
+    # Now update MC_SPACE_SAVED_BY_OPERATION and calculate total
+    for plugin_name in "${(@k)space_by_plugin}"; do
+      local space_bytes="${space_by_plugin[$plugin_name]}"
+      MC_SPACE_SAVED_BY_OPERATION["$plugin_name"]=$space_bytes
+      total_from_file=$((total_from_file + space_bytes))
+    done
+    
+    if [[ $total_from_file -gt 0 ]]; then
+      MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + total_from_file))
+    fi
+    rm -f "$space_tracking_file" 2>/dev/null || true
+  fi
+  
+  # Stop progress display
+  kill $progress_pid 2>/dev/null || true
+  wait $progress_pid 2>/dev/null || true
+  
+  # Clean up progress file
+  rm -f "$progress_file" 2>/dev/null || true
   
   # Display cleanup output (filter out spinner artifacts and show meaningful messages)
   if [[ -f "$cleanup_output_file" && -s "$cleanup_output_file" ]]; then
-    # Filter and display output, removing empty lines and spinner artifacts
-    local output_lines=$(cat "$cleanup_output_file" 2>/dev/null | grep -v "^$" | grep -v "Cleaning. Please wait" | grep -v "^\r" | head -30)
+    # Filter and display output, removing:
+    # - Empty lines
+    # - Spinner artifacts and control characters
+    # - Redundant "Cleaning..." messages (keep only unique ones)
+    # - Duplicate success messages
+    local output_lines=$(cat "$cleanup_output_file" 2>/dev/null | \
+      grep -v "^$" | \
+      grep -v "Cleaning. Please wait" | \
+      grep -v "^\r" | \
+      sed -E 's/\x1b\[[0-9;]*m//g' | \
+      sed -E 's/\r//g' | \
+      awk '!seen[$0]++' | \
+      head -50)
     if [[ -n "$output_lines" ]]; then
       echo ""
       echo "$output_lines"

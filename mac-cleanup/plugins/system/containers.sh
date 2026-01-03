@@ -12,19 +12,76 @@ clean_container_caches() {
   if [[ -d "$containers_dir" ]]; then
     backup "$containers_dir" "app_containers"
     
+    # Collect all cache directories first
+    local cache_dirs=()
     while IFS= read -r dir; do
-      [[ -z "$dir" ]] && continue
-      local app_name=$(echo "$dir" | awk -F'/' '{print $(NF-2)}')
-      local space_before=$(calculate_size_bytes "$dir")
-      safe_clean_dir "$dir" "$app_name container cache"
-      local space_after=$(calculate_size_bytes "$dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned $app_name container cache."
+      [[ -n "$dir" && -d "$dir" ]] && cache_dirs+=("$dir")
     done < <(find "$containers_dir" -type d -name "Caches" 2>/dev/null)
+    
+    if [[ ${#cache_dirs[@]} -eq 0 ]]; then
+      print_info "No container cache directories found."
+      track_space_saved "Application Container Caches" 0
+      return 0
+    fi
+    
+    # Process all cache directories with minimal verbosity
+    local cache_count=${#cache_dirs[@]}
+    if [[ $cache_count -eq 1 ]]; then
+      print_info "Cleaning 1 container cache directory..."
+    else
+      print_info "Cleaning $cache_count container cache directories..."
+    fi
+    
+    local processed_count=0
+    local total_items=${#cache_dirs[@]}
+    local current_item=0
+    
+    for dir in "${cache_dirs[@]}"; do
+      current_item=$((current_item + 1))
+      # Extract app name from path: /Users/.../Library/Containers/com.app.name/Data/Library/Caches
+      # We want "com.app.name" which is the container bundle ID
+      local app_name=$(echo "$dir" | sed -E 's|.*/Containers/([^/]+)/.*|\1|')
+      [[ -z "$app_name" ]] && app_name="Unknown"
+      
+      update_operation_progress $current_item $total_items "$app_name"
+      
+      local space_before=$(calculate_size_bytes "$dir")
+      if [[ $space_before -gt 0 ]]; then
+        # Clean the directory silently (we'll show summary at end)
+        if [[ -d "$dir" ]]; then
+          find "$dir" -mindepth 1 -delete 2>/dev/null || {
+            find "$dir" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null || true
+            find "$dir" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null || true
+            if [[ -n "${ZSH_VERSION:-}" ]]; then
+              rm -rf "${dir:?}"/*(N) "${dir:?}"/.[!.]*(N) 2>/dev/null || true
+            else
+              rm -rf "${dir:?}"/* "${dir:?}"/.[!.]* 2>/dev/null || true
+            fi
+          }
+          invalidate_size_cache "$dir"
+        fi
+        local space_after=$(calculate_size_bytes "$dir")
+        local space_freed=$((space_before - space_after))
+        total_space_freed=$((total_space_freed + space_freed))
+        processed_count=$((processed_count + 1))
+        log_message "INFO" "Cleaned container cache: $app_name (freed $(format_bytes $space_freed))"
+      fi
+    done
+    
+    if [[ $processed_count -gt 0 ]]; then
+      if [[ $processed_count -eq 1 ]]; then
+        print_success "Cleaned 1 container cache directory ($(format_bytes $total_space_freed) freed)."
+      else
+        print_success "Cleaned $processed_count container cache directories ($(format_bytes $total_space_freed) freed)."
+      fi
+    else
+      print_info "Container caches were already empty."
+    fi
     
     track_space_saved "Application Container Caches" $total_space_freed
   else
     print_warning "No application containers found."
+    track_space_saved "Application Container Caches" 0
   fi
 }
 

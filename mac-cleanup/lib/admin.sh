@@ -71,15 +71,25 @@ run_as_admin() {
   print_info "Running $description with administrative privileges..."
   log_message "INFO" "Executing admin command: $description"
   
-  # Validate/cache sudo credentials
-  if ! sudo -v; then
-    print_error "Failed to validate sudo credentials."
-    log_message "ERROR" "Sudo credential validation failed"
-    return 1
+  # Validate/cache sudo credentials (use -n to fail immediately if password needed)
+  # In non-interactive mode, we need cached credentials
+  if ! sudo -n -v 2>/dev/null; then
+    # Try once with prompt (only if interactive)
+    if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+      if ! sudo -v; then
+        print_error "Failed to validate sudo credentials."
+        log_message "ERROR" "Sudo credential validation failed"
+        return 1
+      fi
+    else
+      print_error "Sudo credentials not cached. Please run 'sudo -v' first to cache credentials."
+      log_message "ERROR" "Sudo credentials not cached in non-interactive mode"
+      return 1
+    fi
   fi
   
-  # Run the command with sudo
-  if sudo sh -c "$command"; then
+  # Run the command with sudo (use -n to fail immediately if password needed)
+  if sudo -n sh -c "$command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]] && sudo sh -c "$command"); then
     log_message "SUCCESS" "Admin command completed: $description"
     return 0
   else
