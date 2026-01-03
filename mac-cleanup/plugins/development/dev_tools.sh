@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_dev_tool_temp() {
-  print_header "Cleaning Developer Tool Temporary Files"
-  
   local total_space_freed=0
   
   # IntelliJ IDEA

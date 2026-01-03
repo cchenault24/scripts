@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_container_caches() {
-  print_header "Cleaning Application Container Caches"
-  
   local containers_dir="$HOME/Library/Containers"
   local total_space_freed=0
   
@@ -25,17 +23,8 @@ clean_container_caches() {
     done < <(find "$containers_dir" -type d -name "Caches" 2>/dev/null)
     
     if [[ ${#cache_dirs[@]} -eq 0 ]]; then
-      print_info "No container cache directories found."
       track_space_saved "Application Container Caches" 0
       return 0
-    fi
-    
-    # Process all cache directories with minimal verbosity
-    local cache_count=${#cache_dirs[@]}
-    if [[ $cache_count -eq 1 ]]; then
-      print_info "Cleaning 1 container cache directory..."
-    else
-      print_info "Cleaning $cache_count container cache directories..."
     fi
     
     local processed_count=0
@@ -90,8 +79,6 @@ clean_container_caches() {
       else
         print_success "Cleaned $processed_count container cache directories ($(format_bytes $total_space_freed) freed)."
       fi
-    else
-      print_info "Container caches were already empty."
     fi
     
     # Manual cleanup doesn't use safe_clean_dir, so we need to track space manually
@@ -105,8 +92,6 @@ clean_container_caches() {
 }
 
 clean_saved_states() {
-  print_header "Cleaning Saved Application States"
-  
   local saved_states_dir="$HOME/Library/Saved Application State"
   
   if [[ -d "$saved_states_dir" ]]; then

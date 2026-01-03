@@ -105,7 +105,8 @@ mc_validate_backup() {
   
   # For directories (tar.gz), verify we can list contents
   if [[ "$backup_type" == "directory" && "$backup_file" == *.tar.gz ]]; then
-    local file_count=$(tar -tzf "$backup_file" 2>/dev/null | wc -l | tr -d ' ')
+    # Use full paths to ensure commands are available
+    local file_count=$(tar -tzf "$backup_file" 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d ' ' 2>/dev/null || echo "0")
     if [[ -z "$file_count" || "$file_count" == "0" ]]; then
       log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Backup archive appears empty: $backup_file"
       # Don't fail for empty archives (they might be valid)

@@ -74,18 +74,17 @@ run_as_admin() {
   log_message "INFO" "Executing admin command: $description"
   
   # Validate/cache sudo credentials (use -n to fail immediately if password needed)
-  # In non-interactive mode, we need cached credentials
   if ! sudo -n -v 2>/dev/null; then
-    # Try once with prompt (only if interactive)
-    if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+    # Try once with prompt (script always runs interactively)
+    if [[ -t 0 ]] && [[ -t 1 ]]; then
       if ! sudo -v; then
         print_error "Failed to validate sudo credentials."
         log_message "ERROR" "Sudo credential validation failed"
         return 1
       fi
     else
-      print_error "Sudo credentials not cached. Please run 'sudo -v' first to cache credentials."
-      log_message "ERROR" "Sudo credentials not cached in non-interactive mode"
+      print_error "Sudo credentials not cached and script requires interactive terminal."
+      log_message "ERROR" "Sudo credentials not cached and non-interactive terminal"
       return 1
     fi
   fi
@@ -96,7 +95,7 @@ run_as_admin() {
   
   # Run the command with sudo (use -n to fail immediately if password needed)
   # Use the escaped command to prevent injection
-  if sudo -n sh -c "$escaped_command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]] && sudo sh -c "$escaped_command"); then
+  if sudo -n sh -c "$escaped_command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && sudo sh -c "$escaped_command"); then
     log_message "SUCCESS" "Admin command completed: $description"
     return 0
   else

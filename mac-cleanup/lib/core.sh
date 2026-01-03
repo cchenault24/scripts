@@ -330,20 +330,22 @@ mc_cleanup_script() {
   fi
   
   # Phase 4.2: Clean up progress files and locks
-  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp 2>/dev/null || true
-  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp.lock 2>/dev/null || true
+  # Use (N) qualifier to suppress "no matches found" warnings in zsh
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp(N) 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp.lock(N) 2>/dev/null || true
   
   # Remove any temp files (N qualifier prevents error if no matches)
   rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-temp-"*(/N) 2>/dev/null
   rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-"*.tmp(N) 2>/dev/null
-  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-"*.tmp 2>/dev/null || true
-  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-space-"*.tmp 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-"*.tmp(N) 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-space-"*.tmp(N) 2>/dev/null || true
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool
   
   # Compress backup logs if they exist
-  if [[ -d "$MC_BACKUP_DIR" && $(find "$MC_BACKUP_DIR" -type f 2>/dev/null | wc -l) -gt 0 ]]; then
+  # Use full path to ensure command is available
+  if [[ -d "$MC_BACKUP_DIR" && $(find "$MC_BACKUP_DIR" -type f 2>/dev/null | /usr/bin/wc -l 2>/dev/null || echo "0") -gt 0 ]]; then
     find "$MC_BACKUP_DIR" -type f -name "*.log" ! -name "*.gz" -exec gzip {} \; 2>/dev/null || true
   fi
 }
@@ -473,7 +475,8 @@ mc_get_plugin_function() {
   local normalized_name=$(_normalize_plugin_name "$name")
   
   # Try direct lookup with normalized name (most common case)
-  local result="${MC_PLUGIN_REGISTRY[$normalized_name]}"
+  # Use :- to provide default empty value if key doesn't exist (prevents "parameter not set" error with set -u)
+  local result="${MC_PLUGIN_REGISTRY[$normalized_name]:-}"
   if [[ -n "$result" ]]; then
     echo "$result" | cut -d'|' -f1
     return
@@ -484,7 +487,8 @@ mc_get_plugin_function() {
   for key in "${(@k)MC_PLUGIN_REGISTRY}"; do
     local normalized_key=$(_normalize_plugin_name "$key")
     if [[ "$normalized_key" == "$normalized_name" ]]; then
-      echo "${MC_PLUGIN_REGISTRY[$key]}" | cut -d'|' -f1
+      # Use :- to provide default empty value if key doesn't exist
+      echo "${MC_PLUGIN_REGISTRY[$key]:-}" | cut -d'|' -f1
       return
     fi
   done
@@ -499,7 +503,8 @@ mc_get_plugin_category() {
   local normalized_name=$(_normalize_plugin_name "$name")
   
   # Try direct lookup with normalized name (most common case)
-  local result="${MC_PLUGIN_REGISTRY[$normalized_name]}"
+  # Use :- to provide default empty value if key doesn't exist (prevents "parameter not set" error with set -u)
+  local result="${MC_PLUGIN_REGISTRY[$normalized_name]:-}"
   if [[ -n "$result" ]]; then
     local category=$(echo "$result" | cut -d'|' -f2)
     # Use parameter expansion instead of sed (PERF-5)
@@ -513,7 +518,8 @@ mc_get_plugin_category() {
   for key in "${(@k)MC_PLUGIN_REGISTRY}"; do
     local normalized_key=$(_normalize_plugin_name "$key")
     if [[ "$normalized_key" == "$normalized_name" ]]; then
-      local category=$(echo "${MC_PLUGIN_REGISTRY[$key]}" | cut -d'|' -f2)
+      # Use :- to provide default empty value if key doesn't exist
+      local category=$(echo "${MC_PLUGIN_REGISTRY[$key]:-}" | cut -d'|' -f2)
       # Use parameter expansion instead of sed (PERF-5)
       category="${category#\"}"
       category="${category%\"}"
@@ -528,7 +534,10 @@ mc_get_plugin_category() {
 
 mc_get_plugin_requires_admin() {
   local name="$1"
-  echo "${MC_PLUGIN_REGISTRY[$name]}" | cut -d'|' -f3
+  # Normalize the input name
+  local normalized_name=$(_normalize_plugin_name "$name")
+  # Use :- to provide default empty value if key doesn't exist (prevents "parameter not set" error with set -u)
+  echo "${MC_PLUGIN_REGISTRY[$normalized_name]:-}" | cut -d'|' -f3
 }
 
 mc_list_plugins() {

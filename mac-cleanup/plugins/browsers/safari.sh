@@ -10,8 +10,6 @@ set -euo pipefail  # Exit on error, undefined vars, pipe failures
 # - Plugin registration functions from plugins/base.sh
 
 clean_safari_cache() {
-  print_header "Cleaning Safari Cache"
-  
   if ! command -v safaridriver &> /dev/null && [[ ! -d "$HOME/Library/Safari" ]]; then
     print_warning "Safari does not appear to be installed or has never been run."
     track_space_saved "Safari Cache" 0
@@ -62,8 +60,6 @@ clean_safari_cache() {
         fi
         total_space_freed=$((total_space_freed + space_freed))
         print_success "Cleaned $dir ($(format_bytes $space_freed))."
-      else
-        print_info "Skipped $dir (already empty or minimal content: $(format_bytes $space_before))."
       fi
     fi
   done

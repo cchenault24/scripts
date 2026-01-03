@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_npm_cache() {
-  print_header "Cleaning npm Cache"
-  
   # Phase 4.4: Enhanced dependency check with actionable message
   if ! command -v npm &> /dev/null; then
     print_warning "npm is not installed."
@@ -34,10 +32,16 @@ clean_npm_cache() {
         log_message "ERROR" "Backup failed, aborting npm cache cleanup"
         return 1
       fi
-      npm cache clean --force 2>&1 | log_message "INFO" || {
+      local npm_output
+      npm_output=$(npm cache clean --force 2>&1) || {
         print_error "Failed to clean npm cache"
+        log_message "ERROR" "npm cleanup failed: $npm_output"
         return 1
       }
+      # Log npm output if it contains useful information
+      if [[ -n "$npm_output" ]]; then
+        log_message "INFO" "npm cleanup output: $npm_output"
+      fi
       
       # Manually remove cache files from _cacache directory to actually free disk space
       # npm cache clean --force may only clear the index, not delete files
@@ -93,10 +97,16 @@ clean_npm_cache() {
           return 1
         fi
         
-        yarn cache clean 2>&1 | log_message "INFO" || {
+        local yarn_output
+        yarn_output=$(yarn cache clean 2>&1) || {
           print_error "Failed to clean yarn cache"
+          log_message "ERROR" "yarn cleanup failed: $yarn_output"
           return 1
         }
+        # Log yarn output if it contains useful information
+        if [[ -n "$yarn_output" ]]; then
+          log_message "INFO" "yarn cleanup output: $yarn_output"
+        fi
         
         # Manually remove cache files to actually free disk space
         # yarn cache clean may only clear the index, not delete files

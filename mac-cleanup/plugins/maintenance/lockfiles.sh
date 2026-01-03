@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_pref_lockfiles() {
-  print_header "Cleaning Corrupted Preference Lockfiles"
-  
   local plist_locks=($(find "$HOME/Library/Preferences" -name "*.plist.lockfile" 2>/dev/null))
   local total_space_freed=0
   
@@ -16,8 +14,6 @@ clean_pref_lockfiles() {
     track_space_saved "Corrupted Preference Lockfiles" 0
     return 0
   fi
-  
-  print_info "Found ${#plist_locks[@]} preference lockfiles"
   
   for lock in "${plist_locks[@]}"; do
     local plist_file="${lock%.lockfile}"

@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_temp_files() {
-  print_header "Cleaning Temporary Files"
-  
   local temp_dirs=("/tmp" "$TMPDIR" "$HOME/Library/Application Support/Temp")
   local total_space_freed=0
   
@@ -74,11 +72,7 @@ clean_temp_files() {
             print_warning "Backup failed for empty directory: $temp_dir. Skipping removal."
             log_message "WARNING" "Backup failed for empty directory: $temp_dir"
           fi
-        else
-          print_info "Directory $temp_dir is already empty (no space to free)."
         fi
-      else
-        print_info "No files to clean in $temp_dir (already empty)."
       fi
       continue
     fi
@@ -120,8 +114,6 @@ clean_temp_files() {
     
     if [[ $space_freed -gt 0 ]]; then
       print_success "Cleaned $temp_dir (freed $(format_bytes $space_freed))."
-    else
-      print_info "No files to clean in $temp_dir (already empty)."
     fi
   done
   

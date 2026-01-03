@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_maven_cache() {
-  print_header "Cleaning Maven Cache"
-  
   local maven_repo_dir="$HOME/.m2/repository"
   local total_space_freed=0
   
@@ -44,7 +42,6 @@ clean_maven_cache() {
         log_message "SUCCESS" "Maven repository cleaned (freed $(format_bytes $total_space_freed))"
       fi
     else
-      print_info "Skipping Maven cache cleanup"
       track_space_saved "Maven Cache" 0
     fi
   else

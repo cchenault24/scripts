@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_system_cache() {
-  print_header "Cleaning System Cache"
-  
   print_warning "This operation requires administrative privileges"
   if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to continue?"; then
     local cache_dir="/Library/Caches"
@@ -67,7 +65,6 @@ clean_system_cache() {
       return 0
     fi
   else
-    print_info "Skipping system cache cleanup"
     track_space_saved "System Cache" 0
     return 0
   fi

@@ -6,10 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 flush_dns_cache() {
-  print_header "Flushing DNS Cache"
-  
-  print_info "Flushing DNS Cache..."
-  
   if [[ "$MC_DRY_RUN" == "true" ]]; then
     print_info "[DRY RUN] Would flush DNS cache"
     log_message "DRY_RUN" "Would flush DNS cache"

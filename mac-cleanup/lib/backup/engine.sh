@@ -34,7 +34,7 @@ mc_backup_create() {
   if [[ "$backup_type" == "directory" ]]; then
     local dir_size=$(mc_get_path_size "$path")
     if [[ -n "${MC_MIN_BACKUP_SIZE:-}" && $dir_size -lt $MC_MIN_BACKUP_SIZE ]]; then
-      print_info "Skipping backup of small directory (< $(format_bytes $MC_MIN_BACKUP_SIZE)): $path"
+      # Log silently (don't print to console for small directories)
       log_message "${MC_LOG_LEVEL_INFO:-INFO}" "Skipped backup of small directory: $path ($(format_bytes $dir_size))"
       return 0
     fi

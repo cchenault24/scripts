@@ -6,15 +6,12 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 empty_trash() {
-  print_header "Emptying Trash"
-  
   local trash_dir="$HOME/.Trash"
   
   if [[ -d "$trash_dir" && "$(ls -A "$trash_dir" 2>/dev/null)" ]]; then
     local space_before=$(calculate_size_bytes "$trash_dir")
     print_warning "This will permanently delete all items in your Trash"
-    # In non-interactive mode, skip confirmation and proceed with cleanup
-    if [[ "$MC_DRY_RUN" == "true" ]] || [[ -n "${MC_NON_INTERACTIVE:-}" ]] || mc_confirm "Are you sure you want to empty the Trash?"; then
+    if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to empty the Trash?"; then
       if [[ "$MC_DRY_RUN" == "true" ]]; then
         print_info "[DRY RUN] Would empty Trash ($(format_bytes $space_before))"
         log_message "DRY_RUN" "Would empty Trash"
@@ -44,11 +41,9 @@ empty_trash() {
         log_message "SUCCESS" "Emptied Trash (freed $(format_bytes $space_freed))"
       fi
     else
-      print_info "Skipping Trash cleanup"
       track_space_saved "Empty Trash" 0
     fi
   else
-    print_info "Trash is already empty"
     track_space_saved "Empty Trash" 0
   fi
   

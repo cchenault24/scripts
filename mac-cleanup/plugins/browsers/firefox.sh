@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_firefox_cache() {
-  print_header "Cleaning Firefox Cache"
-  
   local firefox_base="$HOME/Library/Application Support/Firefox"
   local firefox_found=false
   local total_space_freed=0

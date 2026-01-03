@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_edge_cache() {
-  print_header "Cleaning Microsoft Edge Cache"
-  
   local edge_base="$HOME/Library/Application Support/Microsoft Edge"
   local edge_found=false
   local total_space_freed=0

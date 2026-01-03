@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_app_logs() {
-  print_header "Cleaning Application Logs"
-  
   local logs_dir="$HOME/Library/Logs"
   local space_before=$(calculate_size_bytes "$logs_dir")
   
@@ -25,7 +23,6 @@ clean_app_logs() {
   
   # Early exit if no log directories found
   if [[ ${#log_dirs[@]} -eq 0 ]]; then
-    print_info "No log directories found to clean."
     track_space_saved "Application Logs" 0
     return 0
   fi
@@ -63,8 +60,6 @@ clean_app_logs() {
 }
 
 clean_system_logs() {
-  print_header "Cleaning System Logs"
-  
   print_warning "⚠️ CAUTION: System logs can be important for troubleshooting system issues"
   print_warning "Only proceed if you understand the potential consequences"
   
@@ -89,7 +84,6 @@ clean_system_logs() {
     # Non-interactive: user already selected this, so proceed
     # But still show the warning
     print_warning "This operation requires administrative privileges"
-    print_info "Proceeding with system logs cleanup (non-interactive mode)"
     should_proceed=true
   fi
   
@@ -147,8 +141,6 @@ clean_system_logs() {
       
       print_success "System logs cleaned."
     fi
-  else
-    print_info "Skipping system logs cleanup"
   fi
 }
 

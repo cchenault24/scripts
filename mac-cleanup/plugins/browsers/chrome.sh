@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_chrome_cache() {
-  print_header "Cleaning Chrome Cache"
-  
   local chrome_base="$HOME/Library/Application Support/Google/Chrome"
   local chrome_found=false
   local total_space_freed=0

@@ -6,13 +6,10 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_user_cache() {
-  print_header "Cleaning User Cache"
-  
   local cache_dir="$HOME/Library/Caches"
   
   # Early exit for non-existent or empty directories (PERF-6)
   if [[ ! -d "$cache_dir" ]] || [[ -z "$(ls -A "$cache_dir" 2>/dev/null)" ]]; then
-    print_info "User cache directory is empty or doesn't exist."
     track_space_saved "User Cache" 0
     return 0
   fi
@@ -34,7 +31,6 @@ clean_user_cache() {
   
   # Early exit if no cache directories found
   if [[ ${#cache_dirs[@]} -eq 0 ]]; then
-    print_info "No cache directories found to clean."
     track_space_saved "User Cache" 0
     return 0
   fi

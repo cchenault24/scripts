@@ -113,7 +113,7 @@ show_detailed_progress() {
   fi
   
   printf "\r\033[K"
-  printf "\r${CYAN}Cleaning:${NC} %-40s [%s%s] %d%% (%d/%d)" \
+  printf "\r${CYAN}Sweeping:${NC} %-40s [%s%s] %d%% (%d/%d)" \
     "$display_op" \
     "$(printf "%${filled}s" | tr ' ' '=')" \
     "$(printf "%${empty}s" | tr ' ' ' ')" \

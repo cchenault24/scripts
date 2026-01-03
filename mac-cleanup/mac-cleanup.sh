@@ -9,8 +9,6 @@
 # License: MIT
 #
 
-set -euo pipefail  # Exit on error, undefined vars, pipe failures
-
 # Ensure PATH includes standard system directories
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
 
@@ -574,7 +572,7 @@ parse_arguments() {
         ;;
       --undo)
         source "$SCRIPT_DIR/features/undo.sh"
-        mc_undo_cleanup
+        undo_cleanup
         exit $?
         ;;
       --schedule)
@@ -617,8 +615,8 @@ main() {
   # Set up traps
   mc_setup_traps
   
-  # Phase 5: Check platform compatibility (macOS version, architecture, zsh, dependencies)
-  mc_check_platform_compatibility
+  # Check dependencies
+  mc_check_dependencies
   
   # Check for selection tool (fzf required) and install if needed
   mc_check_selection_tool
@@ -686,46 +684,32 @@ main() {
   fi
   
   echo ""
-  # Phase 4.1: Prompt user to proceed with better non-interactive handling
-  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+  # Prompt user to proceed
+  if [[ -t 0 ]]; then
     local response
-    # Phase 4.1: Use timeout to prevent hanging in edge cases
-    if read -t 30 -q "?Press 'y' to begin cleanup, 'n' to exit: " response 2>/dev/null; then
-      echo ""
-      
-      if [[ "$response" != "y" && "$response" != "Y" ]]; then
-        # User chose to exit - kill sweep if still running
-        if [[ -n "$sweep_pid" ]]; then
-          kill $sweep_pid 2>/dev/null || true
-          wait $sweep_pid 2>/dev/null || true
-        fi
-        rm -f "$sweep_file" 2>/dev/null || true
-        print_info "Exiting. Goodbye!"
-        exit 0
+    read -q "?Press 'y' to begin cleanup, 'n' to exit: " response
+    echo ""
+    
+    if [[ "$response" != "y" && "$response" != "Y" ]]; then
+      # User chose to exit - kill sweep if still running
+      if [[ -n "$sweep_pid" ]]; then
+        kill $sweep_pid 2>/dev/null || true
+        wait $sweep_pid 2>/dev/null || true
       fi
-    else
-      # Phase 4.1: Timeout or read failed - check if non-interactive mode should be enabled
-      echo ""
-      if [[ -n "${MC_NON_INTERACTIVE:-}" ]] || [[ "${MC_NON_INTERACTIVE:-}" == "true" ]]; then
-        print_info "Non-interactive mode: proceeding automatically"
-      else
-        print_warning "Input timeout. Assuming non-interactive mode and proceeding."
-        export MC_NON_INTERACTIVE=true
-      fi
+      rm -f "$sweep_file" 2>/dev/null || true
+      print_info "Exiting. Goodbye!"
+      exit 0
     fi
   else
-    # Phase 4.1: Non-interactive mode - proceed automatically
-    if [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
-      export MC_NON_INTERACTIVE=true
-    fi
+    # Non-interactive mode - proceed automatically
     print_info "Non-interactive mode: proceeding automatically"
   fi
   
   # Wait for sweep to complete if still running
   if [[ -n "$sweep_pid" ]]; then
-    print_info "Scanning for cleanup opportunities..."
+    print_info "Sweeping up files into a pile..."
     wait $sweep_pid 2>/dev/null || true
-    print_success "Scan complete!"
+    print_success "All swept up into a neat pile!"
     echo ""
   fi
   
@@ -769,7 +753,7 @@ main() {
     if [[ ${#plugin_array[@]} -gt 0 ]]; then
       local missing_count=$((${#plugin_array[@]} - ${#plugin_sizes_bytes[@]}))
       if [[ $missing_count -gt 0 ]]; then
-        print_info "Calculating sizes for $missing_count plugins..."
+        print_info "Measuring the pile for $missing_count areas..."
       fi
     fi
     
@@ -931,24 +915,19 @@ main() {
     fi
   done
   
-  # Phase 4.4: Check if we have categories with better messaging
+  # Check if we have categories
   if [[ ${#category_list[@]} -eq 0 ]]; then
-    print_info "No cleanup options available!"
-    print_info "No categories with cleanup opportunities found."
-    print_info "This could mean:"
-    print_info "  • Your system is already clean (all caches are empty)"
-    print_info "  • No plugins found files to clean"
-    print_info "  • All cleanup targets have zero size"
+    print_info "Nothing to sweep up - your system is already spotless!"
+    print_info "All the rooms are tidy and there's no dust to be found."
     echo ""
-    print_info "Found ${#plugin_array[@]} plugin(s), but none have files to clean."
-    print_info "This is normal if you've recently cleaned your system or have minimal cache usage."
+    print_info "Checked ${#plugin_array[@]} areas, but everything's already clean."
     mc_cleanup_selection_tool
     exit 0
   fi
   
   # Category selection menu
   echo ""
-  print_info "Please select cleanup categories:"
+  print_info "Which rooms need sweeping?"
   if [[ "$MC_SELECTION_TOOL" == "fzf" ]]; then
     print_info "(Use Space to select, Ctrl-A to select all, Enter to confirm)"
   fi
@@ -988,7 +967,7 @@ main() {
   
   # Check if any categories were selected
   if [[ ${#selected_category_display[@]} -eq 0 ]]; then
-    print_warning "No categories selected. Exiting."
+    print_warning "No rooms selected for sweeping. Exiting."
     mc_cleanup_selection_tool
     exit 0
   fi
@@ -1038,7 +1017,7 @@ main() {
   
   # Plugin selection menu
   echo ""
-  print_info "Please select specific cleanup operations:"
+  print_info "What would you like to sweep up?"
   if [[ "$MC_SELECTION_TOOL" == "fzf" ]]; then
     print_info "(Use Space to select, Ctrl-A to select all, Enter to confirm)"
   fi
@@ -1058,11 +1037,9 @@ main() {
     fi
   done
   
-  # Phase 4.4: Check if we have plugins to show with better messaging
+  # Check if we have plugins to show
   if [[ ${#plugin_option_list[@]} -eq 0 ]]; then
-    print_info "No plugins with cleanup opportunities in selected categories."
-    print_info "This means all selected cleanup targets are already empty or have no data to clean."
-    print_info "Try selecting different categories or check back later after using your system."
+    print_warning "Nothing to sweep up in those areas - already spotless!"
     mc_cleanup_selection_tool
     exit 0
   fi
@@ -1127,7 +1104,7 @@ main() {
   
   # Show final selection
   echo ""
-  print_info "Selected cleanup operations:"
+  print_info "Ready to sweep up these areas:"
   for plugin in "${selected_options[@]}"; do
     print_message "$CYAN" "  - $plugin"
     log_message "INFO" "Selected plugin: $plugin"
@@ -1135,7 +1112,7 @@ main() {
   
   # Execute selected cleanup operations
   echo ""
-  print_info "Starting cleanup operations..."
+  print_info "Time to sweep up! Getting the broom ready..."
   
   # Create temp files for cleanup output, progress tracking, and space tracking
   local cleanup_output_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-$$.tmp"
@@ -1153,6 +1130,7 @@ main() {
   (
     # Source required libraries in subshell to ensure functions are available
     # Functions should be inherited in zsh, but explicitly sourcing ensures availability
+    
     [[ -f "$SCRIPT_DIR/lib/constants.sh" ]] && source "$SCRIPT_DIR/lib/constants.sh" 2>&1 || true
     [[ -f "$SCRIPT_DIR/lib/core.sh" ]] && source "$SCRIPT_DIR/lib/core.sh" 2>&1 || true
     [[ -f "$SCRIPT_DIR/lib/ui.sh" ]] && source "$SCRIPT_DIR/lib/ui.sh" 2>&1 || true
@@ -1160,7 +1138,10 @@ main() {
     [[ -f "$SCRIPT_DIR/lib/admin.sh" ]] && source "$SCRIPT_DIR/lib/admin.sh" 2>&1 || true
     
     if [[ -f "$SCRIPT_DIR/lib/backup.sh" ]]; then
-      source "$SCRIPT_DIR/lib/backup.sh" 2>&1 || true
+      # Source backup.sh and capture any errors
+      local source_output=""
+      source_output=$(source "$SCRIPT_DIR/lib/backup.sh" 2>&1)
+      local source_exit=$?
     fi
     
     [[ -f "$SCRIPT_DIR/lib/validation.sh" ]] && source "$SCRIPT_DIR/lib/validation.sh" 2>&1 || true
@@ -1170,6 +1151,7 @@ main() {
     # Re-register plugins in subshell since plugin registry is not inherited
     # The plugin registry is an associative array that doesn't persist across subshells
     # We need to reload plugins to rebuild the registry
+    
     load_plugins
     
     export MC_NON_INTERACTIVE=true
@@ -1184,21 +1166,17 @@ main() {
       
       local function=$(mc_get_plugin_function "$option")
       
-      # Phase 4.3: Check if function exists - if not, it means the plugin file wasn't sourced properly
+      # Check if function exists - if not, it means the plugin file wasn't sourced properly
       if [[ -z "$function" ]]; then
-        print_error "Plugin function not found for: $option" >> "$cleanup_output_file"
-        print_info "This plugin may not be properly installed or loaded." >> "$cleanup_output_file"
-        print_info "Check the log file for details: $MC_LOG_FILE" >> "$cleanup_output_file"
+        print_error "Plugin function not found or invalid: $function (for plugin: $option)" >> "$cleanup_output_file"
         log_message "ERROR" "Plugin function not found: $function (for plugin: $option)"
         _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
         continue
       fi
       
-      # Phase 4.3: Verify function actually exists (not just registered)
+      # Verify function actually exists (not just registered)
       if ! type "$function" &>/dev/null; then
-        print_error "Plugin function '$function' is registered but not defined for: $option" >> "$cleanup_output_file"
-        print_info "This indicates a plugin configuration issue." >> "$cleanup_output_file"
-        print_info "Check the log file for details: $MC_LOG_FILE" >> "$cleanup_output_file"
+        print_error "Plugin function '$function' is registered but not defined (for plugin: $option)" >> "$cleanup_output_file"
         log_message "ERROR" "Plugin function '$function' registered but not available (for plugin: $option)"
         _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
         continue
@@ -1220,11 +1198,9 @@ main() {
           waited=$((waited + 1))
         done
         
-        # Phase 4.3: If still running after timeout, kill it with better error message
+        # If still running after timeout, kill it
         if kill -0 $func_pid 2>/dev/null; then
-          print_error "Plugin '$option' timed out after $plugin_timeout seconds" >> "$cleanup_output_file"
-          print_info "This may indicate the plugin is processing a large amount of data." >> "$cleanup_output_file"
-          print_info "The plugin has been stopped to prevent hanging. Check the log for details." >> "$cleanup_output_file"
+          print_error "Plugin $option timed out after $plugin_timeout seconds" >> "$cleanup_output_file"
           log_message "ERROR" "Plugin $option timed out after $plugin_timeout seconds"
           kill -TERM $func_pid 2>/dev/null || true
           sleep 2
@@ -1232,12 +1208,11 @@ main() {
           kill -KILL $func_pid 2>/dev/null || true
           wait $func_pid 2>/dev/null || true
         else
-          # Phase 4.3: Function completed, wait for it to get exit code with better error message
+          # Function completed, wait for it to get exit code
           wait $func_pid 2>/dev/null || {
             local exit_code=$?
             if [[ $exit_code -ne 0 ]]; then
-              print_error "Plugin '$option' failed with exit code $exit_code" >> "$cleanup_output_file"
-              print_info "Check the log file for detailed error information: $MC_LOG_FILE" >> "$cleanup_output_file"
+              print_error "Plugin $option failed with exit code $exit_code" >> "$cleanup_output_file"
               log_message "ERROR" "Plugin $option failed with exit code $exit_code"
             fi
           }
@@ -1282,13 +1257,13 @@ main() {
     # Show initial progress state (0%)
     if [[ "$use_progress_bar" == "true" ]]; then
       local initial_bar=$(printf "%40s" | /usr/bin/tr ' ' '░' 2>/dev/null || printf "%40s" | sed 's/ /░/g')
-      printf '\r\033[K%b[0/%d] Starting... %s 0%%%b' \
+      printf '\r\033[K%b[0/%d] Grabbing the broom... %s 0%%%b' \
         "$cyan_code" \
         "$total_operations" \
         "$initial_bar" \
         "$reset_code" >&2
     else
-      printf '\r[0/%d] Starting... 0%%' "$total_operations" >&2
+      printf '\r[0/%d] Grabbing the broom... 0%%' "$total_operations" >&2
     fi
     
     # Track last displayed operation to avoid redundant updates
@@ -1485,7 +1460,7 @@ main() {
   
   # Show summary
   echo ""
-  print_header "Cleanup Summary"
+  print_header "Sweep Summary"
   
   # Sync globals for final summary
   sync_globals
@@ -1506,7 +1481,7 @@ main() {
   
   # Display success message with space saved
   if [[ $MC_TOTAL_SPACE_SAVED -gt 0 ]]; then
-    print_success "Cleanup completed successfully! Cleaned up $(format_bytes $MC_TOTAL_SPACE_SAVED)!"
+    print_success "All swept up! Freed $(format_bytes $MC_TOTAL_SPACE_SAVED) of space!"
     log_message "INFO" "Total space freed: $(format_bytes $MC_TOTAL_SPACE_SAVED)"
   fi
   
@@ -1524,10 +1499,10 @@ main() {
     fi
   else
     if [[ "$MC_DRY_RUN" == "true" ]]; then
-      print_info "No space was freed (dry-run mode - no changes were made)"
+      print_info "No space swept up (dry-run mode - just checking what's there)"
     else
-      print_info "No space was freed - selected directories were already empty or contained minimal data."
-      print_info "See details above for specific information about each directory."
+      print_info "Nothing to sweep up - everything was already tidy!"
+      print_info "Your system is already clean as a whistle."
     fi
   fi
   

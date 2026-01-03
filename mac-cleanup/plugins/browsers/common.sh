@@ -22,8 +22,6 @@ clean_browser_cache_common() {
   local cache_backup_name="$5"
   local profile_backup_prefix="$6"
   
-  print_header "Cleaning ${browser_name} Cache"
-  
   local browser_found=false
   local total_space_freed=0
   

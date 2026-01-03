@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_docker_cache() {
-  print_header "Cleaning Docker Cache"
-  
   if ! command -v docker &> /dev/null; then
     print_warning "Docker is not installed."
     return
@@ -27,7 +25,6 @@ clean_docker_cache() {
       print_info "[DRY RUN] Would run: docker system prune -a --volumes -f"
       log_message "DRY_RUN" "Would clean Docker cache"
     else
-      print_info "Cleaning Docker cache (this may take a while)..."
       log_message "INFO" "Starting Docker cleanup"
       
       # Get disk usage before (parse docker system df output)
@@ -80,7 +77,6 @@ clean_docker_cache() {
       
       # Attempt backup if Docker data directory is accessible (may be very large)
       if [[ -n "$docker_data_dir" ]]; then
-        print_info "Backing up Docker data directory (this may take a while and use significant space)..."
         if ! backup "$docker_data_dir" "docker_data"; then
           print_warning "Backup failed for Docker data directory. Docker cleanup will proceed, but restore may not be possible."
           print_warning "Docker images can be restored by re-pulling them."
@@ -94,10 +90,16 @@ clean_docker_cache() {
       fi
       
       # Clean unused data
-      docker system prune -a --volumes -f 2>&1 | log_message "INFO" || {
+      local docker_output
+      docker_output=$(docker system prune -a --volumes -f 2>&1) || {
         print_error "Failed to clean Docker cache"
+        log_message "ERROR" "Docker cleanup failed: $docker_output"
         return 1
       }
+      # Log docker output if it contains useful information
+      if [[ -n "$docker_output" ]]; then
+        log_message "INFO" "Docker cleanup output: $docker_output"
+      fi
       
       # Get disk usage after
       local docker_size_after=0
@@ -143,7 +145,6 @@ clean_docker_cache() {
       return 0
     fi
   else
-    print_info "Skipping Docker cache cleanup"
     track_space_saved "Docker Cache" 0
     return 0
   fi

@@ -291,8 +291,9 @@ mc_manifest_validate() {
   fi
   
   # Check for balanced braces (basic check)
-  local open_braces=$(grep -o '{' "$manifest_path" 2>/dev/null | wc -l | tr -d ' ')
-  local close_braces=$(grep -o '}' "$manifest_path" 2>/dev/null | wc -l | tr -d ' ')
+  # Use full paths to ensure commands are available
+  local open_braces=$(grep -o '{' "$manifest_path" 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d ' ' 2>/dev/null || echo "0")
+  local close_braces=$(grep -o '}' "$manifest_path" 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d ' ' 2>/dev/null || echo "0")
   
   if [[ "$open_braces" != "$close_braces" ]]; then
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Manifest has unbalanced braces"

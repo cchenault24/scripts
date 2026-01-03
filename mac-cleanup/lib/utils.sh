@@ -216,8 +216,8 @@ update_operation_progress() {
 # Log message to file if logging is enabled
 # QUAL-14: Standardized logging levels
 log_message() {
-  local level="$1"
-  local message="$2"
+  local level="${1:-INFO}"
+  local message="${2:-}"
   
   # QUAL-14: Standardize log levels - normalize to uppercase
   # Use /usr/bin/tr to ensure it's available
@@ -486,8 +486,14 @@ safe_remove() {
   
   # Phase 4.4: Handle empty directories gracefully
   if [[ -d "$path" ]]; then
-    local item_count=$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
-    if [[ "${item_count:-0}" -eq 0 ]]; then
+    # Use full paths to ensure commands are available
+    # wc -l outputs number with leading spaces and newline, use awk to extract just the number
+    local item_count=$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null | /usr/bin/wc -l 2>/dev/null | /usr/bin/awk '{print $1+0}' 2>/dev/null || echo "0")
+    # Ensure it's numeric - awk should handle this, but double-check
+    if [[ -z "$item_count" || ! "$item_count" =~ ^[0-9]+$ ]]; then
+      item_count=0
+    fi
+    if [[ $item_count -eq 0 ]]; then
       log_message "INFO" "Directory is empty, skipping: $path"
       return 0
     fi
@@ -594,8 +600,20 @@ safe_clean_dir() {
   fi
   
   # Phase 4.4: Handle empty directories gracefully
-  local item_count=$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
-  if [[ "${item_count:-0}" -eq 0 ]]; then
+  # Use full paths to ensure commands are available
+  # Get item count and ensure it's a clean numeric value
+  # wc -l outputs number with leading spaces and newline (e.g., "       0\n")
+  # Use awk to extract just the number, or default to 0
+  local find_output=$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null)
+  local item_count_raw=$(echo "$find_output" | /usr/bin/wc -l 2>/dev/null || echo "0")
+  local item_count=$(echo "$item_count_raw" | /usr/bin/awk '{print $1+0}' 2>/dev/null || echo "0")
+  # Ensure it's numeric - convert to integer explicitly
+  item_count=$((item_count + 0))
+  # Check directory size instead of item count - directories can have size even if find doesn't work
+  local dir_size=$(calculate_size_bytes "$path" 2>/dev/null || echo "0")
+  dir_size=$((dir_size + 0))
+  # Skip only if both item_count is 0 AND directory size is 0
+  if [[ $item_count -eq 0 && $dir_size -eq 0 ]]; then
     log_message "INFO" "Directory is empty, skipping: $path"
     return 0
   fi
@@ -667,6 +685,11 @@ safe_clean_dir() {
       for item in "$path"/*(N) "$path"/.*(N); do
         if [[ -e "$item" && "$item" != "$path/." && "$item" != "$path/.." && -L "$item" ]]; then
           local item_size=$(/usr/bin/du -sk "$item" 2>/dev/null | /usr/bin/awk '{print $1}' 2>/dev/null || echo "0")
+          # Ensure item_size is numeric - remove all whitespace and validate
+          item_size=$(echo -n "$item_size" | /usr/bin/tr -d '[:space:]' 2>/dev/null || echo "0")
+          if [[ -z "$item_size" || ! "$item_size" =~ ^[0-9]+$ ]]; then
+            item_size=0
+          fi
           if /bin/rm -f "$item" 2>/dev/null; then
             if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
               actual_space_freed=$((actual_space_freed + item_size * 1024))
@@ -678,6 +701,11 @@ safe_clean_dir() {
       for item in "$path"/*(N) "$path"/.*(N); do
         if [[ -e "$item" && "$item" != "$path/." && "$item" != "$path/.." && ! -L "$item" ]]; then
           local item_size=$(/usr/bin/du -sk "$item" 2>/dev/null | /usr/bin/awk '{print $1}' 2>/dev/null || echo "0")
+          # Ensure item_size is numeric - remove all whitespace and validate
+          item_size=$(echo -n "$item_size" | /usr/bin/tr -d '[:space:]' 2>/dev/null || echo "0")
+          if [[ -z "$item_size" || ! "$item_size" =~ ^[0-9]+$ ]]; then
+            item_size=0
+          fi
           if /bin/rm -rf "$item" 2>/dev/null; then
             if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
               actual_space_freed=$((actual_space_freed + item_size * 1024))

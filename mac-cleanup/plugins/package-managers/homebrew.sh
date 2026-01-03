@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_homebrew_cache() {
-  print_header "Cleaning Homebrew Cache"
-  
   if ! command -v brew &> /dev/null; then
     print_warning "Homebrew is not installed."
     print_info "To install Homebrew: Visit https://brew.sh or run: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
@@ -52,13 +50,19 @@ clean_homebrew_cache() {
       fi
     fi
     
-    print_info "Cleaning Homebrew cache..."
     log_message "INFO" "Cleaning Homebrew cache"
     
-    brew cleanup -s 2>&1 | log_message "INFO" || {
+    # Run brew cleanup and capture output for logging
+    local brew_output
+    brew_output=$(brew cleanup -s 2>&1) || {
       print_error "Failed to clean Homebrew cache"
+      log_message "ERROR" "Homebrew cleanup failed: $brew_output"
       return 1
     }
+    # Log brew output if it contains useful information
+    if [[ -n "$brew_output" ]]; then
+      log_message "INFO" "Homebrew cleanup output: $brew_output"
+    fi
     
     local space_after=0
     for cache_dir in "${brew_cache_dirs[@]}"; do

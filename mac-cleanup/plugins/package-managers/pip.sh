@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_pip_cache() {
-  print_header "Cleaning pip Cache"
-  
   if ! command -v pip &> /dev/null && ! command -v pip3 &> /dev/null; then
     print_warning "pip is not installed."
   print_info "To install pip: Install Python from https://python.org or use: brew install python"
@@ -34,10 +32,16 @@ clean_pip_cache() {
         log_message "ERROR" "Backup failed, aborting pip cache cleanup"
         return 1
       fi
-      $pip_cmd cache purge 2>&1 | log_message "INFO" || {
+      local pip_output
+      pip_output=$($pip_cmd cache purge 2>&1) || {
         print_error "Failed to clean pip cache"
+        log_message "ERROR" "pip cleanup failed: $pip_output"
         return 1
       }
+      # Log pip output if it contains useful information
+      if [[ -n "$pip_output" ]]; then
+        log_message "INFO" "pip cleanup output: $pip_output"
+      fi
       
       local space_after=$(calculate_size_bytes "$pip_cache_dir")
       total_space_freed=$((space_before - space_after))

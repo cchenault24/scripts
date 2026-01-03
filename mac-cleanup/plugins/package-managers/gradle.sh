@@ -6,8 +6,6 @@
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
 clean_gradle_cache() {
-  print_header "Cleaning Gradle Cache"
-  
   local gradle_cache_dir="$HOME/.gradle/caches"
   local gradle_wrapper_dir="$HOME/.gradle/wrapper"
   local total_space_freed=0
