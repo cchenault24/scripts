@@ -33,6 +33,24 @@ clean_homebrew_cache() {
     track_space_saved "Homebrew Cache" 0
     return 0
   else
+    # Find the actual cache directory to backup
+    local cache_dir_to_backup=""
+    for cache_dir in "${brew_cache_dirs[@]}"; do
+      if [[ -d "$cache_dir" ]]; then
+        cache_dir_to_backup="$cache_dir"
+        break
+      fi
+    done
+    
+    # Backup cache directory before cleanup
+    if [[ -n "$cache_dir_to_backup" ]]; then
+      if ! backup "$cache_dir_to_backup" "homebrew_cache"; then
+        print_error "Backup failed for Homebrew cache. Aborting cleanup to prevent data loss."
+        log_message "ERROR" "Backup failed, aborting Homebrew cache cleanup"
+        return 1
+      fi
+    fi
+    
     print_info "Cleaning Homebrew cache..."
     log_message "INFO" "Cleaning Homebrew cache"
     

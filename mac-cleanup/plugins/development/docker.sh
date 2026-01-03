@@ -66,6 +66,33 @@ clean_docker_cache() {
         done <<< "$docker_df_before"
       fi
       
+      # Note: Docker data is managed internally by Docker and stored in Docker's data directory.
+      # Backing up Docker's entire data directory would be extremely large (potentially 100GB+).
+      # Docker has its own mechanisms for managing images/containers, and users can restore
+      # by re-pulling images. However, for Phase 3 compliance, we attempt to backup Docker's
+      # data directory if it exists and is accessible.
+      local docker_data_dir=""
+      if [[ -d "$HOME/Library/Containers/com.docker.docker/Data" ]]; then
+        docker_data_dir="$HOME/Library/Containers/com.docker.docker/Data"
+      elif [[ -d "/var/lib/docker" ]] && [[ -w "/var/lib/docker" ]]; then
+        docker_data_dir="/var/lib/docker"
+      fi
+      
+      # Attempt backup if Docker data directory is accessible (may be very large)
+      if [[ -n "$docker_data_dir" ]]; then
+        print_info "Backing up Docker data directory (this may take a while and use significant space)..."
+        if ! backup "$docker_data_dir" "docker_data"; then
+          print_warning "Backup failed for Docker data directory. Docker cleanup will proceed, but restore may not be possible."
+          print_warning "Docker images can be restored by re-pulling them."
+          log_message "WARNING" "Backup failed for Docker data directory, proceeding with cleanup"
+          # Don't abort - Docker cleanup can proceed without backup (images can be re-pulled)
+        fi
+      else
+        print_warning "Docker data directory not accessible for backup. Docker cleanup will proceed."
+        print_warning "Docker images can be restored by re-pulling them."
+        log_message "WARNING" "Docker data directory not accessible for backup"
+      fi
+      
       # Clean unused data
       docker system prune -a --volumes -f 2>&1 | log_message "INFO" || {
         print_error "Failed to clean Docker cache"

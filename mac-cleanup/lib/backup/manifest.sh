@@ -114,7 +114,8 @@ mc_manifest_add() {
   # Use awk to insert entry before closing bracket of backups array
   # Use here-document to avoid shell quoting issues
   # Use /usr/bin/awk to ensure it's available
-  if ! /usr/bin/awk -v entry_file="$entry_file" <<'AWK_SCRIPT'
+  local awk_succeeded=false
+  if /usr/bin/awk -v entry_file="$entry_file" <<'AWK_SCRIPT'
     BEGIN { 
       found=0
       inserted=0
@@ -164,8 +165,14 @@ mc_manifest_add() {
     }
 AWK_SCRIPT
   "$manifest_path" > "$temp_manifest" 2>/dev/null; then
-    # Clean up entry file
-    rm -f "$entry_file" 2>/dev/null
+    # Verify awk output is valid (not empty and contains expected structure)
+    if [[ -s "$temp_manifest" ]] && grep -q '"backups"' "$temp_manifest" 2>/dev/null; then
+      awk_succeeded=true
+    fi
+  fi
+  
+  # If awk failed or produced invalid output, use fallback method
+  if [[ "$awk_succeeded" != "true" ]]; then
     # Fallback: simple method - remove last 2 lines, add entry, re-add closing
     {
       # Remove closing bracket lines
