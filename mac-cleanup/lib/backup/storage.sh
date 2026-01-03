@@ -65,14 +65,7 @@ mc_storage_check_space() {
 mc_storage_ensure_dir() {
   local backup_dir="$1"
   
-  # #region agent log
-  echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:63\",\"message\":\"mc_storage_ensure_dir() called\",\"data\":{\"backup_dir\":\"$backup_dir\",\"dir_exists\":\"$([ -d \"$backup_dir\" ] && echo 'yes' || echo 'no')\",\"parent_exists\":\"$([ -d \"$(dirname \"$backup_dir\" 2>/dev/null || echo '.')\" ] && echo 'yes' || echo 'no')\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-  # #endregion
-  
   if [[ -z "$backup_dir" ]]; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"storage.sh:66\",\"message\":\"backup_dir is empty\",\"data\":{},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     print_error "Backup directory path is empty" >&2
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "mc_storage_ensure_dir: backup_dir is empty"
     return 1
@@ -83,46 +76,20 @@ mc_storage_ensure_dir() {
     # Ensure parent directory exists first (mkdir -p should handle this, but be explicit)
     local parent_dir=$(dirname "$backup_dir" 2>/dev/null)
     if [[ -n "$parent_dir" && "$parent_dir" != "." && "$parent_dir" != "/" && ! -d "$parent_dir" ]]; then
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:73\",\"message\":\"Creating parent directory\",\"data\":{\"parent_dir\":\"$parent_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
-      mkdir -p "$parent_dir" 2>/dev/null || {
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:76\",\"message\":\"Failed to create parent directory\",\"data\":{\"parent_dir\":\"$parent_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
-      }
+      mkdir -p "$parent_dir" 2>/dev/null || true
     fi
     
-    # #region agent log
-    local mkdir_error=""
-    mkdir -p "$backup_dir" 2> /tmp/mkdir_error_$$.txt || mkdir_error=$(cat /tmp/mkdir_error_$$.txt 2>/dev/null || echo "unknown error")
-    local mkdir_exit=$?
-    rm -f /tmp/mkdir_error_$$.txt 2>/dev/null || true
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:84\",\"message\":\"mkdir -p attempted\",\"data\":{\"backup_dir\":\"$backup_dir\",\"mkdir_exit\":\"$mkdir_exit\",\"error\":\"$mkdir_error\",\"parent_exists\":\"$([ -d \"$parent_dir\" ] && echo 'yes' || echo 'no')\",\"parent_writable\":\"$([ -w \"$parent_dir\" ] && echo 'yes' || echo 'no')\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    if [[ $mkdir_exit -ne 0 ]]; then
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:75\",\"message\":\"mkdir -p failed\",\"data\":{\"backup_dir\":\"$backup_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
+    if ! mkdir -p "$backup_dir" 2>/dev/null; then
       print_error "Failed to create backup directory: $backup_dir" >&2
       log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Failed to create backup directory: $backup_dir"
       
       # Try fallback location
       local fallback_dir="${MC_BACKUP_FALLBACK_DIR:-/tmp/mac-cleanup-backups}/$(/bin/date +%Y-%m-%d-%H-%M-%S 2>/dev/null || echo 'backup')"
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:79\",\"message\":\"Trying fallback\",\"data\":{\"fallback_dir\":\"$fallback_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
       print_info "Attempting fallback location: $fallback_dir" >&2
       if mkdir -p "$fallback_dir" 2>/dev/null; then
         backup_dir="$fallback_dir"
         log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Using fallback backup directory: $backup_dir"
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:82\",\"message\":\"Fallback succeeded\",\"data\":{\"backup_dir\":\"$backup_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
       else
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:85\",\"message\":\"Fallback also failed\",\"data\":{\"fallback_dir\":\"$fallback_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
         return 1
       fi
     fi
@@ -130,18 +97,12 @@ mc_storage_ensure_dir() {
   
   # Verify directory is writable
   if [[ ! -w "$backup_dir" ]]; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"F\",\"location\":\"storage.sh:91\",\"message\":\"Directory not writable\",\"data\":{\"backup_dir\":\"$backup_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     print_error "Backup directory is not writable: $backup_dir" >&2
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Backup directory not writable: $backup_dir"
     return 1
   fi
   
   # Return the validated directory path to stdout (for command substitution)
-  # #region agent log
-  echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"E\",\"location\":\"storage.sh:97\",\"message\":\"mc_storage_ensure_dir() returning success\",\"data\":{\"backup_dir\":\"$backup_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-  # #endregion
   echo "$backup_dir"
   return 0
 }

@@ -110,10 +110,6 @@ _load_backup_modules() {
 
 # Initialize backup system (called from core.sh)
 mc_backup_init() {
-  # #region agent log
-  echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"backup.sh:110\",\"message\":\"mc_backup_init() called\",\"data\":{\"MC_BACKUP_DIR\":\"${MC_BACKUP_DIR:-empty}\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-  # #endregion
-  
   # Load modules
   if ! _load_backup_modules; then
     return 1
@@ -145,14 +141,8 @@ mc_backup_init() {
   fi
   
   # Ensure backup directory exists
-  # #region agent log
-  echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"backup.sh:142\",\"message\":\"Before mc_storage_ensure_dir\",\"data\":{\"MC_BACKUP_DIR\":\"$MC_BACKUP_DIR\",\"dir_exists\":\"$([ -d \"$MC_BACKUP_DIR\" ] && echo 'yes' || echo 'no')\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-  # #endregion
   local backup_dir=$(mc_storage_ensure_dir "$MC_BACKUP_DIR")
   local ensure_exit=$?
-  # #region agent log
-  echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\",\"location\":\"backup.sh:144\",\"message\":\"After mc_storage_ensure_dir\",\"data\":{\"backup_dir\":\"$backup_dir\",\"exit_code\":\"$ensure_exit\",\"is_empty\":\"$([ -z \"$backup_dir\" ] && echo 'yes' || echo 'no')\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-  # #endregion
   if [[ -z "$backup_dir" ]]; then
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Failed to ensure backup directory"
     return 1

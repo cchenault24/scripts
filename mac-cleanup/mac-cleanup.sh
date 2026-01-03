@@ -101,22 +101,11 @@ load_plugins() {
     for plugin_file in "$plugins_dir/system"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
         local plugin_name=$(basename "$plugin_file" .sh)
-        # #region agent log
-        local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-        echo "{\"id\":\"log_${log_timestamp}_before_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:98\",\"message\":\"Before sourcing plugin\",\"data\":{\"plugin_file\":\"$plugin_file\",\"plugin_name\":\"$plugin_name\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"I\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-        # #endregion
         
         if ! source "$plugin_file" 2>&1; then
           print_error "Failed to load plugin: $plugin_file"
           log_message "ERROR" "Plugin load failure: $plugin_file"
           load_errors=$((load_errors + 1))
-        else
-          # #region agent log
-          log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-          # Check if a function matching the plugin name exists (e.g., clean_user_cache for user_cache)
-          local expected_function="clean_${plugin_name}"
-          echo "{\"id\":\"log_${log_timestamp}_after_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:107\",\"message\":\"After sourcing plugin\",\"data\":{\"plugin_file\":\"$plugin_file\",\"plugin_name\":\"$plugin_name\",\"expected_function\":\"$expected_function\",\"function_exists\":\"$(type \"$expected_function\" &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"I\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-          # #endregion
         fi
       fi
     done
@@ -1164,32 +1153,14 @@ main() {
   (
     # Source required libraries in subshell to ensure functions are available
     # Functions should be inherited in zsh, but explicitly sourcing ensures availability
-    # #region agent log
-    local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-    echo "{\"id\":\"log_${log_timestamp}_before_sourcing_libs\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1123\",\"message\":\"Before sourcing libraries\",\"data\":{\"backup_exists_before\":\"$(type backup &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"J\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-    # #endregion
-    
     [[ -f "$SCRIPT_DIR/lib/constants.sh" ]] && source "$SCRIPT_DIR/lib/constants.sh" 2>&1 || true
     [[ -f "$SCRIPT_DIR/lib/core.sh" ]] && source "$SCRIPT_DIR/lib/core.sh" 2>&1 || true
     [[ -f "$SCRIPT_DIR/lib/ui.sh" ]] && source "$SCRIPT_DIR/lib/ui.sh" 2>&1 || true
     [[ -f "$SCRIPT_DIR/lib/utils.sh" ]] && source "$SCRIPT_DIR/lib/utils.sh" 2>&1 || true
     [[ -f "$SCRIPT_DIR/lib/admin.sh" ]] && source "$SCRIPT_DIR/lib/admin.sh" 2>&1 || true
     
-    # #region agent log
-    log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-    echo "{\"id\":\"log_${log_timestamp}_before_backup_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1130\",\"message\":\"Before sourcing backup.sh\",\"data\":{\"backup_file_exists\":\"$([[ -f $SCRIPT_DIR/lib/backup.sh ]] && echo true || echo false)\",\"backup_exists\":\"$(type backup &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"J\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-    # #endregion
-    
     if [[ -f "$SCRIPT_DIR/lib/backup.sh" ]]; then
-      # Source backup.sh and capture any errors
-      local source_output=""
-      source_output=$(source "$SCRIPT_DIR/lib/backup.sh" 2>&1)
-      local source_exit=$?
-      
-      # #region agent log
-      log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-      echo "{\"id\":\"log_${log_timestamp}_after_backup_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1135\",\"message\":\"After sourcing backup.sh\",\"data\":{\"source_exit\":\"$source_exit\",\"backup_exists\":\"$(type backup &>/dev/null && echo true || echo false)\",\"backup_type\":\"$(type backup 2>&1 | head -1 || echo \"not found\")\",\"source_output_length\":\"${#source_output}\",\"source_output\":\"$source_output\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"J\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-      # #endregion
+      source "$SCRIPT_DIR/lib/backup.sh" 2>&1 || true
     fi
     
     [[ -f "$SCRIPT_DIR/lib/validation.sh" ]] && source "$SCRIPT_DIR/lib/validation.sh" 2>&1 || true
@@ -1199,18 +1170,7 @@ main() {
     # Re-register plugins in subshell since plugin registry is not inherited
     # The plugin registry is an associative array that doesn't persist across subshells
     # We need to reload plugins to rebuild the registry
-    # #region agent log
-    local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-    echo "{\"id\":\"log_${log_timestamp}_subshell_start\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1123\",\"message\":\"Subshell started\",\"data\":{\"SCRIPT_DIR\":\"$SCRIPT_DIR\",\"load_plugins_available\":\"$(type load_plugins 2>&1 | head -1 || echo \"not found\")\",\"registry_before\":\"${#MC_PLUGIN_REGISTRY[@]}\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"H\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-    # #endregion
-    
     load_plugins
-    
-    # #region agent log
-    log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-    local test_function="clean_user_cache"
-    echo "{\"id\":\"log_${log_timestamp}_plugins_reloaded\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1135\",\"message\":\"Plugins reloaded in subshell\",\"data\":{\"registry_after\":\"${#MC_PLUGIN_REGISTRY[@]}\",\"registry_keys\":\"${(@k)MC_PLUGIN_REGISTRY}\",\"test_function_exists\":\"$(type \"$test_function\" &>/dev/null && echo true || echo false)\",\"test_function_type\":\"$(type \"$test_function\" 2>&1 | head -1 || echo \"not found\")\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"H\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-    # #endregion
     
     export MC_NON_INTERACTIVE=true
     export MC_SPACE_TRACKING_FILE="$space_tracking_file"
@@ -1221,11 +1181,6 @@ main() {
       # Write progress update BEFORE starting the operation (SAFE-7: with locking)
       # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
       _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
-      
-      # #region agent log
-      local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-      echo "{\"id\":\"log_${log_timestamp}_plugin_lookup_start\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1134\",\"message\":\"Plugin function lookup\",\"data\":{\"option\":\"$option\",\"MC_PLUGIN_REGISTRY_keys\":\"${(@k)MC_PLUGIN_REGISTRY}\",\"registry_count\":\"${#MC_PLUGIN_REGISTRY[@]}\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-      # #endregion
       
       local function=$(mc_get_plugin_function "$option")
       

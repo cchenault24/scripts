@@ -16,7 +16,7 @@ The macOS Cleanup Utility (`mac-cleanup.sh`) is a comprehensive, interactive cle
 - 🔒 **Safety First** - Automatic backups, dry-run mode, and comprehensive error handling
 - 📦 **Smart Backups** - JSON-based manifest system with automatic backup verification
 - 🎨 **Beautiful UI** - Color-coded output with progress bars and fzf-based selection
-- 🧰 **Comprehensive Coverage** - 22+ cleanup plugins across 5 categories
+- 🧰 **Comprehensive Coverage** - 23 cleanup plugins across 5 categories
 - 🤖 **Smart Detection** - Only offers to clean applications that are actually installed
 - 📊 **Detailed Reporting** - Disk space calculation and savings summary by operation
 - 🧪 **Dry-Run Mode** - Preview all operations without making changes
@@ -219,9 +219,9 @@ mac-cleanup/
 
 ## Cleanup Operations
 
-The script includes **22 cleanup plugins** organized into 5 categories:
+The script includes **23 cleanup plugins** organized into 5 categories:
 
-### System Cleanup (5 plugins)
+### System Cleanup (7 plugins)
 
 - **User Cache** - Cleans cache files in `~/Library/Caches`
   - Size: Calculated dynamically
@@ -241,6 +241,16 @@ The script includes **22 cleanup plugins** organized into 5 categories:
   
 - **Temporary Files** - Cleans temporary files in `/tmp`, `$TMPDIR`, and application temp directories
   - Excludes: `.X*` files, `com.apple.*` files, script's own temp files
+  - Size: Calculated dynamically
+  - Admin Required: No
+  
+- **Application Container Caches** - Cleans cache files in application containers
+  - Location: `~/Library/Containers/*/Caches`
+  - Size: Calculated dynamically
+  - Admin Required: No
+  
+- **Saved Application States** - Cleans saved application states
+  - Location: `~/Library/Saved Application State`
   - Size: Calculated dynamically
   - Admin Required: No
 
@@ -320,18 +330,6 @@ All browser plugins clean cache, web data, and service workers for all profiles:
   - Uses: `docker system prune -a --volumes --force`
   - ⚠️ **Note**: Requires Docker Desktop to be running
   - Size: Calculated via `docker system df`
-  - Admin Required: No
-
-### Application-Specific (2 plugins)
-
-- **Application Container Caches** - Cleans cache files in application containers
-  - Location: `~/Library/Containers/*/Caches`
-  - Size: Calculated dynamically
-  - Admin Required: No
-
-- **Saved Application States** - Cleans saved application states
-  - Location: `~/Library/Saved Application State`
-  - Size: Calculated dynamically
   - Admin Required: No
 
 ### System Maintenance (3 plugins)
