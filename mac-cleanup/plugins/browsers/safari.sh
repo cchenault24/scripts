@@ -23,19 +23,42 @@ clean_safari_cache() {
   )
   
   local total_space_freed=0
+  local dirs_processed=0
+  local dirs_with_content=0
+  
+  # Store initial total to calculate what safe_clean_dir adds (to avoid double-counting)
+  local initial_total=$MC_TOTAL_SPACE_SAVED
   
   for dir in "${safari_cache_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
+      dirs_processed=$((dirs_processed + 1))
       local space_before=$(calculate_size_bytes "$dir")
-      backup "$dir" "safari_$(basename "$dir")"
-      safe_clean_dir "$dir" "Safari $(basename "$dir")"
-      local space_after=$(calculate_size_bytes "$dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned $dir."
+      # Check if directory has meaningful content (more than just directory overhead ~4KB)
+      if [[ $space_before -gt 4096 ]]; then
+        dirs_with_content=$((dirs_with_content + 1))
+        backup "$dir" "safari_$(basename "$dir")"
+        safe_clean_dir "$dir" "Safari $(basename "$dir")"
+        local space_after=$(calculate_size_bytes "$dir")
+        local space_freed=$((space_before - space_after))
+        total_space_freed=$((total_space_freed + space_freed))
+        print_success "Cleaned $dir ($(format_bytes $space_freed))."
+      else
+        print_info "Skipped $dir (already empty or minimal content: $(format_bytes $space_before))."
+      fi
     fi
   done
   
-  track_space_saved "Safari Cache" $total_space_freed
+  # Calculate what safe_clean_dir actually added to MC_TOTAL_SPACE_SAVED
+  local space_added_by_safe_clean=$((MC_TOTAL_SPACE_SAVED - initial_total))
+  
+  # Update operation-specific tracking without double-counting
+  # safe_clean_dir already updated MC_TOTAL_SPACE_SAVED, so we just update per-operation tracking
+  if [[ $space_added_by_safe_clean -gt 0 ]]; then
+    MC_SPACE_SAVED_BY_OPERATION["Safari Cache"]=$space_added_by_safe_clean
+  elif [[ $dirs_processed -gt 0 && $dirs_with_content -eq 0 ]]; then
+    print_info "All Safari cache directories are already empty or contain minimal data."
+    MC_SPACE_SAVED_BY_OPERATION["Safari Cache"]=0
+  fi
   
   print_warning "You may need to restart Safari for changes to take effect"
 }

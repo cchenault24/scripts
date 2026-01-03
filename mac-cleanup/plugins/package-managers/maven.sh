@@ -12,7 +12,7 @@ clean_maven_cache() {
   if [[ -d "$maven_repo_dir" ]]; then
     print_warning "Cleaning Maven repository will require re-downloading dependencies on next build."
     
-    if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean the Maven repository?"; then
+    if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to clean the Maven repository?"; then
       local space_before=$(calculate_size_bytes "$maven_repo_dir")
       
       if [[ "$MC_DRY_RUN" == "true" ]]; then

@@ -61,20 +61,7 @@ show_spinner() {
   local message="$1"
   local pid=$2
   
-  if command -v gum &> /dev/null; then
-    # Use gum spinner if available - wait for the actual process
-    if [[ -n "$pid" ]]; then
-      while kill -0 $pid 2>/dev/null; do
-        sleep 0.1
-      done
-      wait $pid
-    else
-      gum spin --spinner dot --title "$message" -- sleep 0.5
-    fi
-    return
-  fi
-  
-  # Otherwise use a basic spinner
+  # Use a basic spinner
   if [[ -n "$pid" ]]; then
     local spin='⣾⣽⣻⢿⡿⣟⣯⣷'
     local charwidth=3
@@ -95,84 +82,100 @@ show_progress() {
   local total=$2
   local message="${3:-Progress}"
   
-  if command -v gum &> /dev/null && [[ -t 1 ]]; then
-    local percent=$((current * 100 / total))
-    echo "$percent" | gum progress --title "$message" --width 50 --percent
-  else
-    local percent=$((current * 100 / total))
-    local filled=$((percent / 2))
-    local empty=$((50 - filled))
-    printf "\r$message ["
-    printf "%${filled}s" | tr ' ' '='
-    printf "%${empty}s" | tr ' ' ' '
-    printf "] %d%%" $percent
-    if [[ $current -eq $total ]]; then
-      echo ""
-    fi
+  local percent=$((current * 100 / total))
+  local filled=$((percent / 2))
+  local empty=$((50 - filled))
+  printf "\r$message ["
+  printf "%${filled}s" | tr ' ' '='
+  printf "%${empty}s" | tr ' ' ' '
+  printf "] %d%%" $percent
+  if [[ $current -eq $total ]]; then
+    echo ""
   fi
 }
 
-# Check if gum is installed, install if not
-mc_check_gum() {
-  if ! command -v gum &> /dev/null; then
-    print_warning "gum is not installed. This tool is required for interactive selection."
+# Determine which selection tool to use (fzf required)
+mc_get_selection_tool() {
+  if command -v fzf &> /dev/null; then
+    echo "fzf"
+  else
+    echo "none"
+  fi
+}
+
+# Check if a selection tool is available, install if needed
+mc_check_selection_tool() {
+  local tool=$(mc_get_selection_tool)
+  
+  if [[ "$tool" == "none" ]]; then
+    print_warning "No interactive selection tool found (fzf required)."
     echo ""
     
-    if [ -t 0 ] && read -q "?Do you want to install gum now? (y/n) "; then
+    if [ -t 0 ] && read -q "?Do you want to install fzf now? (y/n) "; then
       echo ""
-      print_info "Installing gum..."
+      print_info "Installing fzf..."
       
-      # Check for Homebrew
       if command -v brew &> /dev/null; then
-        brew install gum
+        brew install fzf
+        MC_SELECTION_TOOL_INSTALLED_BY_SCRIPT=true
+        MC_SELECTION_TOOL="fzf"
+        print_success "fzf installed successfully!"
+        return 0
       else
-        # Download and install gum binary if Homebrew is not available
-        TMP_DIR=$(mktemp -d)
-        GUM_VERSION="0.11.0"
-        GUM_URL="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_Darwin_x86_64.tar.gz"
-        
-        curl -sL "$GUM_URL" | tar xz -C "$TMP_DIR"
-        if [[ "$MC_DRY_RUN" == "true" ]]; then
-          print_info "[DRY RUN] Would install gum to /usr/local/bin/"
-        else
-          sudo mv "$TMP_DIR/gum" /usr/local/bin/ || {
-            print_error "Failed to install gum. Please install manually: brew install gum"
-            exit 1
-          }
-        fi
-        rm -rf "$TMP_DIR"
+        print_error "Homebrew not found. Cannot install fzf automatically."
+        print_info "Please install manually: brew install fzf"
+        exit 1
       fi
-      
-      MC_GUM_INSTALLED_BY_SCRIPT=true
-      print_success "gum installed successfully!"
     else
       echo ""
-      print_error "gum is required for this script to work."
-      print_info "You can install it with: brew install gum"
+      print_error "fzf is required for this script to work."
+      print_info "Install with: brew install fzf"
       exit 1
     fi
   fi
 }
 
-# Cleanup gum if it was installed by this script
-mc_cleanup_gum() {
-  if [[ "$MC_GUM_INSTALLED_BY_SCRIPT" == "true" ]]; then
-    print_info "Cleaning up gum installation..."
+# Legacy function name for backward compatibility
+mc_check_gum() {
+  mc_check_selection_tool
+}
+
+# Cleanup selection tool if it was installed by this script
+mc_cleanup_selection_tool() {
+  if [[ "$MC_SELECTION_TOOL_INSTALLED_BY_SCRIPT" == "true" ]]; then
+    print_info "Cleaning up selection tool installation..."
     if [[ "$MC_DRY_RUN" == "true" ]]; then
-      print_info "[DRY RUN] Would remove gum"
+      print_info "[DRY RUN] Would remove $MC_SELECTION_TOOL"
     else
       if command -v brew &> /dev/null; then
-        brew uninstall gum 2>/dev/null || true
-      else
-        sudo rm -f /usr/local/bin/gum 2>/dev/null || true
+        brew uninstall "$MC_SELECTION_TOOL" 2>/dev/null || true
       fi
     fi
-    MC_GUM_INSTALLED_BY_SCRIPT=false
-    print_success "gum cleaned up"
+    MC_SELECTION_TOOL_INSTALLED_BY_SCRIPT=false
+    print_success "Selection tool cleaned up"
   fi
+}
+
+# Legacy function name for backward compatibility
+mc_cleanup_gum() {
+  mc_cleanup_selection_tool
 }
 
 # Export cleanup_gum for backward compatibility
 cleanup_gum() {
   mc_cleanup_gum
+}
+
+# Confirmation prompt function (replaces gum confirm)
+mc_confirm() {
+  local prompt="$1"
+  local response
+  if [[ -t 0 ]]; then
+    read -q "?$prompt (y/n) " response
+    echo ""
+    [[ "$response" == "y" || "$response" == "Y" ]]
+  else
+    # Non-interactive: default to no
+    return 1
+  fi
 }

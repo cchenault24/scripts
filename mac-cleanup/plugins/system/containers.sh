@@ -12,14 +12,15 @@ clean_container_caches() {
   if [[ -d "$containers_dir" ]]; then
     backup "$containers_dir" "app_containers"
     
-    find "$containers_dir" -type d -name "Caches" | while read dir; do
+    while IFS= read -r dir; do
+      [[ -z "$dir" ]] && continue
       local app_name=$(echo "$dir" | awk -F'/' '{print $(NF-2)}')
       local space_before=$(calculate_size_bytes "$dir")
       safe_clean_dir "$dir" "$app_name container cache"
       local space_after=$(calculate_size_bytes "$dir")
       total_space_freed=$((total_space_freed + space_before - space_after))
       print_success "Cleaned $app_name container cache."
-    done
+    done < <(find "$containers_dir" -type d -name "Caches" 2>/dev/null)
     
     track_space_saved "Application Container Caches" $total_space_freed
   else

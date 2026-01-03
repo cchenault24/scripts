@@ -5,7 +5,8 @@
 
 # Global state variables (MC_ prefix for mac-cleanup)
 MC_BACKUP_DIR="$HOME/.mac-cleanup-backups/$(date +%Y-%m-%d-%H-%M-%S)"
-MC_GUM_INSTALLED_BY_SCRIPT=false
+MC_SELECTION_TOOL_INSTALLED_BY_SCRIPT=false
+MC_SELECTION_TOOL=""
 MC_DRY_RUN=false
 MC_QUIET_MODE=false
 MC_LOG_FILE=""
@@ -65,11 +66,12 @@ mc_cleanup_script() {
   # Perform any necessary cleanup before exiting
   print_info "Cleaning up script resources..."
   
-  # Remove any temp files
+  # Remove any temp files (N qualifier prevents error if no matches)
   rm -f /tmp/mac-cleanup-temp-*(/N) 2>/dev/null
+  rm -f /tmp/mac-cleanup-sweep-*.tmp(N) 2>/dev/null
   
-  # Clean up gum if it was installed by this script
-  mc_cleanup_gum
+  # Clean up selection tool if it was installed by this script
+  mc_cleanup_selection_tool
   
   # Compress backup logs if they exist
   if [[ -d "$MC_BACKUP_DIR" && $(find "$MC_BACKUP_DIR" -type f | wc -l) -gt 0 ]]; then
@@ -83,8 +85,11 @@ mc_handle_interrupt() {
   print_warning "Script interrupted by user."
   print_info "Cleaning up and exiting..."
   
-  # Clean up gum if it was installed by this script
-  mc_cleanup_gum
+  # Clean up sweep temp files (N qualifier prevents error if no matches)
+  rm -f /tmp/mac-cleanup-sweep-*.tmp(N) 2>/dev/null
+  
+  # Clean up selection tool if it was installed by this script
+  mc_cleanup_selection_tool
   
   # Exit with non-zero status
   exit 1
@@ -103,17 +108,76 @@ mc_register_plugin() {
   local function="$3"
   local requires_admin="${4:-false}"
   
+  # Strip any quotes from the plugin name (they shouldn't be part of the key)
+  name=$(echo "$name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+  
   MC_PLUGIN_REGISTRY["$name"]="$function|$category|$requires_admin"
 }
 
 mc_get_plugin_function() {
   local name="$1"
-  echo "${MC_PLUGIN_REGISTRY[$name]}" | cut -d'|' -f1
+  # Try direct lookup first
+  local result="${MC_PLUGIN_REGISTRY[$name]}"
+  if [[ -n "$result" ]]; then
+    echo "$result" | cut -d'|' -f1
+    return
+  fi
+  
+  # If not found, try with quotes (in case registry has quoted keys)
+  result="${MC_PLUGIN_REGISTRY[\"$name\"]}"
+  if [[ -n "$result" ]]; then
+    echo "$result" | cut -d'|' -f1
+    return
+  fi
+  
+  # If still not found, search through all keys and match by cleaned name
+  for key in "${(@k)MC_PLUGIN_REGISTRY}"; do
+    local clean_key=$(echo "$key" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+    local clean_name=$(echo "$name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+    if [[ "$clean_key" == "$clean_name" ]]; then
+      echo "${MC_PLUGIN_REGISTRY[$key]}" | cut -d'|' -f1
+      return
+    fi
+  done
+  
+  # Return empty if not found
+  echo ""
 }
 
 mc_get_plugin_category() {
   local name="$1"
-  echo "${MC_PLUGIN_REGISTRY[$name]}" | cut -d'|' -f2
+  # Try direct lookup first
+  local result="${MC_PLUGIN_REGISTRY[$name]}"
+  if [[ -n "$result" ]]; then
+    local category=$(echo "$result" | cut -d'|' -f2)
+    # Strip quotes from category before returning
+    echo "$category" | sed -E 's/^"//' | sed -E 's/"$//'
+    return
+  fi
+  
+  # If not found, try with quotes (in case registry has quoted keys)
+  result="${MC_PLUGIN_REGISTRY[\"$name\"]}"
+  if [[ -n "$result" ]]; then
+    local category=$(echo "$result" | cut -d'|' -f2)
+    # Strip quotes from category before returning
+    echo "$category" | sed -E 's/^"//' | sed -E 's/"$//'
+    return
+  fi
+  
+  # If still not found, search through all keys and match by cleaned name
+  for key in "${(@k)MC_PLUGIN_REGISTRY}"; do
+    local clean_key=$(echo "$key" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+    local clean_name=$(echo "$name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+    if [[ "$clean_key" == "$clean_name" ]]; then
+      local category=$(echo "${MC_PLUGIN_REGISTRY[$key]}" | cut -d'|' -f2)
+      # Strip quotes from category before returning
+      echo "$category" | sed -E 's/^"//' | sed -E 's/"$//'
+      return
+    fi
+  done
+  
+  # Return empty if not found
+  echo ""
 }
 
 mc_get_plugin_requires_admin() {

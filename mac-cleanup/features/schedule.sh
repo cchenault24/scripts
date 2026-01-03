@@ -68,7 +68,7 @@ setup_schedule() {
   print_header "Setup Scheduled Cleanup"
   
   print_info "Select a schedule frequency:"
-  local schedule=$(echo -e "daily\nweekly\nmonthly" | gum choose)
+  local schedule=$(echo -e "daily\nweekly\nmonthly" | fzf)
   
   if [[ -z "$schedule" ]]; then
     print_warning "Schedule setup cancelled."
@@ -91,7 +91,7 @@ setup_schedule() {
     print_success "Scheduled cleanup configured for $schedule runs."
     print_info "The cleanup will run automatically every $schedule."
     
-    if gum confirm "Do you want to load the schedule now?"; then
+    if mc_confirm "Do you want to load the schedule now?"; then
       launchctl load "$HOME/Library/LaunchAgents/com.mac-cleanup.agent.plist" 2>/dev/null && {
         print_success "Schedule activated successfully!"
       } || {

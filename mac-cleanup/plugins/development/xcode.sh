@@ -9,7 +9,7 @@ clean_xcode_data() {
   print_warning "⚠️ CAUTION: Cleaning Xcode data will remove derived data, archives, and device support."
   print_warning "This may require Xcode to rebuild projects and re-index."
   
-  if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean Xcode data?"; then
+  if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to clean Xcode data?"; then
     local total_space_freed=0
     
     # Xcode Derived Data
@@ -27,7 +27,7 @@ clean_xcode_data() {
     local archives_dir="$HOME/Library/Developer/Xcode/Archives"
     if [[ -d "$archives_dir" ]]; then
       print_warning "Archives contain built apps. Consider backing up important archives first."
-      if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Do you want to clean Xcode Archives?"; then
+      if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to clean Xcode Archives?"; then
         local space_before=$(calculate_size_bytes "$archives_dir")
         backup "$archives_dir" "xcode_archives"
         safe_clean_dir "$archives_dir" "Xcode Archives"

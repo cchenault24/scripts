@@ -199,7 +199,7 @@ The backup directory also contains:
 
 ## Dependencies
 
-The script depends on [gum](https://github.com/charmbracelet/gum) for the interactive interface. If gum is not installed, the script will offer to install it automatically and can remove it after use if desired.
+The script depends on [fzf](https://github.com/junegunn/fzf) for the interactive interface. If fzf is not installed, the script will offer to install it automatically and can remove it after use if desired.
 
 ## Command Line Options
 
@@ -244,9 +244,9 @@ If you encounter any issues:
 1. **Permission Denied Errors**: Make sure the script is executable (`chmod +x mac-cleanup.sh`).
 2. **Admin Privileges**: Some operations require admin privileges. The script will auto-detect your admin account or prompt you. Enter your password when prompted for sudo operations.
 3. **Backup Failures**: Ensure you have sufficient disk space for backups. The script skips empty directories automatically.
-4. **Gum Installation Failures**: If automatic installation fails, try installing gum manually:
+4. **fzf Installation Failures**: If automatic installation fails, try installing fzf manually:
    ```bash
-   brew install gum
+   brew install fzf
    ```
 5. **Check Logs**: Review the `cleanup.log` file in the backup directory for detailed information about operations and any errors.
 6. **Docker Cleanup**: Ensure Docker Desktop is running before attempting Docker cache cleanup.

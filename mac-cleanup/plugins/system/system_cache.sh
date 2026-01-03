@@ -7,7 +7,7 @@ clean_system_cache() {
   print_header "Cleaning System Cache"
   
   print_warning "This operation requires administrative privileges"
-  if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Do you want to continue?"; then
+  if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to continue?"; then
     local cache_dir="/Library/Caches"
     local space_before=0
     

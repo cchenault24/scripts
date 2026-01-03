@@ -11,7 +11,7 @@ empty_trash() {
   if [[ -d "$trash_dir" && "$(ls -A "$trash_dir" 2>/dev/null)" ]]; then
     local space_before=$(calculate_size_bytes "$trash_dir")
     print_warning "This will permanently delete all items in your Trash"
-    if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to empty the Trash?"; then
+    if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to empty the Trash?"; then
       if [[ "$MC_DRY_RUN" == "true" ]]; then
         print_info "[DRY RUN] Would empty Trash ($(format_bytes $space_before))"
         log_message "DRY_RUN" "Would empty Trash"

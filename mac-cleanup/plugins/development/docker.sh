@@ -19,7 +19,7 @@ clean_docker_cache() {
   print_warning "This will remove unused Docker images, containers, volumes, and build cache."
   print_warning "This may require re-downloading images and rebuilding containers."
   
-  if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean Docker cache?"; then
+  if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to clean Docker cache?"; then
     if [[ "$MC_DRY_RUN" == "true" ]]; then
       print_info "[DRY RUN] Would clean Docker cache"
       print_info "[DRY RUN] Would run: docker system prune -a --volumes -f"

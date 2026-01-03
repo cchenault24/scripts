@@ -26,8 +26,24 @@ calculate_size() {
 # Calculate size in bytes for accurate tracking
 calculate_size_bytes() {
   local path="$1"
+  
   if [[ -e "$path" ]]; then
-    du -sk "$path" 2>/dev/null | awk '{print $1 * 1024}'
+    # Use /usr/bin/du explicitly and capture output more reliably
+    local du_output=""
+    du_output=$(/usr/bin/du -sk "$path" 2>/dev/null) || du_output=""
+    
+    if [[ -n "$du_output" ]]; then
+      local kb=$(echo "$du_output" | /usr/bin/awk '{print $1}')
+      
+      if [[ -n "$kb" && "$kb" =~ ^[0-9]+$ ]]; then
+        local result=$((kb * 1024))
+        echo "$result"
+      else
+        echo "0"
+      fi
+    else
+      echo "0"
+    fi
   else
     echo "0"
   fi

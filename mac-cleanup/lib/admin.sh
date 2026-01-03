@@ -28,7 +28,12 @@ mc_detect_admin_user() {
       fi
     done
     # If current user not in list, use first admin user
-    MC_ADMIN_USERNAME=$(echo $admin_users | awk '{print $1}')
+    # Use awk with fallback to full path
+    local awk_cmd="awk"
+    if ! command -v awk &> /dev/null; then
+      awk_cmd="/usr/bin/awk"
+    fi
+    MC_ADMIN_USERNAME=$(echo $admin_users | $awk_cmd '{print $1}')
     log_message "INFO" "Detected admin user: $MC_ADMIN_USERNAME"
     return 0
   fi

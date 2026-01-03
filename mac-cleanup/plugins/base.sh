@@ -27,6 +27,9 @@ track_space_saved() {
   local space_bytes=$2
   
   MC_SPACE_SAVED_BY_OPERATION["$plugin_name"]=$space_bytes
+  # Also update the total space saved if it's not already being tracked
+  # (some plugins use safe_clean_dir/safe_remove which already update the total)
+  MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + space_bytes))
 }
 
 # Helper function to get space saved for a plugin

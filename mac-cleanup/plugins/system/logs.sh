@@ -27,10 +27,10 @@ clean_system_logs() {
   print_warning "⚠️ CAUTION: System logs can be important for troubleshooting system issues"
   print_warning "Only proceed if you understand the potential consequences"
   
-  if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Are you sure you want to clean system logs?"; then
+  if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to clean system logs?"; then
     print_warning "This operation requires administrative privileges"
     
-    if [[ "$MC_DRY_RUN" == "true" ]] || gum confirm "Do you want to continue?"; then
+    if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to continue?"; then
       local logs_dir="/var/log"
       local space_before=0
       

@@ -24,7 +24,7 @@ undo_cleanup() {
     backup_options+=("$backup_date")
   done
   
-  local selected=$(printf "%s\n" "${backup_options[@]}" | gum choose --height=10)
+  local selected=$(printf "%s\n" "${backup_options[@]}" | fzf --height=10)
   
   if [[ -z "$selected" ]]; then
     print_warning "No backup selected. Cancelling undo."
@@ -50,7 +50,7 @@ undo_cleanup() {
   fi
   
   print_warning "This will restore files from the backup session."
-  if ! gum confirm "Are you sure you want to restore from this backup?"; then
+  if ! mc_confirm "Are you sure you want to restore from this backup?"; then
     print_info "Restore cancelled."
     return 1
   fi
@@ -116,14 +116,53 @@ undo_cleanup() {
     print_warning "Backup manifest not found. Attempting to restore all backups..."
     print_info "Restoring all files from backup directory..."
     
+    # Use nullglob to handle case where no .tar.gz files exist
+    setopt local_options nullglob
+    local backup_files_found=0
+    
+    # Check for .tar.gz backup files
     for backup_file in "$selected_backup"/*.tar.gz; do
       if [[ -f "$backup_file" ]]; then
         local backup_name=$(basename "$backup_file" .tar.gz)
-        print_info "Restoring $backup_name..."
+        # Skip log files
+        if [[ "$backup_name" == cleanup.log* ]] || [[ "$backup_name" == *.log ]]; then
+          continue
+        fi
+        print_info "Found backup: $backup_name"
         # Note: Without manifest, we can't determine original path, so this is limited
         print_warning "Cannot determine original path without manifest. Manual restoration may be needed."
+        print_info "To restore manually, extract with: tar -xzf \"$backup_file\" -C /destination/path/"
+        backup_files_found=$((backup_files_found + 1))
       fi
     done
+    
+    # Also check for non-tar.gz backup files (excluding log files)
+    for backup_file in "$selected_backup"/*(N); do
+      if [[ -f "$backup_file" ]]; then
+        local backup_name=$(basename "$backup_file")
+        # Skip tar.gz files (already processed), manifest, and any log files
+        if [[ "$backup_file" == *.tar.gz ]] || \
+           [[ "$backup_file" == */backup_manifest.txt ]] || \
+           [[ "$backup_file" == */cleanup.log* ]] || \
+           [[ "$backup_name" == *.log ]] || \
+           [[ "$backup_name" == *.log.gz ]]; then
+          continue
+        fi
+        print_info "Found backup file: $backup_name"
+        print_warning "Cannot determine original path without manifest. Manual restoration may be needed."
+        print_info "To restore manually, copy with: cp \"$backup_file\" /destination/path/"
+        backup_files_found=$((backup_files_found + 1))
+      fi
+    done
+    
+    unsetopt local_options nullglob
+    
+    if [[ $backup_files_found -eq 0 ]]; then
+      print_warning "No backup files found in this backup session."
+      print_info "The backup directory may be empty or contain only log files."
+    else
+      print_info "Found $backup_files_found backup file(s), but cannot restore automatically without manifest."
+    fi
   fi
   
   print_success "Undo operation completed."
