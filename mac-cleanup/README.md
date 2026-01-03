@@ -103,6 +103,39 @@ This script is designed specifically for **zsh** and uses several zsh-specific f
 
 The script will automatically check for and install `fzf` if it's not already available.
 
+### Uninstall
+
+To remove the macOS Cleanup Utility:
+
+1. **Remove scheduled cleanup** (if scheduled):
+   ```bash
+   launchctl unload ~/Library/LaunchAgents/com.mac-cleanup.agent.plist 2>/dev/null || true
+   rm ~/Library/LaunchAgents/com.mac-cleanup.agent.plist 2>/dev/null || true
+   ```
+
+2. **Remove backups** (optional - backups are safe to keep):
+   ```bash
+   rm -rf ~/.mac-cleanup-backups
+   ```
+
+3. **Remove fzf** (only if installed by the script):
+   ```bash
+   # Check if fzf was installed by Homebrew
+   if brew list fzf &>/dev/null; then
+     brew uninstall fzf
+   fi
+   ```
+
+4. **Remove the script directory**:
+   ```bash
+   rm -rf /path/to/mac-cleanup
+   ```
+
+**Note**: The script does not modify system files or create files outside of:
+- `~/.mac-cleanup-backups/` - Backup directory (can be safely deleted)
+- `~/Library/LaunchAgents/com.mac-cleanup.agent.plist` - Scheduled cleanup (if scheduled)
+- `/tmp/mac-cleanup-*` - Temporary files (automatically cleaned on exit)
+
 ### Directory Structure
 
 The script uses a modular plugin-based architecture:

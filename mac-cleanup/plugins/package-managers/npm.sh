@@ -24,9 +24,6 @@ clean_npm_cache() {
     # Clear size cache to ensure accurate calculation for backup decision
     clear_size_cache
     local space_before=$(calculate_size_bytes "$npm_cache_dir")
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:18\",\"message\":\"Before npm cache clean\",\"data\":{\"npm_cache_dir\":\"$npm_cache_dir\",\"space_before\":\"$space_before\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     
     if [[ "$MC_DRY_RUN" == "true" ]]; then
       print_info "[DRY RUN] Would clean npm cache ($(format_bytes $space_before))"
@@ -37,9 +34,6 @@ clean_npm_cache() {
         log_message "ERROR" "Backup failed, aborting npm cache cleanup"
         return 1
       fi
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:29\",\"message\":\"Running npm cache clean\",\"data\":{\"npm_cache_dir\":\"$npm_cache_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
       npm cache clean --force 2>&1 | log_message "INFO" || {
         print_error "Failed to clean npm cache"
         return 1
@@ -59,17 +53,8 @@ clean_npm_cache() {
       
       # Clear size cache before recalculating to get accurate after size
       clear_size_cache
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:33\",\"message\":\"After npm cache clean, calculating space\",\"data\":{\"npm_cache_dir\":\"$npm_cache_dir\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
       local space_after=$(calculate_size_bytes "$npm_cache_dir")
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:34\",\"message\":\"Space calculation complete\",\"data\":{\"space_before\":\"$space_before\",\"space_after\":\"$space_after\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
       total_space_freed=$((space_before - space_after))
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:35\",\"message\":\"Calculated space freed\",\"data\":{\"total_space_freed\":\"$total_space_freed\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
       # Validate space_freed is not negative (directory may have grown during cleanup)
       if [[ $total_space_freed -lt 0 ]]; then
         total_space_freed=0
@@ -82,9 +67,6 @@ clean_npm_cache() {
         print_warning "npm cache cleanup may not have freed expected space. Expected: $(format_bytes $space_before), Freed: $(format_bytes $total_space_freed)"
         log_message "WARNING" "npm cache cleanup may not have freed expected space. Expected: $(format_bytes $space_before), Freed: $(format_bytes $total_space_freed)"
       fi
-      # #region agent log
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:40\",\"message\":\"npm cache cleaned, will track total after yarn\",\"data\":{\"total_space_freed\":\"$total_space_freed\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-      # #endregion
       # Don't track space yet - wait until after yarn cleanup to track total (npm + yarn)
       print_success "npm cache cleaned."
       log_message "SUCCESS" "npm cache cleaned (freed $(format_bytes $total_space_freed))"
@@ -111,9 +93,6 @@ clean_npm_cache() {
           return 1
         fi
         
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:64\",\"message\":\"Running yarn cache clean\",\"data\":{\"yarn_cache_dir\":\"$yarn_cache_dir\",\"space_before\":\"$space_before\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
         yarn cache clean 2>&1 | log_message "INFO" || {
           print_error "Failed to clean yarn cache"
           return 1
@@ -134,13 +113,7 @@ clean_npm_cache() {
         # Clear size cache before recalculating to get accurate after size
         clear_size_cache
         local space_after=$(calculate_size_bytes "$yarn_cache_dir")
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:69\",\"message\":\"Yarn space calculation\",\"data\":{\"space_before\":\"$space_before\",\"space_after\":\"$space_after\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
         local yarn_space_freed=$((space_before - space_after))
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\",\"location\":\"npm.sh:70\",\"message\":\"Yarn space freed\",\"data\":{\"yarn_space_freed\":\"$yarn_space_freed\"},\"timestamp\":$(/bin/date +%s 2>/dev/null || echo 0)}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
         # Validate space_freed is not negative (directory may have grown during cleanup)
         if [[ $yarn_space_freed -lt 0 ]]; then
           yarn_space_freed=0

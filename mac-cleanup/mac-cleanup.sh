@@ -1184,11 +1184,6 @@ main() {
       
       local function=$(mc_get_plugin_function "$option")
       
-      # #region agent log
-      log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
-      echo "{\"id\":\"log_${log_timestamp}_plugin_lookup_result\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1136\",\"message\":\"Plugin function lookup result\",\"data\":{\"option\":\"$option\",\"function\":\"$function\",\"function_empty\":\"$([[ -z \"$function\" ]] && echo true || echo false)\",\"function_type\":\"$(type \"$function\" 2>&1 | head -1 || echo \"not found\")\",\"function_available\":\"$(type \"$function\" &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
-      # #endregion
-      
       # Phase 4.3: Check if function exists - if not, it means the plugin file wasn't sourced properly
       if [[ -z "$function" ]]; then
         print_error "Plugin function not found for: $option" >> "$cleanup_output_file"
