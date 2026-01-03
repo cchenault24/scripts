@@ -21,6 +21,38 @@ register_plugin() {
   mc_register_plugin "$name" "$category" "$function" "$requires_admin"
 }
 
+# Helper function to safely write to space tracking file with locking
+_write_space_tracking_file() {
+  local plugin_name="$1"
+  local space_bytes=$2
+  
+  if [[ -z "${MC_SPACE_TRACKING_FILE:-}" || ! -f "$MC_SPACE_TRACKING_FILE" ]]; then
+    return 0
+  fi
+  
+  # Use file locking to prevent race conditions when multiple plugins write simultaneously
+  local lock_file="${MC_SPACE_TRACKING_FILE}.lock"
+  # Try to acquire lock (wait up to 5 seconds)
+  local lock_acquired=false
+  local attempts=0
+  while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
+    if (set -C; echo $$ > "$lock_file" 2>/dev/null); then
+      lock_acquired=true
+      # Append to file: plugin_name|space_bytes
+      echo "$plugin_name|$space_bytes" >> "$MC_SPACE_TRACKING_FILE" 2>/dev/null || true
+      rm -f "$lock_file" 2>/dev/null || true
+      return 0
+    else
+      sleep 0.1
+      attempts=$((attempts + 1))
+    fi
+  done
+  
+  # If lock acquisition failed, try one more time without lock (better than losing data)
+  echo "$plugin_name|$space_bytes" >> "$MC_SPACE_TRACKING_FILE" 2>/dev/null || true
+  log_message "WARNING" "Space tracking file lock timeout, wrote without lock"
+}
+
 # Helper function to track space saved for a plugin
 track_space_saved() {
   local plugin_name="$1"
@@ -31,12 +63,9 @@ track_space_saved() {
   # (some plugins use safe_clean_dir/safe_remove which already update the total)
   MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + space_bytes))
   
-  # If we're in a background process, write to space tracking file
+  # If we're in a background process, write to space tracking file with locking
   # This allows the parent process to read the space saved data
-  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-    # Append to file: plugin_name|space_bytes
-    echo "$plugin_name|$space_bytes" >> "$MC_SPACE_TRACKING_FILE" 2>/dev/null || true
-  fi
+  _write_space_tracking_file "$plugin_name" "$space_bytes"
 }
 
 # Helper function to get space saved for a plugin

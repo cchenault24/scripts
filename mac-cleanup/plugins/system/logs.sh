@@ -73,17 +73,22 @@ clean_system_logs() {
       space_before=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
     fi
     
-    backup "$logs_dir" "system_logs"
+    if ! backup "$logs_dir" "system_logs"; then
+      print_error "Backup failed for system logs. Aborting cleanup to prevent data loss."
+      log_message "ERROR" "Backup failed, aborting system logs cleanup"
+      return 1
+    fi
     
     if [[ "$MC_DRY_RUN" == "true" ]]; then
       print_info "[DRY RUN] Would clean system logs"
       log_message "DRY_RUN" "Would clean system logs"
     else
       # Clean log files without removing them (zero their size instead)
-      run_as_admin "find $logs_dir -type f -name \"*.log\" -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
+      # Properly escape logs_dir to prevent command injection
+      run_as_admin "find \"$logs_dir\" -type f -name '*.log' -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
       
       # Clean archived logs
-      run_as_admin "find $logs_dir -type f -name \"*.log.*\" -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
+      run_as_admin "find \"$logs_dir\" -type f -name '*.log.*' -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
       
       local space_after=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
       local space_freed=$((space_before - space_after))

@@ -17,8 +17,10 @@ clean_dev_tool_temp() {
   
   for base_dir in "${idea_dirs[@]}"; do
     if [[ -d "$base_dir" ]]; then
-      find "$base_dir" -type d -name "caches" -o -type d -maxdepth 1 | while read dir; do
-        if [[ -d "$dir" ]]; then
+      # Fix operator precedence: find directories named "caches" OR directories at maxdepth 1
+      # Use parentheses to group conditions properly
+      find "$base_dir" \( -type d -name "caches" -o -type d -maxdepth 1 \) | while read dir; do
+        if [[ -d "$dir" && "$dir" != "$base_dir" ]]; then
           local space_before=$(calculate_size_bytes "$dir")
           backup "$dir" "intellij_$(basename "$dir")"
           safe_clean_dir "$dir" "IntelliJ $(basename "$dir")"

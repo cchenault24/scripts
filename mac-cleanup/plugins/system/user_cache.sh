@@ -9,7 +9,11 @@ clean_user_cache() {
   local cache_dir="$HOME/Library/Caches"
   local space_before=$(calculate_size_bytes "$cache_dir")
   
-  backup "$cache_dir" "user_caches"
+  if ! backup "$cache_dir" "user_caches"; then
+    print_error "Backup failed for user cache. Aborting cleanup to prevent data loss."
+    log_message "ERROR" "Backup failed, aborting user cache cleanup"
+    return 1
+  fi
   
   # Collect all cache directories first
   local cache_dirs=()
@@ -27,9 +31,15 @@ clean_user_cache() {
     safe_clean_dir "$dir" "$dir_name cache"
   done
   
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we calculate total for display only
   local space_after=$(calculate_size_bytes "$cache_dir")
   local space_freed=$((space_before - space_after))
-  track_space_saved "User Cache" $space_freed
+  # Update plugin-specific tracking (but don't double-count in total)
+  MC_SPACE_SAVED_BY_OPERATION["User Cache"]=$space_freed
+  # Write to space tracking file if in background process (with locking)
+  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+    _write_space_tracking_file "User Cache" "$space_freed"
+  fi
   
   print_success "User cache cleaned."
 }

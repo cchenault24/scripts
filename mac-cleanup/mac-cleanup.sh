@@ -50,12 +50,17 @@ sync_globals() {
 # Discover and load plugins
 load_plugins() {
   local plugins_dir="$SCRIPT_DIR/plugins"
+  local load_errors=0
   
   # Load browser plugins
   if [[ -d "$plugins_dir/browsers" ]]; then
     for plugin_file in "$plugins_dir/browsers"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
-        source "$plugin_file"
+        if ! source "$plugin_file" 2>/dev/null; then
+          print_error "Failed to load plugin: $plugin_file"
+          log_message "ERROR" "Plugin load failure: $plugin_file"
+          load_errors=$((load_errors + 1))
+        fi
       fi
     done
   fi
@@ -64,7 +69,11 @@ load_plugins() {
   if [[ -d "$plugins_dir/package-managers" ]]; then
     for plugin_file in "$plugins_dir/package-managers"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
-        source "$plugin_file"
+        if ! source "$plugin_file" 2>/dev/null; then
+          print_error "Failed to load plugin: $plugin_file"
+          log_message "ERROR" "Plugin load failure: $plugin_file"
+          load_errors=$((load_errors + 1))
+        fi
       fi
     done
   fi
@@ -73,7 +82,11 @@ load_plugins() {
   if [[ -d "$plugins_dir/development" ]]; then
     for plugin_file in "$plugins_dir/development"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
-        source "$plugin_file"
+        if ! source "$plugin_file" 2>/dev/null; then
+          print_error "Failed to load plugin: $plugin_file"
+          log_message "ERROR" "Plugin load failure: $plugin_file"
+          load_errors=$((load_errors + 1))
+        fi
       fi
     done
   fi
@@ -82,7 +95,11 @@ load_plugins() {
   if [[ -d "$plugins_dir/system" ]]; then
     for plugin_file in "$plugins_dir/system"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
-        source "$plugin_file"
+        if ! source "$plugin_file" 2>/dev/null; then
+          print_error "Failed to load plugin: $plugin_file"
+          log_message "ERROR" "Plugin load failure: $plugin_file"
+          load_errors=$((load_errors + 1))
+        fi
       fi
     done
   fi
@@ -91,9 +108,18 @@ load_plugins() {
   if [[ -d "$plugins_dir/maintenance" ]]; then
     for plugin_file in "$plugins_dir/maintenance"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
-        source "$plugin_file"
+        if ! source "$plugin_file" 2>/dev/null; then
+          print_error "Failed to load plugin: $plugin_file"
+          log_message "ERROR" "Plugin load failure: $plugin_file"
+          load_errors=$((load_errors + 1))
+        fi
       fi
     done
+  fi
+  
+  # Warn if there were load errors, but continue (some plugins may still work)
+  if [[ $load_errors -gt 0 ]]; then
+    print_warning "$load_errors plugin(s) failed to load. Some cleanup operations may be unavailable."
   fi
 }
 
@@ -1028,14 +1054,14 @@ main() {
       echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
       
       local function=$(mc_get_plugin_function "$option")
-      if [[ -n "$function" ]]; then
+      if [[ -n "$function" ]] && type "$function" &>/dev/null; then
         $function >> "$cleanup_output_file" 2>&1
         sync_globals
         # Write progress update AFTER completing the operation
         echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
       else
-        print_error "Unknown cleanup function for: $option" >> "$cleanup_output_file"
-        log_message "ERROR" "Unknown cleanup function for: $option"
+        print_error "Plugin function not found or invalid: $function (for plugin: $option)" >> "$cleanup_output_file"
+        log_message "ERROR" "Plugin function not found: $function (for plugin: $option)"
         # Still mark as completed even if function not found
         echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
       fi
@@ -1044,6 +1070,7 @@ main() {
     echo "$total_operations|$total_operations|Complete|0|0|" > "$progress_file"
   ) &
   local cleanup_pid=$!
+  MC_CLEANUP_PID=$cleanup_pid  # Store in global for interrupt handler
   
   # Show progress bar while cleanup runs
   (
@@ -1196,6 +1223,7 @@ main() {
     printf '\r\033[K' >&2
   ) &
   local progress_pid=$!
+  MC_PROGRESS_PID=$progress_pid  # Store in global for interrupt handler
   
   # Wait for cleanup to complete
   wait $cleanup_pid

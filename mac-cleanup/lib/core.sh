@@ -12,6 +12,8 @@ MC_QUIET_MODE=false
 MC_LOG_FILE=""
 MC_TOTAL_SPACE_SAVED=0
 MC_ADMIN_USERNAME=""
+MC_CLEANUP_PID=""
+MC_PROGRESS_PID=""
 declare -A MC_SPACE_SAVED_BY_OPERATION
 declare -A MC_PLUGIN_REGISTRY
 
@@ -88,8 +90,26 @@ mc_handle_interrupt() {
   print_warning "Script interrupted by user."
   print_info "Cleaning up and exiting..."
   
+  # Kill background cleanup process if running
+  if [[ -n "${MC_CLEANUP_PID:-}" && "$MC_CLEANUP_PID" =~ ^[0-9]+$ ]]; then
+    if kill -0 "$MC_CLEANUP_PID" 2>/dev/null; then
+      print_info "Stopping cleanup process..."
+      kill "$MC_CLEANUP_PID" 2>/dev/null || true
+      wait "$MC_CLEANUP_PID" 2>/dev/null || true
+    fi
+  fi
+  
+  # Kill progress display process if running
+  if [[ -n "${MC_PROGRESS_PID:-}" && "$MC_PROGRESS_PID" =~ ^[0-9]+$ ]]; then
+    if kill -0 "$MC_PROGRESS_PID" 2>/dev/null; then
+      kill "$MC_PROGRESS_PID" 2>/dev/null || true
+      wait "$MC_PROGRESS_PID" 2>/dev/null || true
+    fi
+  fi
+  
   # Clean up sweep temp files (N qualifier prevents error if no matches)
   rm -f /tmp/mac-cleanup-sweep-*.tmp(N) 2>/dev/null
+  rm -f /tmp/mac-cleanup-*.tmp 2>/dev/null || true
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool

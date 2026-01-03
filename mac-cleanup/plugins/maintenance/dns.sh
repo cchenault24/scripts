@@ -12,7 +12,8 @@ flush_dns_cache() {
     print_info "[DRY RUN] Would flush DNS cache"
     log_message "DRY_RUN" "Would flush DNS cache"
   else
-    run_as_admin "dscacheutil -flushcache; killall -HUP mDNSResponder" "DNS cache flush"
+    # DNS cache flush command doesn't use variables, but ensure it's properly quoted
+    run_as_admin "dscacheutil -flushcache && killall -HUP mDNSResponder" "DNS cache flush"
     print_success "DNS Cache flushed"
   fi
 }

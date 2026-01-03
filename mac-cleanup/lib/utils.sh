@@ -159,10 +159,15 @@ safe_remove() {
       print_success "Cleaned $description"
       log_message "SUCCESS" "Removed: $path (freed $(format_bytes $size_before))"
       MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + size_before))
-      # Write to space tracking file if in background process
+      # Write to space tracking file if in background process (with locking)
       # safe_remove is typically used standalone, so we write to the file
       if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-        echo "$description|$size_before" >> "$MC_SPACE_TRACKING_FILE" 2>/dev/null || true
+        # Use helper function from base.sh if available, otherwise use simple write
+        if type _write_space_tracking_file &>/dev/null; then
+          _write_space_tracking_file "$description" "$size_before"
+        else
+          echo "$description|$size_before" >> "$MC_SPACE_TRACKING_FILE" 2>/dev/null || true
+        fi
       fi
     else
       print_warning "Failed to completely remove $description"

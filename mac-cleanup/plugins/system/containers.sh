@@ -95,7 +95,13 @@ clean_saved_states() {
     backup "$saved_states_dir" "saved_app_states"
     safe_clean_dir "$saved_states_dir" "saved application states"
     local space_after=$(calculate_size_bytes "$saved_states_dir")
-    track_space_saved "Saved Application States" $((space_before - space_after))
+    local space_freed=$((space_before - space_after))
+    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+    MC_SPACE_SAVED_BY_OPERATION["Saved Application States"]=$space_freed
+    # Write to space tracking file if in background process (with locking)
+    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+      _write_space_tracking_file "Saved Application States" "$space_freed"
+    fi
     print_success "Cleaned saved application states."
   else
     print_warning "No saved application states found."

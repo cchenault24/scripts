@@ -22,7 +22,8 @@ clean_system_cache() {
       print_info "[DRY RUN] Would clean system cache"
       log_message "DRY_RUN" "Would clean system cache"
     else
-      run_as_admin "find $cache_dir -maxdepth 1 -type d ! -path $cache_dir -exec rm -rf {} + 2>/dev/null || true" "system cache cleanup"
+      # Properly escape cache_dir to prevent command injection
+      run_as_admin "find \"$cache_dir\" -maxdepth 1 -type d ! -path \"$cache_dir\" -exec rm -rf {} + 2>/dev/null || true" "system cache cleanup"
       
       local space_after=$(sudo sh -c "du -sk $cache_dir 2>/dev/null | awk '{print \$1 * 1024}'" || echo "0")
       local space_freed=$((space_before - space_after))

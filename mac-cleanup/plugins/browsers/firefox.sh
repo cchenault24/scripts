@@ -15,11 +15,15 @@ clean_firefox_cache() {
   if [[ -d "$firefox_cache_dir" ]]; then
     firefox_found=true
     local space_before=$(calculate_size_bytes "$firefox_cache_dir")
-    backup "$firefox_cache_dir" "firefox_cache"
-    safe_clean_dir "$firefox_cache_dir" "Firefox cache"
-    local space_after=$(calculate_size_bytes "$firefox_cache_dir")
-    total_space_freed=$((total_space_freed + space_before - space_after))
-    print_success "Cleaned Firefox cache."
+    if ! backup "$firefox_cache_dir" "firefox_cache"; then
+      print_error "Backup failed for Firefox cache. Skipping this directory."
+      log_message "ERROR" "Backup failed for Firefox cache, skipping"
+    else
+      safe_clean_dir "$firefox_cache_dir" "Firefox cache"
+      local space_after=$(calculate_size_bytes "$firefox_cache_dir")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned Firefox cache."
+    fi
   fi
   
   # Find and clean all Firefox profiles
@@ -52,18 +56,27 @@ clean_firefox_cache() {
       update_operation_progress $current_item $total_items "$profile_name/$dir_name"
       
       local space_before=$(calculate_size_bytes "$dir")
-      backup "$dir" "firefox_${profile_name}_$dir_name"
-      safe_clean_dir "$dir" "Firefox $profile_name $dir_name"
-      local space_after=$(calculate_size_bytes "$dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned Firefox $profile_name $dir_name."
+      if ! backup "$dir" "firefox_${profile_name}_$dir_name"; then
+        print_error "Backup failed for Firefox $profile_name $dir_name. Skipping this directory."
+        log_message "ERROR" "Backup failed for Firefox $profile_name $dir_name, skipping"
+      else
+        safe_clean_dir "$dir" "Firefox $profile_name $dir_name"
+        local space_after=$(calculate_size_bytes "$dir")
+        total_space_freed=$((total_space_freed + space_before - space_after))
+        print_success "Cleaned Firefox $profile_name $dir_name."
+      fi
     done
   fi
   
   if [[ "$firefox_found" == false ]]; then
     print_warning "Firefox does not appear to be installed or has never been run."
   else
-    track_space_saved "Firefox Cache" $total_space_freed
+    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+    MC_SPACE_SAVED_BY_OPERATION["Firefox Cache"]=$total_space_freed
+    # Write to space tracking file if in background process (with locking)
+    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+      _write_space_tracking_file "Firefox Cache" "$total_space_freed"
+    fi
     print_warning "You may need to restart Firefox for changes to take effect"
   fi
 }

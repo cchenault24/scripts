@@ -16,11 +16,15 @@ clean_chrome_cache() {
   if [[ -d "$chrome_cache_dir" ]]; then
     chrome_found=true
     local space_before=$(calculate_size_bytes "$chrome_cache_dir")
-    backup "$chrome_cache_dir" "chrome_cache"
-    safe_clean_dir "$chrome_cache_dir" "Chrome cache"
-    local space_after=$(calculate_size_bytes "$chrome_cache_dir")
-    total_space_freed=$((total_space_freed + space_before - space_after))
-    print_success "Cleaned Chrome cache."
+    if ! backup "$chrome_cache_dir" "chrome_cache"; then
+      print_error "Backup failed for Chrome cache. Skipping this directory."
+      log_message "ERROR" "Backup failed for Chrome cache, skipping"
+    else
+      safe_clean_dir "$chrome_cache_dir" "Chrome cache"
+      local space_after=$(calculate_size_bytes "$chrome_cache_dir")
+      total_space_freed=$((total_space_freed + space_before - space_after))
+      print_success "Cleaned Chrome cache."
+    fi
   fi
   
   # Find and clean all Chrome profiles (not just Default)
@@ -53,18 +57,27 @@ clean_chrome_cache() {
       update_operation_progress $current_item $total_items "$profile_name/$dir_name"
       
       local space_before=$(calculate_size_bytes "$dir")
-      backup "$dir" "chrome_${profile_name}_$dir_name"
-      safe_clean_dir "$dir" "Chrome $profile_name $dir_name"
-      local space_after=$(calculate_size_bytes "$dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned Chrome $profile_name $dir_name."
+      if ! backup "$dir" "chrome_${profile_name}_$dir_name"; then
+        print_error "Backup failed for Chrome $profile_name $dir_name. Skipping this directory."
+        log_message "ERROR" "Backup failed for Chrome $profile_name $dir_name, skipping"
+      else
+        safe_clean_dir "$dir" "Chrome $profile_name $dir_name"
+        local space_after=$(calculate_size_bytes "$dir")
+        total_space_freed=$((total_space_freed + space_before - space_after))
+        print_success "Cleaned Chrome $profile_name $dir_name."
+      fi
     done
   fi
   
   if [[ "$chrome_found" == false ]]; then
     print_warning "Chrome does not appear to be installed or has never been run."
   else
-    track_space_saved "Chrome Cache" $total_space_freed
+    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+    MC_SPACE_SAVED_BY_OPERATION["Chrome Cache"]=$total_space_freed
+    # Write to space tracking file if in background process (with locking)
+    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+      _write_space_tracking_file "Chrome Cache" "$total_space_freed"
+    fi
     print_warning "You may need to restart Chrome for changes to take effect"
   fi
 }

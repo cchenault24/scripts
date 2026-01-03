@@ -62,7 +62,12 @@ clean_xcode_data() {
     if [[ $total_space_freed -eq 0 ]]; then
       print_warning "No Xcode data found to clean."
     else
-      track_space_saved "Xcode Data" $total_space_freed
+      # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+      MC_SPACE_SAVED_BY_OPERATION["Xcode Data"]=$total_space_freed
+      # Write to space tracking file if in background process (with locking)
+      if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+        _write_space_tracking_file "Xcode Data" "$total_space_freed"
+      fi
       print_warning "You may need to rebuild Xcode projects after this cleanup."
     fi
   else
