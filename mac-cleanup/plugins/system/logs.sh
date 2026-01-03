@@ -96,7 +96,9 @@ clean_system_logs() {
     local space_before=0
     
     if [[ "$MC_DRY_RUN" != "true" ]]; then
-      space_before=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
+      # SAFE-6: Properly quote logs_dir to prevent command injection
+      local escaped_logs_dir_size=$(printf '%q' "$logs_dir")
+      space_before=$(sudo -n sh -c "du -sk $escaped_logs_dir_size 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
     fi
     
     if ! backup "$logs_dir" "system_logs"; then
@@ -123,7 +125,9 @@ clean_system_logs() {
         return 1
       }
       
-      local space_after=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
+      # SAFE-6: Properly quote logs_dir to prevent command injection
+      local escaped_logs_dir_after=$(printf '%q' "$logs_dir")
+      local space_after=$(sudo -n sh -c "du -sk $escaped_logs_dir_after 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
       local space_freed=$((space_before - space_after))
       
       # Validate space_freed is not negative

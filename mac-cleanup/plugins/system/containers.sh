@@ -52,15 +52,14 @@ clean_container_caches() {
       local space_before=$(calculate_size_bytes "$dir")
       if [[ $space_before -gt 0 ]]; then
         # Clean the directory silently (we'll show summary at end)
+        # SAFE-1: Use safe_clean_dir to safely handle symlinks and permissions
         if [[ -d "$dir" ]]; then
-          find "$dir" -mindepth 1 -delete 2>/dev/null || {
-            find "$dir" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null
-            find "$dir" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null
-            if [[ -n "${ZSH_VERSION:-}" ]]; then
-              rm -rf "${dir:?}"/*(N) "${dir:?}"/.[!.]*(N) 2>/dev/null
-            else
-              rm -rf "${dir:?}"/* "${dir:?}"/.[!.]* 2>/dev/null
-            fi
+          safe_clean_dir "$dir" "container cache: $app_name" || {
+            # Fallback: try find -delete if safe_clean_dir fails
+            find "$dir" -mindepth 1 -delete 2>/dev/null || {
+              find "$dir" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null
+              find "$dir" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null
+            }
           }
           invalidate_size_cache "$dir"
         fi

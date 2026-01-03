@@ -46,7 +46,8 @@ clean_npm_cache() {
       local npm_cacache_dir="$npm_cache_dir/_cacache"
       if [[ -d "$npm_cacache_dir" ]]; then
         log_message "INFO" "Removing npm cache files from $npm_cacache_dir"
-        rm -rf "$npm_cacache_dir" 2>&1 | log_message "INFO" || {
+        # SAFE-1: Use safe_remove to safely handle symlinks and permissions
+        safe_remove "$npm_cacache_dir" "npm cache directory" || {
           print_warning "Failed to remove npm cache directory: $npm_cacache_dir"
           log_message "WARNING" "Failed to remove npm cache directory: $npm_cacache_dir"
         }
@@ -118,8 +119,9 @@ clean_npm_cache() {
         # yarn cache clean may only clear the index, not delete files
         if [[ -d "$yarn_cache_dir" ]]; then
           log_message "INFO" "Removing yarn cache files from $yarn_cache_dir"
-          # Remove all files and subdirectories in the yarn cache directory
-          find "$yarn_cache_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} \; 2>&1 | log_message "INFO" || {
+          # SAFE-1: Use safe_clean_dir to safely handle symlinks and permissions
+          # This is safer than find ... -exec rm -rf which can follow symlinks
+          safe_clean_dir "$yarn_cache_dir" "yarn cache directory" || {
             print_warning "Failed to remove some yarn cache files from: $yarn_cache_dir"
             log_message "WARNING" "Failed to remove some yarn cache files from: $yarn_cache_dir"
           }

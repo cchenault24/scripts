@@ -52,8 +52,14 @@ clean_temp_files() {
         if [[ $dir_size -gt 0 ]]; then
           # Backup before removing directory
           if backup "$temp_dir" "temp_dir_$(basename "$temp_dir")"; then
-            # Remove the empty directory
-            if rmdir "$temp_dir" 2>/dev/null || rm -rf "$temp_dir" 2>/dev/null; then
+            # SAFE-1: Use safe_remove to safely handle symlinks and permissions
+            # Try rmdir first for empty directories, then fall back to safe_remove
+            if rmdir "$temp_dir" 2>/dev/null; then
+              print_success "Removed empty directory: $temp_dir (freed $(format_bytes $dir_size))."
+              log_message "SUCCESS" "Removed empty directory: $temp_dir (freed $(format_bytes $dir_size))"
+              total_space_freed=$((total_space_freed + dir_size))
+              MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + dir_size))
+            elif safe_remove "$temp_dir" "empty temp directory"; then
               print_success "Removed empty directory: $temp_dir (freed $(format_bytes $dir_size))."
               log_message "SUCCESS" "Removed empty directory: $temp_dir (freed $(format_bytes $dir_size))"
               total_space_freed=$((total_space_freed + dir_size))
@@ -85,13 +91,11 @@ clean_temp_files() {
     if [[ "$temp_dir" == "/tmp" ]]; then
       # Use cached file list for deletion (reuse find results from above)
       if [[ ${#files_to_clean[@]} -gt 0 ]]; then
-        # Batch delete using the cached list
-        printf '%s\0' "${files_to_clean[@]}" | xargs -0 rm -rf 2>/dev/null || {
-          # Fallback: delete individually if batch fails
-          for item in "${files_to_clean[@]}"; do
-            safe_remove "$item" "$(basename "$item")"
-          done
-        }
+        # SAFE-1: Use safe_remove for each item to safely handle symlinks and permissions
+        # This is safer than xargs rm -rf which can follow symlinks
+        for item in "${files_to_clean[@]}"; do
+          safe_remove "$item" "$(basename "$item")"
+        done
       fi
       # Invalidate cache after manual cleanup
       invalidate_size_cache "$temp_dir"
