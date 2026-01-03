@@ -3,6 +3,8 @@
 # plugins/development/xcode.sh - Xcode data cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Helper function to clean a directory safely (used for safe temp files)
 _clean_xcode_dir_safe() {
   local dir="$1"

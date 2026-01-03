@@ -3,6 +3,8 @@
 # lib/backup/validation.sh - Validation and integrity checking for backup system
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Calculate SHA256 checksum of a file
 # Arguments: file_path
 # Outputs: checksum string (format: sha256:hexdigest)

@@ -3,6 +3,8 @@
 # plugins/system/containers.sh - Application container caches and saved states cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_container_caches() {
   print_header "Cleaning Application Container Caches"
   

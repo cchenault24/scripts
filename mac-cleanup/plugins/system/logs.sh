@@ -3,6 +3,8 @@
 # plugins/system/logs.sh - Application and system logs cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_app_logs() {
   print_header "Cleaning Application Logs"
   

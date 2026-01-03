@@ -3,6 +3,8 @@
 # lib/ui.sh - UI functions for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Set color variables
 MC_RED='\033[0;31m'
 MC_GREEN='\033[0;32m'

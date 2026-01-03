@@ -3,6 +3,8 @@
 # lib/backup/storage.sh - Storage management for backup system
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Check available disk space for a given directory
 # Returns available space in bytes, or 0 on error
 mc_storage_check_space() {

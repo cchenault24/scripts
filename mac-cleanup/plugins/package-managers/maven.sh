@@ -3,6 +3,8 @@
 # plugins/package-managers/maven.sh - Maven cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_maven_cache() {
   print_header "Cleaning Maven Cache"
   

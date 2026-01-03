@@ -3,6 +3,8 @@
 # plugins/browsers/chrome.sh - Chrome cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_chrome_cache() {
   print_header "Cleaning Chrome Cache"
   

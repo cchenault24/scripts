@@ -9,6 +9,8 @@
 # License: MIT
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Ensure PATH includes standard system directories
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
 
@@ -583,7 +585,7 @@ parse_arguments() {
         ;;
       --undo)
         source "$SCRIPT_DIR/features/undo.sh"
-        undo_cleanup
+        mc_undo_cleanup
         exit $?
         ;;
       --schedule)

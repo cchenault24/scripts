@@ -3,6 +3,8 @@
 # plugins/development/dev_tools.sh - Developer tool temporary files cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_dev_tool_temp() {
   print_header "Cleaning Developer Tool Temporary Files"
   

@@ -3,6 +3,8 @@
 # plugins/package-managers/pip.sh - pip cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_pip_cache() {
   print_header "Cleaning pip Cache"
   

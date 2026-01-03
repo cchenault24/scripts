@@ -3,6 +3,8 @@
 # lib/utils.sh - Utility functions for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Size calculation cache (associative array)
 typeset -A MC_SIZE_CACHE
 

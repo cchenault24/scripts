@@ -3,6 +3,8 @@
 # plugins/maintenance/lockfiles.sh - Corrupted preference lockfiles cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_pref_lockfiles() {
   print_header "Cleaning Corrupted Preference Lockfiles"
   

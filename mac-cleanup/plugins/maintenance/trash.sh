@@ -3,6 +3,8 @@
 # plugins/maintenance/trash.sh - Empty Trash plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 empty_trash() {
   print_header "Emptying Trash"
   

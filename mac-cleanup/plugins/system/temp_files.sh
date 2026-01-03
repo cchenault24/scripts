@@ -3,6 +3,8 @@
 # plugins/system/temp_files.sh - Temporary files cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_temp_files() {
   print_header "Cleaning Temporary Files"
   

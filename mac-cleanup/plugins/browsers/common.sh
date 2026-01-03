@@ -4,6 +4,8 @@
 # QUAL-3: Shared functionality for browser cache cleanup plugins
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Common browser cache cleanup function
 # Parameters:
 #   - browser_name: Display name of the browser (e.g., "Chrome", "Firefox")

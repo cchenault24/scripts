@@ -3,8 +3,10 @@
 # features/undo.sh - Undo/restore functionality for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Undo cleanup - restore from backup
-undo_cleanup() {
+mc_undo_cleanup() {
   print_header "Undo Cleanup"
   
   # Load restore module

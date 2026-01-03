@@ -3,6 +3,8 @@
 # plugins/browsers/edge.sh - Microsoft Edge cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_edge_cache() {
   print_header "Cleaning Microsoft Edge Cache"
   

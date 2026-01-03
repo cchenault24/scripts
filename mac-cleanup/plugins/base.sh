@@ -3,6 +3,8 @@
 # plugins/base.sh - Base plugin interface for mac-cleanup plugins
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 #==============================================================================
 # Plugin API Documentation
 #==============================================================================

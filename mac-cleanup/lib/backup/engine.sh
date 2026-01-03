@@ -3,6 +3,8 @@
 # lib/backup/engine.sh - Core backup engine with atomic operations
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Main backup function - creates atomic backup of file or directory
 # Arguments: path, backup_name, backup_dir, manifest_path
 # Returns 0 on success, 1 on failure

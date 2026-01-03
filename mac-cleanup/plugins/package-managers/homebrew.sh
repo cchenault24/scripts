@@ -3,6 +3,8 @@
 # plugins/package-managers/homebrew.sh - Homebrew cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_homebrew_cache() {
   print_header "Cleaning Homebrew Cache"
   

@@ -4,6 +4,8 @@
 # Wrapper for new backup engine (backward compatible)
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Load backup modules
 _backup_modules_loaded=false
 _load_backup_modules() {

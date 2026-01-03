@@ -3,6 +3,8 @@
 # plugins/package-managers/npm.sh - npm/yarn cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_npm_cache() {
   print_header "Cleaning npm Cache"
   

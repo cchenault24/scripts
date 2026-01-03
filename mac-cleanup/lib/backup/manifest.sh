@@ -3,6 +3,8 @@
 # lib/backup/manifest.sh - JSON manifest management for backup system
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Initialize a new manifest file
 # Arguments: manifest_path, session_id
 mc_manifest_init() {

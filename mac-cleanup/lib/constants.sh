@@ -3,6 +3,8 @@
 # lib/constants.sh - Constants and configuration values for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Size constants (in bytes)
 MC_BYTES_PER_KB=1024
 MC_BYTES_PER_MB=1048576

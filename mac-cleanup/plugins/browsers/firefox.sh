@@ -3,6 +3,8 @@
 # plugins/browsers/firefox.sh - Firefox cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_firefox_cache() {
   print_header "Cleaning Firefox Cache"
   

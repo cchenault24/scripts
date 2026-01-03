@@ -3,6 +3,8 @@
 # lib/validation.sh - Input validation functions for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Validate that a path exists
 mc_validate_path_exists() {
   local path="$1"

@@ -3,6 +3,8 @@
 # lib/error_handler.sh - Standardized error handling functions for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Standard error handling wrapper for plugin operations
 # Usage: mc_handle_plugin_error <operation> <path> <error_code>
 mc_handle_plugin_error() {

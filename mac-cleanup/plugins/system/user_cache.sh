@@ -3,6 +3,8 @@
 # plugins/system/user_cache.sh - User cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_user_cache() {
   print_header "Cleaning User Cache"
   

@@ -3,6 +3,8 @@
 # lib/admin.sh - Admin/sudo operations for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Detect admin user
 mc_detect_admin_user() {
   # Try to get current user's groups

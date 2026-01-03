@@ -3,6 +3,8 @@
 # plugins/maintenance/dns.sh - DNS cache flush plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 flush_dns_cache() {
   print_header "Flushing DNS Cache"
   

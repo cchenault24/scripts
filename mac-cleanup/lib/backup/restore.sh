@@ -3,6 +3,8 @@
 # lib/backup/restore.sh - Restore engine for backup system
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Load dependencies
 # Get script directory - use MC_SCRIPT_DIR if available, otherwise calculate it
 restore_script_dir=""

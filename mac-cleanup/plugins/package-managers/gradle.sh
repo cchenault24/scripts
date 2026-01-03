@@ -3,6 +3,8 @@
 # plugins/package-managers/gradle.sh - Gradle cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_gradle_cache() {
   print_header "Cleaning Gradle Cache"
   

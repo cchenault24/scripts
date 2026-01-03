@@ -3,6 +3,8 @@
 # features/schedule.sh - Scheduling functionality for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Generate LaunchAgent plist for scheduling
 generate_launchagent() {
   local schedule="$1"  # daily, weekly, monthly

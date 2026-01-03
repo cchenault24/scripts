@@ -3,6 +3,8 @@
 # lib/core.sh - Core utilities and state management for mac-cleanup
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # Global state variables (MC_ prefix for mac-cleanup)
 # Only initialize MC_BACKUP_DIR if it's not already set (prevents re-initialization with new timestamp)
 if [[ -z "${MC_BACKUP_DIR:-}" ]]; then
@@ -29,7 +31,7 @@ if [[ -z "${MC_BYTES_PER_MB:-}" ]]; then
 fi
 
 # Create backup directory if it doesn't exist
-create_backup_dir() {
+_create_backup_dir() {
   if [[ ! -d "$MC_BACKUP_DIR" ]]; then
     if ! mkdir -p "$MC_BACKUP_DIR" 2>/dev/null; then
       print_error "Failed to create backup directory at $MC_BACKUP_DIR"
@@ -44,7 +46,7 @@ create_backup_dir() {
 # Initialize core
 mc_core_init() {
   # Create backup directory
-  create_backup_dir
+  _create_backup_dir
   
   # Initialize backup system (will create JSON manifest)
   # Load backup module to initialize
@@ -90,8 +92,8 @@ mc_cleanup_script() {
   print_info "Cleaning up script resources..."
   
   # Remove any temp files (N qualifier prevents error if no matches)
-  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-temp-*(/N) 2>/dev/null
-  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-*.tmp(N) 2>/dev/null
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-temp-"*(/N) 2>/dev/null
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-"*.tmp(N) 2>/dev/null
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool
@@ -126,8 +128,8 @@ mc_handle_interrupt() {
   fi
   
   # Clean up sweep temp files (N qualifier prevents error if no matches)
-  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-*.tmp(N) 2>/dev/null
-  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-*.tmp 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-"*.tmp(N) 2>/dev/null
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-"*.tmp 2>/dev/null || true
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool

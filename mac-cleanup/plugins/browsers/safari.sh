@@ -3,6 +3,8 @@
 # plugins/browsers/safari.sh - Safari cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 # This file is sourced by the main script which provides:
 # - All lib functions (print_*, log_message, calculate_size, etc.)
 # - Plugin registration functions from plugins/base.sh

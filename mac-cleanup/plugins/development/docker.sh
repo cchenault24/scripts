@@ -3,6 +3,8 @@
 # plugins/development/docker.sh - Docker cache cleanup plugin
 #
 
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
 clean_docker_cache() {
   print_header "Cleaning Docker Cache"
   
