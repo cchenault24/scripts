@@ -38,7 +38,6 @@ clean_maven_cache() {
         fi
         # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
         track_space_saved "Maven Cache" $total_space_freed "true"
-        print_success "Maven repository cleaned."
         log_message "SUCCESS" "Maven repository cleaned (freed $(format_bytes $total_space_freed))"
       fi
     else

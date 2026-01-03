@@ -33,8 +33,7 @@ clean_edge_cache() {
       space_freed=0
       log_message "WARNING" "Directory size increased during cleanup: $edge_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
     fi
-    total_space_freed=$((total_space_freed + space_freed))
-    print_success "Cleaned Edge cache."
+      total_space_freed=$((total_space_freed + space_freed))
   fi
   
   # Find and clean all Edge profiles (similar to Chrome)
@@ -86,7 +85,6 @@ clean_edge_cache() {
         log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
       fi
       total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned Edge $profile_name $dir_name."
     done
   fi
   
@@ -98,7 +96,6 @@ clean_edge_cache() {
   
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
   track_space_saved "Microsoft Edge Cache" $total_space_freed "true"
-  print_warning "You may need to restart Edge for changes to take effect"
   return 0
 }
 

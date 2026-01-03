@@ -45,7 +45,6 @@ clean_browser_cache_common() {
       fi
       
       total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned ${browser_name} cache."
     fi
   fi
   
@@ -92,7 +91,6 @@ clean_browser_cache_common() {
         fi
         
         total_space_freed=$((total_space_freed + space_freed))
-        print_success "Cleaned ${browser_name} $profile_name $dir_name."
       fi
     done
   fi
@@ -106,7 +104,6 @@ clean_browser_cache_common() {
     if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
       _write_space_tracking_file "${browser_name} Cache" "$total_space_freed"
     fi
-    print_warning "You may need to restart ${browser_name} for changes to take effect"
   fi
   
   return 0

@@ -30,7 +30,6 @@ clean_gradle_cache() {
       log_message "WARNING" "Directory size increased during cleanup: $gradle_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
     fi
     total_space_freed=$((total_space_freed + space_freed))
-    print_success "Cleaned Gradle cache."
   fi
   
   if [[ -d "$gradle_wrapper_dir" ]]; then
@@ -54,7 +53,6 @@ clean_gradle_cache() {
       log_message "WARNING" "Directory size increased during cleanup: $gradle_wrapper_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
     fi
     total_space_freed=$((total_space_freed + space_freed))
-    print_success "Cleaned Gradle wrapper cache."
   fi
   
   if [[ $total_space_freed -eq 0 ]]; then

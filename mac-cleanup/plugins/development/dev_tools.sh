@@ -40,7 +40,6 @@ clean_dev_tool_temp() {
             log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
           fi
           total_space_freed=$((total_space_freed + space_freed))
-          print_success "Cleaned $dir."
         fi
       done
     fi
@@ -78,7 +77,6 @@ clean_dev_tool_temp() {
         log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
       fi
       total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned $dir."
     fi
   done
   

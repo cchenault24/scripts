@@ -55,7 +55,6 @@ clean_app_logs() {
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
   track_space_saved "Application Logs" $space_freed "true"
   
-  print_success "Application logs cleaned."
   return 0
 }
 
@@ -138,8 +137,6 @@ clean_system_logs() {
       fi
       
       track_space_saved "System Logs" $space_freed
-      
-      print_success "System logs cleaned."
     fi
   fi
 }

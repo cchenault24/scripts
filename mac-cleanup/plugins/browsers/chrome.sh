@@ -37,7 +37,6 @@ clean_chrome_cache() {
     fi
     
     total_space_freed=$((total_space_freed + space_freed))
-    print_success "Cleaned Chrome cache."
   fi
   
   # Find and clean all Chrome profiles (not just Default)
@@ -91,7 +90,6 @@ clean_chrome_cache() {
       fi
       
       total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned Chrome $profile_name $dir_name."
     done
   fi
   
@@ -103,7 +101,6 @@ clean_chrome_cache() {
   
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
   track_space_saved "Chrome Cache" $total_space_freed "true"
-  print_warning "You may need to restart Chrome for changes to take effect"
   return 0
 }
 

@@ -111,10 +111,6 @@ clean_temp_files() {
     fi
     
     total_space_freed=$((total_space_freed + space_freed))
-    
-    if [[ $space_freed -gt 0 ]]; then
-      print_success "Cleaned $temp_dir (freed $(format_bytes $space_freed))."
-    fi
   done
   
   # safe_clean_dir/safe_remove already update MC_TOTAL_SPACE_SAVED, so we only track per-operation

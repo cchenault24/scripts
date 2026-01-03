@@ -51,7 +51,6 @@ clean_pip_cache() {
         log_message "WARNING" "Directory size increased during cleanup: $pip_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
       fi
       track_space_saved "pip Cache" $total_space_freed
-      print_success "pip cache cleaned."
       log_message "SUCCESS" "pip cache cleaned (freed $(format_bytes $total_space_freed))"
     fi
   else

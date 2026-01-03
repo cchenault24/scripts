@@ -10,7 +10,6 @@ clean_pref_lockfiles() {
   local total_space_freed=0
   
   if [[ ${#plist_locks[@]} -eq 0 ]]; then
-    print_warning "No preference lockfiles found."
     track_space_saved "Corrupted Preference Lockfiles" 0
     return 0
   fi
@@ -38,7 +37,6 @@ clean_pref_lockfiles() {
   # safe_remove already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
   # We pass "true" to skip updating the total to avoid double-counting
   track_space_saved "Corrupted Preference Lockfiles" $total_space_freed "true"
-  print_success "Cleaned corrupted preference lockfiles."
   return 0
 }
 

@@ -139,7 +139,6 @@ clean_docker_cache() {
         log_message "WARNING" "Docker size increased during cleanup (before: $(format_bytes $docker_size_before), after: $(format_bytes $docker_size_after))"
       fi
       
-      print_success "Docker cache cleaned."
       log_message "SUCCESS" "Docker cache cleaned (freed $(format_bytes $docker_space_freed))"
       track_space_saved "Docker Cache" $docker_space_freed
       return 0

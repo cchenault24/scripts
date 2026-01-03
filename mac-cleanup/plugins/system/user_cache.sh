@@ -63,7 +63,6 @@ clean_user_cache() {
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
   track_space_saved "User Cache" $space_freed "true"
   
-  print_success "User cache cleaned."
   return 0
 }
 

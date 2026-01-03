@@ -79,11 +79,9 @@ _clean_xcode_dir_safe() {
     fi
   fi
   
-  # Only print success message if not in quiet mode
+  # Only print warning if space wasn't freed (useful diagnostic)
   local quiet_mode="${MC_QUIET_MODE:-false}"
-  if [[ $space_freed -gt 0 && "$quiet_mode" != "true" ]]; then
-    print_success "Cleaned $description ($(format_bytes $space_freed))." >&2
-  elif [[ $space_freed -eq 0 && $space_before -gt 0 && "$quiet_mode" != "true" ]]; then
+  if [[ $space_freed -eq 0 && $space_before -gt 0 && "$quiet_mode" != "true" ]]; then
     print_warning "No space was freed for $description. Files may be locked by Xcode." >&2
     print_info "Try closing Xcode and running cleanup again." >&2
   fi
@@ -140,11 +138,6 @@ _clean_xcode_old_items() {
     }
     
     total_space_freed=$((total_space_freed + space_before))
-    # Only print success message if not in quiet mode
-    local quiet_mode="${MC_QUIET_MODE:-false}"
-    if [[ "$quiet_mode" != "true" ]]; then
-      print_success "Removed old $item_name ($(format_bytes $space_before))." >&2
-    fi
   done
   
   echo "$total_space_freed"

@@ -73,19 +73,11 @@ clean_container_caches() {
       fi
     done
     
-    if [[ $processed_count -gt 0 ]]; then
-      if [[ $processed_count -eq 1 ]]; then
-        print_success "Cleaned 1 container cache directory ($(format_bytes $total_space_freed) freed)."
-      else
-        print_success "Cleaned $processed_count container cache directories ($(format_bytes $total_space_freed) freed)."
-      fi
-    fi
     
     # Manual cleanup doesn't use safe_clean_dir, so we need to track space manually
     # Manual cleanup doesn't use safe_clean_dir, so we update the total (don't skip)
     track_space_saved "Application Container Caches" $total_space_freed
   else
-    print_warning "No application containers found."
     track_space_saved "Application Container Caches" 0
   fi
   return 0
@@ -111,9 +103,7 @@ clean_saved_states() {
     fi
     # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
     track_space_saved "Saved Application States" $space_freed "true"
-    print_success "Cleaned saved application states."
   else
-    print_warning "No saved application states found."
     track_space_saved "Saved Application States" 0
   fi
   return 0

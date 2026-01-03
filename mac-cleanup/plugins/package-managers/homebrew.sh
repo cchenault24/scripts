@@ -79,7 +79,6 @@ clean_homebrew_cache() {
     fi
     
     track_space_saved "Homebrew Cache" $space_freed
-    print_success "Homebrew cache cleaned."
     log_message "SUCCESS" "Homebrew cache cleaned (freed $(format_bytes $space_freed))"
     return 0
   fi

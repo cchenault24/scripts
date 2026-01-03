@@ -61,7 +61,6 @@ clean_system_cache() {
       
       track_space_saved "System Cache" $space_freed
       
-      print_success "System cache cleaned."
       return 0
     fi
   else

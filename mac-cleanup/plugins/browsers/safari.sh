@@ -59,14 +59,12 @@ clean_safari_cache() {
           log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
         fi
         total_space_freed=$((total_space_freed + space_freed))
-        print_success "Cleaned $dir ($(format_bytes $space_freed))."
       fi
     fi
   done
   
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
   track_space_saved "Safari Cache" $total_space_freed "true"
-  print_warning "You may need to restart Safari for changes to take effect"
   return 0
 }
 

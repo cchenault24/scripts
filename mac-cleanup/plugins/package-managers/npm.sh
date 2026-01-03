@@ -68,11 +68,9 @@ clean_npm_cache() {
       # Warn if expected space wasn't freed (cleanup may not have worked as expected)
       # Only warn if we expected significant space (> 10MB) but freed very little (< 1% of expected)
       if [[ $space_before -gt 10485760 && $total_space_freed -lt $((space_before / 100)) ]]; then
-        print_warning "npm cache cleanup may not have freed expected space. Expected: $(format_bytes $space_before), Freed: $(format_bytes $total_space_freed)"
         log_message "WARNING" "npm cache cleanup may not have freed expected space. Expected: $(format_bytes $space_before), Freed: $(format_bytes $total_space_freed)"
       fi
       # Don't track space yet - wait until after yarn cleanup to track total (npm + yarn)
-      print_success "npm cache cleaned."
       log_message "SUCCESS" "npm cache cleaned (freed $(format_bytes $total_space_freed))"
     fi
   else
@@ -138,7 +136,6 @@ clean_npm_cache() {
         fi
         
         total_space_freed=$((total_space_freed + yarn_space_freed))
-        print_success "yarn cache cleaned."
         log_message "SUCCESS" "yarn cache cleaned (freed $(format_bytes $yarn_space_freed))"
       fi
     fi
