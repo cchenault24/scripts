@@ -31,10 +31,55 @@ The macOS Cleanup Utility (`mac-cleanup.sh`) is a comprehensive, interactive cle
 ## System Requirements
 
 - **macOS**: 10.15 (Catalina) or later
-- **Shell**: Zsh (default on modern macOS)
+- **Shell**: Zsh 5.0+ (default on modern macOS)
+- **Architecture**: Intel (x86_64) or Apple Silicon (arm64)
+- **File System**: APFS (recommended) or HFS+ (legacy, supported)
 - **Permissions**: Administrative account (auto-detected) for certain cleanup operations
 - **Dependencies**: `fzf` (auto-installed if missing), `find`, `tar`, `gzip`
 - **Disk Space**: Sufficient space for temporary backups (typically 10-20% of data to be cleaned)
+
+## Platform Compatibility
+
+### macOS Version Support
+
+The script automatically verifies that you're running macOS 10.15 (Catalina) or later. The version check:
+- Validates macOS version using `sw_vers`
+- Provides clear error messages if version is too old
+- Logs version information for troubleshooting
+
+### Architecture Support
+
+The script supports both Intel and Apple Silicon Macs:
+- **Intel (x86_64)**: Fully supported
+- **Apple Silicon (arm64)**: Fully supported
+- Architecture is auto-detected and logged for compatibility tracking
+
+### File System Compatibility
+
+The script works with both modern and legacy macOS file systems:
+- **APFS**: Fully supported (recommended for all features)
+- **HFS+**: Supported with some limitations (legacy systems)
+- File system type is auto-detected and logged
+
+### Zsh Compatibility
+
+This script is designed specifically for **zsh** and uses several zsh-specific features:
+
+**Zsh-Specific Features Used:**
+- **Glob Qualifiers**: `*(N)` pattern for null glob handling (prevents errors when directories are empty)
+- **Parameter Expansion**: `${(%):-%x}` for reliable script path detection
+- **Array Expansion**: `"${(@k)array}"` for associative array key expansion
+- **Associative Arrays**: `typeset -A` for plugin registry and state management
+
+**Why Zsh?**
+- Zsh is the default shell on macOS since Catalina (10.15)
+- Zsh provides better error handling and glob patterns
+- Modern zsh features improve script reliability and performance
+
+**Running in Other Shells:**
+- The script will detect if not running in zsh and exit with a helpful error message
+- Some features have bash fallbacks, but full functionality requires zsh
+- To use zsh: `zsh mac-cleanup.sh` or change default shell: `chsh -s /bin/zsh`
 
 ## Installation
 
@@ -473,27 +518,59 @@ The script uses a modular plugin-based architecture:
 
 ## Dependencies
 
-### Required
+The script automatically checks for all dependencies and provides clear error messages if required tools are missing.
 
+### Required Dependencies
+
+These tools are **required** for the script to function. The script will exit with an error if any are missing:
+
+- **find** - File system search (standard macOS tool, pre-installed)
+- **tar** - Archive creation/extraction (standard macOS tool, pre-installed)
+- **gzip** - Compression (standard macOS tool, pre-installed)
+- **zsh** - Shell interpreter (default on macOS, version 5.0+ required)
 - **fzf** - Interactive fuzzy finder for selection menus
-  - Auto-installed if missing
+  - Auto-installed if missing (via Homebrew)
   - Can be removed after use if installed by script
+  - Script will prompt for installation if not found
 
-### System Tools
+**If Required Tools Are Missing:**
+- The script will detect and report missing tools
+- For standard tools (find, tar, gzip): Install Xcode Command Line Tools: `xcode-select --install`
+- For fzf: The script will offer to install it automatically via Homebrew
 
-- **find** - File system search (standard macOS tool)
-- **tar** - Archive creation/extraction (standard macOS tool)
-- **gzip** - Compression (standard macOS tool)
-- **zsh** - Shell interpreter (default on macOS)
+### Optional Dependencies
 
-### Optional
+These tools are **optional** and only needed for specific cleanup operations. The script will gracefully skip related plugins if tools are not found:
 
-- **Docker** - Required only for Docker cache cleanup
-- **Homebrew** - Required only for Homebrew cache cleanup
+- **Homebrew** (`brew`) - Required only for Homebrew cache cleanup
+  - If missing: Homebrew cleanup plugin is skipped
+  - Install: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+
+- **Docker** (`docker`) - Required only for Docker cache cleanup
+  - If missing: Docker cleanup plugin is skipped
+  - Install: Download Docker Desktop from https://www.docker.com/products/docker-desktop
+
 - **npm/yarn** - Required only for npm cache cleanup
+  - If missing: npm cleanup plugin is skipped
+  - Install: Comes with Node.js (install via Homebrew: `brew install node`)
+
 - **pip** - Required only for pip cache cleanup
-- **Gradle** - Required only for Gradle cache cleanup
-- **Maven** - Required only for Maven cache cleanup
+  - If missing: pip cleanup plugin is skipped
+  - Install: Comes with Python (pre-installed on macOS, or via Homebrew: `brew install python`)
+
+- **Gradle** (`gradle`) - Required only for Gradle cache cleanup
+  - If missing: Gradle cleanup plugin is skipped
+  - Install: `brew install gradle` or download from https://gradle.org
+
+- **Maven** (`mvn`) - Required only for Maven cache cleanup
+  - If missing: Maven cleanup plugin is skipped
+  - Install: `brew install maven` or download from https://maven.apache.org
+
+**Dependency Detection:**
+- The script automatically detects which optional tools are available
+- Plugins for missing tools are automatically skipped (no errors)
+- Missing optional tools are logged but don't prevent script execution
+- Use `--quiet` mode to suppress optional dependency warnings
 
 ## Troubleshooting
 

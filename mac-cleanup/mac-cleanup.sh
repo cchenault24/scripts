@@ -628,8 +628,8 @@ main() {
   # Set up traps
   mc_setup_traps
   
-  # Check dependencies
-  mc_check_dependencies
+  # Phase 5: Check platform compatibility (macOS version, architecture, zsh, dependencies)
+  mc_check_platform_compatibility
   
   # Check for selection tool (fzf required) and install if needed
   mc_check_selection_tool

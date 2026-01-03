@@ -37,3 +37,20 @@ MC_LOG_LEVEL_WARNING="WARNING"
 MC_LOG_LEVEL_ERROR="ERROR"
 MC_LOG_LEVEL_SUCCESS="SUCCESS"
 MC_LOG_LEVEL_DRY_RUN="DRY_RUN"
+
+# Phase 5: Platform Compatibility Constants
+# Minimum required macOS version (10.15 = Catalina)
+MC_MIN_MACOS_MAJOR=10
+MC_MIN_MACOS_MINOR=15
+
+# Minimum required zsh version (5.0+)
+MC_MIN_ZSH_MAJOR=5
+MC_MIN_ZSH_MINOR=0
+
+# Supported architectures
+MC_ARCH_INTEL="intel"
+MC_ARCH_APPLE_SILICON="apple_silicon"
+
+# Supported file systems
+MC_FS_APFS="apfs"
+MC_FS_HFS_PLUS="hfs+"

@@ -79,27 +79,246 @@ mc_core_init() {
   fi
 }
 
-# Check for tools the script depends on
-# Phase 4.3: Enhanced with actionable error messages
-mc_check_dependencies() {
-  local missing_deps=()
+# Phase 5: Platform Compatibility Functions
+
+# Check macOS version compatibility (requires 10.15+)
+mc_check_macos_version() {
+  # Only check on macOS
+  if [[ "$OSTYPE" != "darwin"* ]]; then
+    print_error "This script is designed for macOS only."
+    print_info "Detected OS: $OSTYPE"
+    log_message "ERROR" "Non-macOS system detected: $OSTYPE"
+    exit 1
+  fi
   
-  for cmd in find; do
-    if ! command -v $cmd &>/dev/null; then
-      missing_deps+=($cmd)
+  # Get macOS version
+  local macos_version=""
+  if command -v sw_vers &>/dev/null; then
+    macos_version=$(sw_vers -productVersion)
+  else
+    print_warning "Cannot determine macOS version (sw_vers not found)"
+    log_message "WARNING" "sw_vers command not found, skipping version check"
+    return 0  # Continue anyway, as sw_vers should always be available
+  fi
+  
+  # Parse version (e.g., "10.15.7" or "13.2.1")
+  local major_version minor_version
+  major_version=$(echo "$macos_version" | cut -d. -f1)
+  minor_version=$(echo "$macos_version" | cut -d. -f2)
+  
+  # Check if version is 10.15 (Catalina) or later
+  # 10.15 = major=10, minor=15
+  # 11.0+ = major=11+
+  local version_ok=false
+  if [[ $major_version -gt 10 ]]; then
+    version_ok=true
+  elif [[ $major_version -eq 10 && $minor_version -ge 15 ]]; then
+    version_ok=true
+  fi
+  
+  if [[ "$version_ok" == "false" ]]; then
+    print_error "macOS version $macos_version is not supported."
+    print_info "This script requires macOS 10.15 (Catalina) or later."
+    print_info "Your version: $macos_version"
+    print_info "Next steps:"
+    print_info "  • Upgrade to macOS 10.15 or later"
+    print_info "  • Check for updates: System Preferences > Software Update"
+    log_message "ERROR" "Unsupported macOS version: $macos_version (requires 10.15+)"
+    exit 1
+  fi
+  
+  # Log version info
+  log_message "INFO" "macOS version check passed: $macos_version"
+  if [[ "$MC_QUIET_MODE" != "true" ]]; then
+    print_success "macOS version compatible: $macos_version"
+  fi
+}
+
+# Detect system architecture (Intel vs Apple Silicon)
+mc_detect_architecture() {
+  local arch=""
+  if command -v uname &>/dev/null; then
+    arch=$(uname -m)
+  else
+    print_warning "Cannot determine system architecture (uname not found)"
+    log_message "WARNING" "uname command not found"
+    echo "unknown"
+    return
+  fi
+  
+  case "$arch" in
+    x86_64)
+      echo "intel"
+      log_message "INFO" "Detected Intel architecture"
+      ;;
+    arm64)
+      echo "apple_silicon"
+      log_message "INFO" "Detected Apple Silicon architecture"
+      ;;
+    *)
+      echo "unknown"
+      log_message "WARNING" "Unknown architecture: $arch"
+      ;;
+  esac
+}
+
+# Check file system compatibility (APFS vs HFS+)
+mc_check_filesystem() {
+  local home_fs=""
+  
+  # macOS uses diskutil for file system information (df doesn't support -T on macOS)
+  if command -v diskutil &>/dev/null; then
+    # Get the device for the home directory
+    local device=$(df "$HOME" 2>/dev/null | tail -n1 | awk '{print $1}' || echo "")
+    if [[ -n "$device" ]]; then
+      # Get file system type from diskutil
+      home_fs=$(diskutil info "$device" 2>/dev/null | grep "File System Personality" | awk -F': ' '{print $2}' | awk '{print $1}' || echo "")
+    fi
+  fi
+  
+  # Fallback: try to detect from mount output
+  if [[ -z "$home_fs" ]]; then
+    home_fs=$(mount | grep "$(df "$HOME" 2>/dev/null | tail -n1 | awk '{print $1}')" | grep -oE '(apfs|hfs)' || echo "")
+  fi
+  
+  # Normalize and report file system type
+  if [[ -n "$home_fs" ]]; then
+    case "$(echo "$home_fs" | tr '[:upper:]' '[:lower:]')" in
+      apfs)
+        log_message "INFO" "File system: APFS (modern, recommended)"
+        ;;
+      hfs+|hfsx|hfs)
+        log_message "INFO" "File system: HFS+ (legacy, still supported)"
+        if [[ "$MC_QUIET_MODE" != "true" ]]; then
+          print_warning "HFS+ file system detected. Some features may be limited."
+        fi
+        ;;
+      *)
+        log_message "INFO" "File system: $home_fs"
+        ;;
+    esac
+  else
+    log_message "INFO" "File system: Unable to detect (assuming compatible)"
+  fi
+}
+
+# Check zsh compatibility and version
+mc_check_zsh_compatibility() {
+  # Verify we're running in zsh
+  if [[ -z "${ZSH_VERSION:-}" ]]; then
+    print_error "This script requires zsh (Z shell)."
+    print_info "Current shell: ${SHELL:-unknown}"
+    print_info "Next steps:"
+    print_info "  • Run with: zsh mac-cleanup.sh"
+    print_info "  • Or change default shell: chsh -s /bin/zsh"
+    log_message "ERROR" "Not running in zsh shell"
+    exit 1
+  fi
+  
+  # Check zsh version (should be 5.0+ for modern features)
+  local zsh_major=$(echo "$ZSH_VERSION" | cut -d. -f1)
+  if [[ $zsh_major -lt 5 ]]; then
+    print_warning "zsh version $ZSH_VERSION may not support all features."
+    print_info "Recommended: zsh 5.0 or later"
+    log_message "WARNING" "Older zsh version detected: $ZSH_VERSION"
+  else
+    log_message "INFO" "zsh version compatible: $ZSH_VERSION"
+  fi
+  
+  # Verify zsh-specific features are available
+  # Check for glob qualifiers (used in the script)
+  # The (N) qualifier makes globs return nothing instead of erroring on no matches
+  # Test by trying to use the qualifier syntax - if it errors, qualifiers aren't supported
+  if ! (eval 'local test_glob=(/nonexistent/*(N)); true' 2>/dev/null); then
+    print_warning "zsh glob qualifiers may not be fully supported."
+    log_message "WARNING" "zsh glob qualifier test failed - some features may not work"
+  else
+    log_message "INFO" "zsh glob qualifiers supported"
+  fi
+}
+
+# Check for tools the script depends on
+# Phase 5.3: Enhanced dependency checking with required vs optional
+mc_check_dependencies() {
+  local missing_required=()
+  local missing_optional=()
+  
+  # Required dependencies (script will not work without these)
+  local required_tools=("find" "tar" "gzip")
+  
+  # Optional dependencies (script will work but with limited functionality)
+  local optional_tools=("fzf" "brew" "docker" "npm" "pip" "gradle" "maven")
+  
+  # Check required tools
+  for cmd in "${required_tools[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+      missing_required+=("$cmd")
     fi
   done
   
-  if [[ ${#missing_deps[@]} -gt 0 ]]; then
-    print_error "Missing required dependencies: ${missing_deps[*]}"
+  # Check optional tools
+  for cmd in "${optional_tools[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+      missing_optional+=("$cmd")
+    fi
+  done
+  
+  # Fail if required tools are missing
+  if [[ ${#missing_required[@]} -gt 0 ]]; then
+    print_error "Missing required dependencies: ${missing_required[*]}"
     print_info "These tools are required for the script to function."
     print_info "Next steps:"
     print_info "  • On macOS, these tools should be pre-installed"
     print_info "  • If missing, try: xcode-select --install"
     print_info "  • Or reinstall macOS command line tools"
-    log_message "ERROR" "Missing required dependencies: ${missing_deps[*]}"
+    log_message "ERROR" "Missing required dependencies: ${missing_required[*]}"
     exit 1
   fi
+  
+  # Warn about missing optional tools (but continue)
+  if [[ ${#missing_optional[@]} -gt 0 && "$MC_QUIET_MODE" != "true" ]]; then
+    local missing_list="${missing_optional[*]}"
+    log_message "INFO" "Optional dependencies not found: $missing_list"
+    # Don't print warning for fzf as it's handled separately by mc_check_selection_tool
+    if [[ ! "$missing_list" =~ fzf ]]; then
+      print_info "Optional tools not found: $missing_list (some features may be limited)"
+    fi
+  fi
+  
+  # Log successful dependency check
+  log_message "INFO" "Dependency check passed (required tools available)"
+}
+
+# Comprehensive platform compatibility check (Phase 5 entry point)
+mc_check_platform_compatibility() {
+  print_info "Checking platform compatibility..."
+  
+  # Check macOS version
+  mc_check_macos_version
+  
+  # Detect architecture
+  local arch=$(mc_detect_architecture)
+  if [[ "$arch" != "unknown" && "$MC_QUIET_MODE" != "true" ]]; then
+    case "$arch" in
+      intel)
+        print_success "Architecture: Intel (x86_64)"
+        ;;
+      apple_silicon)
+        print_success "Architecture: Apple Silicon (arm64)"
+        ;;
+    esac
+  fi
+  
+  # Check file system
+  mc_check_filesystem
+  
+  # Check zsh compatibility
+  mc_check_zsh_compatibility
+  
+  # Check dependencies
+  mc_check_dependencies
+  
+  log_message "INFO" "Platform compatibility check completed"
 }
 
 # Clean up any temporary files created by the script
