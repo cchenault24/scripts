@@ -12,13 +12,16 @@
 # - plugin_warnings() - Returns array of warnings (optional)
 
 # Helper function to register a plugin
+# Usage: register_plugin "Plugin Name" "category" "clean_function" "requires_admin" ["size_function"]
+# PERF-3: Optional size_function parameter allows plugins to register their own size calculation
 register_plugin() {
   local name="$1"
   local category="$2"
   local function="$3"
   local requires_admin="${4:-false}"
+  local size_function="${5:-}"  # Optional size calculation function (PERF-3)
   
-  mc_register_plugin "$name" "$category" "$function" "$requires_admin"
+  mc_register_plugin "$name" "$category" "$function" "$requires_admin" "$size_function"
 }
 
 # Helper function to safely write to space tracking file with locking

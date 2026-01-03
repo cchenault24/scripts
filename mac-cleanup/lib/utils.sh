@@ -77,7 +77,25 @@ calculate_size_bytes() {
     local kb=$(echo "$du_output" | /usr/bin/awk '{print $1}')
     
     if [[ -n "$kb" && "$kb" =~ ^[0-9]+$ ]]; then
-      result=$((kb * 1024))
+      # Use awk for large number arithmetic to prevent overflow
+      # On 32-bit systems, shell arithmetic can overflow at 2GB (2,097,152 KB)
+      result=$(echo "$kb * 1024" | /usr/bin/awk '{printf "%.0f", $1 * $2}')
+      # Ensure result is numeric (awk might return scientific notation for very large numbers)
+      if [[ ! "$result" =~ ^[0-9]+$ ]]; then
+        # Fallback: if awk fails, try bc if available, otherwise use shell arithmetic with overflow check
+        if command -v bc &>/dev/null; then
+          result=$(echo "$kb * 1024" | bc 2>/dev/null | awk '{printf "%.0f", $1}')
+        else
+          # Shell arithmetic with overflow protection (max 2^31-1 bytes = 2GB)
+          local max_kb=2097152
+          if [[ $kb -gt $max_kb ]]; then
+            result=2147483647  # Max 32-bit signed integer
+            log_message "WARNING" "Size calculation overflow protection: $path (KB: $kb)"
+          else
+            result=$((kb * 1024))
+          fi
+        fi
+      fi
     fi
   fi
   
@@ -98,34 +116,68 @@ invalidate_size_cache() {
 }
 
 # Format bytes to human-readable format
+# Uses floating point arithmetic for accurate rounding
 format_bytes() {
   local bytes=$1
-  if [[ $bytes -ge 1073741824 ]]; then
-    local gb=$((bytes / 1073741824))
-    local mb=$(((bytes % 1073741824) / 1048576))
-    if [[ $mb -gt 0 ]]; then
-      printf "%d.%02d GB" $gb $((mb * 100 / 1024))
+  
+  # Use awk for floating point calculations to avoid rounding errors
+  if command -v awk &>/dev/null; then
+    if [[ $bytes -ge 1073741824 ]]; then
+      # GB with 2 decimal places
+      awk -v b=$bytes 'BEGIN {
+        gb = b / 1073741824
+        printf "%.2f GB", gb
+      }'
+    elif [[ $bytes -ge 1048576 ]]; then
+      # MB with 2 decimal places
+      awk -v b=$bytes 'BEGIN {
+        mb = b / 1048576
+        printf "%.2f MB", mb
+      }'
+    elif [[ $bytes -ge 1024 ]]; then
+      # KB with 2 decimal places
+      awk -v b=$bytes 'BEGIN {
+        kb = b / 1024
+        printf "%.2f KB", kb
+      }'
     else
-      printf "%d GB" $gb
-    fi
-  elif [[ $bytes -ge 1048576 ]]; then
-    local mb=$((bytes / 1048576))
-    local kb=$(((bytes % 1048576) / 1024))
-    if [[ $kb -gt 0 ]]; then
-      printf "%d.%02d MB" $mb $((kb * 100 / 1024))
-    else
-      printf "%d MB" $mb
-    fi
-  elif [[ $bytes -ge 1024 ]]; then
-    local kb=$((bytes / 1024))
-    local b=$((bytes % 1024))
-    if [[ $b -gt 0 ]]; then
-      printf "%d.%02d KB" $kb $((b * 100 / 1024))
-    else
-      printf "%d KB" $kb
+      printf "%d B" $bytes
     fi
   else
-    printf "%d B" $bytes
+    # Fallback to integer arithmetic if awk not available
+    if [[ $bytes -ge 1073741824 ]]; then
+      local gb=$((bytes / 1073741824))
+      local remainder=$((bytes % 1073741824))
+      local mb=$((remainder / 1048576))
+      # Calculate decimal part more accurately
+      local decimal=$((remainder * 100 / 1048576))
+      if [[ $decimal -gt 0 ]]; then
+        printf "%d.%02d GB" $gb $decimal
+      else
+        printf "%d GB" $gb
+      fi
+    elif [[ $bytes -ge 1048576 ]]; then
+      local mb=$((bytes / 1048576))
+      local remainder=$((bytes % 1048576))
+      local kb=$((remainder / 1024))
+      local decimal=$((remainder * 100 / 1024))
+      if [[ $decimal -gt 0 ]]; then
+        printf "%d.%02d MB" $mb $decimal
+      else
+        printf "%d MB" $mb
+      fi
+    elif [[ $bytes -ge 1024 ]]; then
+      local kb=$((bytes / 1024))
+      local b=$((bytes % 1024))
+      local decimal=$((b * 100 / 1024))
+      if [[ $decimal -gt 0 ]]; then
+        printf "%d.%02d KB" $kb $decimal
+      else
+        printf "%d KB" $kb
+      fi
+    else
+      printf "%d B" $bytes
+    fi
   fi
 }
 
@@ -196,18 +248,27 @@ safe_clean_dir() {
     log_message "INFO" "Cleaning directory: $path"
     
     # Optimized batch deletion: use find with -delete for better performance
+    # Important: Use -not -type l to avoid following symbolic links (prevents deleting files outside target)
     # Try find -delete first (fastest), fallback to rm -rf
-    find "$path" -mindepth 1 -delete 2>/dev/null || {
+    find "$path" -mindepth 1 -not -type l -delete 2>/dev/null || {
+      # Also delete symbolic links themselves (but don't follow them)
+      find "$path" -mindepth 1 -type l -delete 2>/dev/null || true
       # Fallback: batch delete visible and hidden files separately
-      find "$path" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null || true
-      find "$path" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null || true
+      find "$path" -mindepth 1 -maxdepth 1 ! -name ".*" -not -type l -delete 2>/dev/null || true
+      find "$path" -mindepth 1 -maxdepth 1 -name ".*" -not -type l -delete 2>/dev/null || true
+      find "$path" -mindepth 1 -maxdepth 1 -type l -delete 2>/dev/null || true
       # Final fallback for stubborn files - use (N) qualifier to handle empty globs in zsh
       # In zsh, we need to handle globs that might not match
+      # Note: rm -rf will follow symlinks, so we try to remove symlinks first
       if [[ -n "${ZSH_VERSION:-}" ]]; then
         # Zsh: use (N) qualifier to return empty if no matches
+        # Remove symlinks first (don't follow), then regular files
+        find "$path" -mindepth 1 -maxdepth 1 -type l -delete 2>/dev/null || true
         rm -rf "${path:?}"/*(N) "${path:?}"/.[!.]*(N) 2>/dev/null || true
       else
         # Bash: use nullglob or just try and ignore errors
+        # Remove symlinks first (don't follow), then regular files
+        find "$path" -mindepth 1 -maxdepth 1 -type l -delete 2>/dev/null || true
         rm -rf "${path:?}"/* "${path:?}"/.[!.]* 2>/dev/null || true
       fi
     }
@@ -218,6 +279,13 @@ safe_clean_dir() {
     print_success "Cleaned $description"
     local size_after=$(calculate_size_bytes "$path")
     local space_freed=$((size_before - size_after))
+    
+    # Validate space_freed is not negative (directory may have grown during cleanup)
+    if [[ $space_freed -lt 0 ]]; then
+      space_freed=0
+      log_message "WARNING" "Directory size increased during cleanup: $path (before: $(format_bytes $size_before), after: $(format_bytes $size_after))"
+    fi
+    
     log_message "SUCCESS" "Cleaned: $path (freed $(format_bytes $space_freed))"
     MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + space_freed))
     # Note: We don't write individual safe_clean_dir entries to space tracking file

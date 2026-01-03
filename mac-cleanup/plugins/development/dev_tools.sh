@@ -22,10 +22,20 @@ clean_dev_tool_temp() {
       find "$base_dir" \( -type d -name "caches" -o -type d -maxdepth 1 \) | while read dir; do
         if [[ -d "$dir" && "$dir" != "$base_dir" ]]; then
           local space_before=$(calculate_size_bytes "$dir")
-          backup "$dir" "intellij_$(basename "$dir")"
+          if ! backup "$dir" "intellij_$(basename "$dir")"; then
+            print_error "Backup failed for $dir. Skipping this directory."
+            log_message "ERROR" "Backup failed for $dir, skipping"
+            continue
+          fi
           safe_clean_dir "$dir" "IntelliJ $(basename "$dir")"
           local space_after=$(calculate_size_bytes "$dir")
-          total_space_freed=$((total_space_freed + space_before - space_after))
+          local space_freed=$((space_before - space_after))
+          # Validate space_freed is not negative (directory may have grown during cleanup)
+          if [[ $space_freed -lt 0 ]]; then
+            space_freed=0
+            log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+          fi
+          total_space_freed=$((total_space_freed + space_freed))
           print_success "Cleaned $dir."
         fi
       done
@@ -45,15 +55,30 @@ clean_dev_tool_temp() {
   for dir in "${vscode_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
       local space_before=$(calculate_size_bytes "$dir")
-      backup "$dir" "vscode_$(basename "$dir")"
+      if ! backup "$dir" "vscode_$(basename "$dir")"; then
+        print_error "Backup failed for $dir. Skipping this directory."
+        log_message "ERROR" "Backup failed for $dir, skipping"
+        continue
+      fi
       safe_clean_dir "$dir" "VS Code $(basename "$dir")"
       local space_after=$(calculate_size_bytes "$dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
+      local space_freed=$((space_before - space_after))
+      # Validate space_freed is not negative (directory may have grown during cleanup)
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+      fi
+      total_space_freed=$((total_space_freed + space_freed))
       print_success "Cleaned $dir."
     fi
   done
   
-  track_space_saved "Developer Tool Temp Files" $total_space_freed
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+  MC_SPACE_SAVED_BY_OPERATION["Developer Tool Temp Files"]=$total_space_freed
+  # Write to space tracking file if in background process (with locking)
+  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+    _write_space_tracking_file "Developer Tool Temp Files" "$total_space_freed"
+  fi
 }
 
 # Register plugin

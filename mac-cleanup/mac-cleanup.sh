@@ -191,10 +191,25 @@ run_async_sweep() {
 }
 
 # Calculate size in bytes for a plugin (with early exits for non-existent paths)
+# PERF-3: First try to use registered size calculation function, fallback to case statement
 calculate_plugin_size_bytes() {
   local plugin_name="$1"
   local size_bytes=0
   
+  # Try to use registered size calculation function first (PERF-3)
+  local normalized_name=$(_normalize_plugin_name "$plugin_name")
+  local size_function="${MC_PLUGIN_SIZE_FUNCTIONS[$normalized_name]:-}"
+  
+  if [[ -n "$size_function" ]] && type "$size_function" &>/dev/null; then
+    size_bytes=$($size_function 2>/dev/null || echo "0")
+    # Ensure result is numeric
+    if [[ "$size_bytes" =~ ^[0-9]+$ ]]; then
+      echo "$size_bytes"
+      return 0
+    fi
+  fi
+  
+  # Fallback to hardcoded case statement for backward compatibility
   case "$plugin_name" in
     "User Cache")
       [[ -d "$HOME/Library/Caches" ]] && size_bytes=$(calculate_size_bytes "$HOME/Library/Caches")
@@ -214,7 +229,12 @@ calculate_plugin_size_bytes() {
         # Use find to get total size of log files (requires sudo, but we can try without for size calculation)
         local find_output=$(find "/var/log" -type f \( -name "*.log" -o -name "*.log.*" \) -exec du -sk {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
         if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
-          log_files_size=$((find_output * 1024))
+          # Use awk for large number arithmetic to prevent overflow
+          log_files_size=$(echo "$find_output * 1024" | awk '{printf "%.0f", $1 * $2}')
+          # Ensure result is numeric
+          if [[ ! "$log_files_size" =~ ^[0-9]+$ ]]; then
+            log_files_size=0
+          fi
         fi
         size_bytes=$log_files_size
       fi
@@ -228,7 +248,12 @@ calculate_plugin_size_bytes() {
             # Calculate size of files that will actually be cleaned (exclude .X* and com.apple.*)
             local find_output=$(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" -print0 2>/dev/null | xargs -0 du -sk 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
             if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
-              dir_size=$((find_output * 1024))
+              # Use awk for large number arithmetic to prevent overflow
+              dir_size=$(echo "$find_output * 1024" | awk '{printf "%.0f", $1 * $2}')
+              # Ensure result is numeric
+              if [[ ! "$dir_size" =~ ^[0-9]+$ ]]; then
+                dir_size=0
+              fi
             fi
           else
             # For other temp dirs, calculate full size
@@ -576,7 +601,11 @@ main() {
   # Get plugin list
   local plugin_array=()
   while IFS= read -r plugin_name; do
-    plugin_name=$(echo "$plugin_name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+    # Use parameter expansion instead of multiple sed calls (PERF-5)
+    plugin_name="${plugin_name#\"}"  # Remove leading quote
+    plugin_name="${plugin_name%\"}"  # Remove trailing quote
+    plugin_name="${plugin_name#\[}"  # Remove leading bracket
+    plugin_name="${plugin_name%\]}"  # Remove trailing bracket
     [[ -n "$plugin_name" ]] && plugin_array+=("$plugin_name")
   done < <(mc_list_plugins)
   
@@ -742,7 +771,11 @@ main() {
   
   for plugin_name in "${plugin_array[@]}"; do
     local category=$(mc_get_plugin_category "$plugin_name")
-    category=$(echo "$category" | sed -E 's/^"//' | sed -E 's/"$//' | tr -d '\n' | tr -d '\r')
+    # Use parameter expansion instead of multiple sed calls (PERF-5)
+    category="${category#\"}"  # Remove leading quote
+    category="${category%\"}"  # Remove trailing quote
+    category="${category//$'\n'/}"  # Remove newlines
+    category="${category//$'\r'/}"  # Remove carriage returns
     
     if [[ -n "$category" && -n "$plugin_name" ]]; then
       local existing="${plugins_by_category[$category]:-}"
@@ -780,7 +813,9 @@ main() {
   local ordered_categories=()
   for pref_cat in "${preferred_order[@]}"; do
     for found_cat in "${categories_found[@]}"; do
-      local clean_found=$(echo "$found_cat" | sed -E 's/^"//' | sed -E 's/"$//')
+      # Use parameter expansion instead of sed (PERF-5)
+      local clean_found="${found_cat#\"}"
+      clean_found="${clean_found%\"}"
       if [[ "$clean_found" == "$pref_cat" ]]; then
         ordered_categories+=("$found_cat")
         break
@@ -899,14 +934,17 @@ main() {
   local selected_category_names=()
   
   for display in "${selected_category_display[@]}"; do
-    display=$(echo "$display" | sed -E 's/^"//' | sed -E 's/"$//')
-    local option_text=$(echo "$display" | sed -E 's/ \| .*$//')
-    local category_name=$(echo "$option_text" | sed -E 's/ \(.*$//')
-    category_name=$(echo "$category_name" | sed 's/[[:space:]]*$//')
+    # Use parameter expansion instead of multiple sed calls (PERF-5)
+    display="${display#\"}"
+    display="${display%\"}"
+    local option_text="${display%% |*}"  # Remove everything after " | "
+    local category_name="${option_text%% (*}"  # Remove everything after " ("
+    category_name="${category_name%"${category_name##*[![:space:]]}"}"  # Trim trailing whitespace
     
     # Find category and get its plugins
     for category_key in "${ordered_categories[@]}"; do
-      local category=$(echo "$category_key" | sed -E 's/^"//' | sed -E 's/"$//')
+      local category="${category_key#\"}"
+      category="${category%\"}"
       local category_display_name="${category_display[$category]:-$category}"
       
       if [[ "$category_display_name" == "$category_name" ]]; then
@@ -1005,9 +1043,11 @@ main() {
   # Extract selected plugin names
   local selected_options=()
   for display in "${selected_plugin_display[@]}"; do
-    display=$(echo "$display" | sed -E 's/^"//' | sed -E 's/"$//')
-    local plugin_name=$(echo "$display" | sed -E 's/ \| .*$//')
-    plugin_name=$(echo "$plugin_name" | sed 's/[[:space:]]*$//')
+    # Use parameter expansion instead of multiple sed calls (PERF-5)
+    display="${display#\"}"
+    display="${display%\"}"
+    local plugin_name="${display%% |*}"  # Remove everything after " | "
+    plugin_name="${plugin_name%"${plugin_name##*[![:space:]]}"}"  # Trim trailing whitespace
     
     for stored_name in "${plugin_option_names[@]}"; do
       if [[ "$stored_name" == "$plugin_name" ]]; then
@@ -1056,6 +1096,8 @@ main() {
       local function=$(mc_get_plugin_function "$option")
       if [[ -n "$function" ]] && type "$function" &>/dev/null; then
         $function >> "$cleanup_output_file" 2>&1
+        # Clear size cache after plugin execution to ensure fresh calculations for next plugin
+        clear_size_cache
         sync_globals
         # Write progress update AFTER completing the operation
         echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"

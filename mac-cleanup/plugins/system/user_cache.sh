@@ -7,6 +7,14 @@ clean_user_cache() {
   print_header "Cleaning User Cache"
   
   local cache_dir="$HOME/Library/Caches"
+  
+  # Early exit for non-existent or empty directories (PERF-6)
+  if [[ ! -d "$cache_dir" ]] || [[ -z "$(ls -A "$cache_dir" 2>/dev/null)" ]]; then
+    print_info "User cache directory is empty or doesn't exist."
+    return 0
+  fi
+  
+  # Calculate size once before cleanup (PERF-1: avoid redundant calculations)
   local space_before=$(calculate_size_bytes "$cache_dir")
   
   if ! backup "$cache_dir" "user_caches"; then
@@ -21,6 +29,12 @@ clean_user_cache() {
     [[ -n "$dir" && -d "$dir" ]] && cache_dirs+=("$dir")
   done < <(find "$cache_dir" -maxdepth 1 -type d ! -path "$cache_dir" 2>/dev/null)
   
+  # Early exit if no cache directories found
+  if [[ ${#cache_dirs[@]} -eq 0 ]]; then
+    print_info "No cache directories found to clean."
+    return 0
+  fi
+  
   local total_items=${#cache_dirs[@]}
   local current_item=0
   
@@ -32,8 +46,17 @@ clean_user_cache() {
   done
   
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we calculate total for display only
+  # Invalidate cache first to ensure fresh calculation (PERF-1)
+  invalidate_size_cache "$cache_dir"
   local space_after=$(calculate_size_bytes "$cache_dir")
   local space_freed=$((space_before - space_after))
+  
+  # Validate space_freed is not negative
+  if [[ $space_freed -lt 0 ]]; then
+    space_freed=0
+    log_message "WARNING" "Directory size increased during cleanup: $cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+  fi
+  
   # Update plugin-specific tracking (but don't double-count in total)
   MC_SPACE_SAVED_BY_OPERATION["User Cache"]=$space_freed
   # Write to space tracking file if in background process (with locking)

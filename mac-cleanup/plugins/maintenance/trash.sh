@@ -16,9 +16,21 @@ empty_trash() {
         print_info "[DRY RUN] Would empty Trash ($(format_bytes $space_before))"
         log_message "DRY_RUN" "Would empty Trash"
       else
-        rm -rf "$trash_dir"/* "$trash_dir"/.[!.]* 2>/dev/null || true
+        # Use safe_clean_dir for proper error handling and space tracking
+        # This ensures proper handling of hidden files, symlinks, and edge cases
+        if ! backup "$trash_dir" "trash"; then
+          print_error "Backup failed for Trash. Aborting cleanup to prevent data loss."
+          log_message "ERROR" "Backup failed, aborting Trash cleanup"
+          return 1
+        fi
+        safe_clean_dir "$trash_dir" "Trash"
+        # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+        MC_SPACE_SAVED_BY_OPERATION["Empty Trash"]=$space_before
+        # Write to space tracking file if in background process (with locking)
+        if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+          _write_space_tracking_file "Empty Trash" "$space_before"
+        fi
         print_success "Trash emptied."
-        track_space_saved "Empty Trash" $space_before
         log_message "SUCCESS" "Emptied Trash (freed $(format_bytes $space_before))"
       fi
     else

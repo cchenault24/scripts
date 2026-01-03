@@ -57,29 +57,68 @@ backup() {
     echo "$path|$backup_name|$timestamp" >> "$MC_BACKUP_DIR/backup_manifest.txt" 2>/dev/null
     
     if [[ -d "$path" ]]; then
+      # Check available disk space before backup
+      local path_size=$(calculate_size_bytes "$path" 2>/dev/null || echo "0")
+      local backup_dir_available=$(df "$MC_BACKUP_DIR" 2>/dev/null | awk 'NR==2 {print $4 * 1024}' || echo "0")
+      
+      # Add 20% overhead for compression and metadata
+      local needed_space=$((path_size + (path_size / 5)))
+      
+      if [[ $backup_dir_available -lt $needed_space ]]; then
+        print_error "Insufficient disk space for backup. Available: $(format_bytes $backup_dir_available), Needed: $(format_bytes $needed_space)"
+        log_message "ERROR" "Insufficient disk space for backup: $backup_name (available: $(format_bytes $backup_dir_available), needed: $(format_bytes $needed_space))"
+        return 1
+      fi
+      
       # Use faster compression level (gzip -1) for better performance
       # Use a background process for large directories
       tar -c -C "$(dirname "$path")" "$(basename "$path")" 2>/dev/null | gzip -1 > "$MC_BACKUP_DIR/${backup_name}.tar.gz" 2>/dev/null &
       local pid=$!
       show_spinner "Creating backup of $(basename "$path")" $pid
       
-      # Verify backup was created successfully
+      # Verify backup was created successfully and is valid
       if [[ -f "$MC_BACKUP_DIR/${backup_name}.tar.gz" ]]; then
-        print_success "Backup complete: $backup_name"
-        log_message "SUCCESS" "Backup created: $backup_name.tar.gz"
-        return 0
+        # Verify backup integrity by testing if it can be listed
+        if tar -tzf "$MC_BACKUP_DIR/${backup_name}.tar.gz" &>/dev/null; then
+          print_success "Backup complete: $backup_name"
+          log_message "SUCCESS" "Backup created and verified: $backup_name.tar.gz"
+          return 0
+        else
+          print_warning "Backup file created but integrity check failed. Removing corrupted backup..."
+          rm -f "$MC_BACKUP_DIR/${backup_name}.tar.gz" 2>/dev/null || true
+          log_message "ERROR" "Backup integrity verification failed for: $backup_name"
+          return 1
+        fi
       else
-        print_warning "Backup verification failed, but continuing with cleanup..."
-        log_message "WARNING" "Backup verification failed for: $backup_name"
+        print_warning "Backup file was not created"
+        log_message "WARNING" "Backup file not created for: $backup_name"
         return 1
       fi
     else
+      # Check available disk space before backup (for files)
+      local path_size=$(stat -f%z "$path" 2>/dev/null || echo "0")
+      local backup_dir_available=$(df "$MC_BACKUP_DIR" 2>/dev/null | awk 'NR==2 {print $4 * 1024}' || echo "0")
+      
+      if [[ $backup_dir_available -lt $path_size ]]; then
+        print_error "Insufficient disk space for backup. Available: $(format_bytes $backup_dir_available), Needed: $(format_bytes $path_size)"
+        log_message "ERROR" "Insufficient disk space for backup: $backup_name (available: $(format_bytes $backup_dir_available), needed: $(format_bytes $path_size))"
+        return 1
+      fi
+      
       if cp "$path" "$MC_BACKUP_DIR/${backup_name}" 2>/dev/null; then
-        print_success "Backup complete: $backup_name"
-        log_message "SUCCESS" "Backup created: $backup_name"
-        return 0
+        # Verify backup file exists and has content
+        if [[ -f "$MC_BACKUP_DIR/${backup_name}" && -s "$MC_BACKUP_DIR/${backup_name}" ]]; then
+          print_success "Backup complete: $backup_name"
+          log_message "SUCCESS" "Backup created and verified: $backup_name"
+          return 0
+        else
+          print_warning "Backup file created but is empty or missing. Removing invalid backup..."
+          rm -f "$MC_BACKUP_DIR/${backup_name}" 2>/dev/null || true
+          log_message "ERROR" "Backup verification failed (empty or missing) for: $backup_name"
+          return 1
+        fi
       else
-        print_warning "Backup failed, but continuing with cleanup..."
+        print_warning "Backup failed"
         log_message "WARNING" "Backup failed for: $backup_name"
         return 1
       fi

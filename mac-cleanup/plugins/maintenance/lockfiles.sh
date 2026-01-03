@@ -22,13 +22,22 @@ clean_pref_lockfiles() {
     # Check if the plist file exists
     if [[ ! -f "$plist_file" ]]; then
       local space_before=$(calculate_size_bytes "$lock")
-      backup "$lock" "$(basename "$lock")"
+      if ! backup "$lock" "$(basename "$lock")"; then
+        print_error "Backup failed for lockfile $(basename "$lock"). Skipping this file."
+        log_message "ERROR" "Backup failed for lockfile $(basename "$lock"), skipping"
+        continue
+      fi
       safe_remove "$lock" "orphaned lockfile $(basename "$lock")"
       total_space_freed=$((total_space_freed + space_before))
     fi
   done
   
-  track_space_saved "Corrupted Preference Lockfiles" $total_space_freed
+  # safe_remove already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
+  MC_SPACE_SAVED_BY_OPERATION["Corrupted Preference Lockfiles"]=$total_space_freed
+  # Write to space tracking file if in background process (with locking)
+  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+    _write_space_tracking_file "Corrupted Preference Lockfiles" "$total_space_freed"
+  fi
   print_success "Cleaned corrupted preference lockfiles."
 }
 

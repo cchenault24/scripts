@@ -21,7 +21,15 @@ clean_firefox_cache() {
     else
       safe_clean_dir "$firefox_cache_dir" "Firefox cache"
       local space_after=$(calculate_size_bytes "$firefox_cache_dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
+      local space_freed=$((space_before - space_after))
+      
+      # Validate space_freed is not negative
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $firefox_cache_dir"
+      fi
+      
+      total_space_freed=$((total_space_freed + space_freed))
       print_success "Cleaned Firefox cache."
     fi
   fi
@@ -62,7 +70,15 @@ clean_firefox_cache() {
       else
         safe_clean_dir "$dir" "Firefox $profile_name $dir_name"
         local space_after=$(calculate_size_bytes "$dir")
-        total_space_freed=$((total_space_freed + space_before - space_after))
+        local space_freed=$((space_before - space_after))
+        
+        # Validate space_freed is not negative
+        if [[ $space_freed -lt 0 ]]; then
+          space_freed=0
+          log_message "WARNING" "Directory size increased during cleanup: $dir"
+        fi
+        
+        total_space_freed=$((total_space_freed + space_freed))
         print_success "Cleaned Firefox $profile_name $dir_name."
       fi
     done

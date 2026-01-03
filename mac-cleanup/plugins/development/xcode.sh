@@ -16,11 +16,23 @@ clean_xcode_data() {
     local derived_data_dir="$HOME/Library/Developer/Xcode/DerivedData"
     if [[ -d "$derived_data_dir" ]]; then
       local space_before=$(calculate_size_bytes "$derived_data_dir")
-      backup "$derived_data_dir" "xcode_derived_data"
-      safe_clean_dir "$derived_data_dir" "Xcode Derived Data"
+      if ! backup "$derived_data_dir" "xcode_derived_data"; then
+        print_error "Backup failed for Xcode Derived Data. Skipping this directory."
+        log_message "ERROR" "Backup failed for Xcode Derived Data, skipping"
+      else
+        safe_clean_dir "$derived_data_dir" "Xcode Derived Data"
       local space_after=$(calculate_size_bytes "$derived_data_dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned Xcode Derived Data."
+      local space_freed=$((space_before - space_after))
+      
+      # Validate space_freed is not negative
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $derived_data_dir"
+      fi
+      
+        total_space_freed=$((total_space_freed + space_freed))
+        print_success "Cleaned Xcode Derived Data."
+      fi
     fi
     
     # Xcode Archives
@@ -29,11 +41,23 @@ clean_xcode_data() {
       print_warning "Archives contain built apps. Consider backing up important archives first."
       if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to clean Xcode Archives?"; then
         local space_before=$(calculate_size_bytes "$archives_dir")
-        backup "$archives_dir" "xcode_archives"
-        safe_clean_dir "$archives_dir" "Xcode Archives"
+        if ! backup "$archives_dir" "xcode_archives"; then
+          print_error "Backup failed for Xcode Archives. Aborting cleanup to prevent data loss."
+          log_message "ERROR" "Backup failed, aborting Xcode Archives cleanup"
+        else
+          safe_clean_dir "$archives_dir" "Xcode Archives"
         local space_after=$(calculate_size_bytes "$archives_dir")
-        total_space_freed=$((total_space_freed + space_before - space_after))
-        print_success "Cleaned Xcode Archives."
+        local space_freed=$((space_before - space_after))
+        
+        # Validate space_freed is not negative
+        if [[ $space_freed -lt 0 ]]; then
+          space_freed=0
+          log_message "WARNING" "Directory size increased during cleanup: $archives_dir"
+        fi
+        
+          total_space_freed=$((total_space_freed + space_freed))
+          print_success "Cleaned Xcode Archives."
+        fi
       fi
     fi
     
@@ -41,22 +65,46 @@ clean_xcode_data() {
     local device_support_dir="$HOME/Library/Developer/Xcode/iOS DeviceSupport"
     if [[ -d "$device_support_dir" ]]; then
       local space_before=$(calculate_size_bytes "$device_support_dir")
-      backup "$device_support_dir" "xcode_device_support"
-      safe_clean_dir "$device_support_dir" "Xcode Device Support"
+      if ! backup "$device_support_dir" "xcode_device_support"; then
+        print_error "Backup failed for Xcode Device Support. Skipping this directory."
+        log_message "ERROR" "Backup failed for Xcode Device Support, skipping"
+      else
+        safe_clean_dir "$device_support_dir" "Xcode Device Support"
       local space_after=$(calculate_size_bytes "$device_support_dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned Xcode Device Support."
+      local space_freed=$((space_before - space_after))
+      
+      # Validate space_freed is not negative
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $device_support_dir"
+      fi
+      
+        total_space_freed=$((total_space_freed + space_freed))
+        print_success "Cleaned Xcode Device Support."
+      fi
     fi
     
     # Xcode Caches
     local xcode_caches_dir="$HOME/Library/Caches/com.apple.dt.Xcode"
     if [[ -d "$xcode_caches_dir" ]]; then
       local space_before=$(calculate_size_bytes "$xcode_caches_dir")
-      backup "$xcode_caches_dir" "xcode_caches"
-      safe_clean_dir "$xcode_caches_dir" "Xcode Caches"
+      if ! backup "$xcode_caches_dir" "xcode_caches"; then
+        print_error "Backup failed for Xcode Caches. Skipping this directory."
+        log_message "ERROR" "Backup failed for Xcode Caches, skipping"
+      else
+        safe_clean_dir "$xcode_caches_dir" "Xcode Caches"
       local space_after=$(calculate_size_bytes "$xcode_caches_dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
-      print_success "Cleaned Xcode Caches."
+      local space_freed=$((space_before - space_after))
+      
+      # Validate space_freed is not negative
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $xcode_caches_dir"
+      fi
+      
+        total_space_freed=$((total_space_freed + space_freed))
+        print_success "Cleaned Xcode Caches."
+      fi
     fi
     
     if [[ $total_space_freed -eq 0 ]]; then

@@ -26,10 +26,19 @@ clean_pip_cache() {
       print_info "[DRY RUN] Would clean pip cache ($(format_bytes $space_before))"
       log_message "DRY_RUN" "Would clean pip cache"
     else
-      backup "$pip_cache_dir" "pip_cache"
+      if ! backup "$pip_cache_dir" "pip_cache"; then
+        print_error "Backup failed for pip cache. Aborting cleanup to prevent data loss."
+        log_message "ERROR" "Backup failed, aborting pip cache cleanup"
+        return 1
+      fi
       $pip_cmd cache purge 2>&1 | log_message "INFO"
       local space_after=$(calculate_size_bytes "$pip_cache_dir")
       total_space_freed=$((space_before - space_after))
+      # Validate space_freed is not negative (directory may have grown during cleanup)
+      if [[ $total_space_freed -lt 0 ]]; then
+        total_space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $pip_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+      fi
       track_space_saved "pip Cache" $total_space_freed
       print_success "pip cache cleaned."
       log_message "SUCCESS" "pip cache cleaned (freed $(format_bytes $total_space_freed))"

@@ -10,7 +10,11 @@ clean_container_caches() {
   local total_space_freed=0
   
   if [[ -d "$containers_dir" ]]; then
-    backup "$containers_dir" "app_containers"
+    if ! backup "$containers_dir" "app_containers"; then
+      print_error "Backup failed for application containers. Aborting cleanup to prevent data loss."
+      log_message "ERROR" "Backup failed, aborting container caches cleanup"
+      return 1
+    fi
     
     # Collect all cache directories first
     local cache_dirs=()
@@ -20,7 +24,10 @@ clean_container_caches() {
     
     if [[ ${#cache_dirs[@]} -eq 0 ]]; then
       print_info "No container cache directories found."
-      track_space_saved "Application Container Caches" 0
+      MC_SPACE_SAVED_BY_OPERATION["Application Container Caches"]=0
+      if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+        _write_space_tracking_file "Application Container Caches" 0
+      fi
       return 0
     fi
     
@@ -62,6 +69,11 @@ clean_container_caches() {
         fi
         local space_after=$(calculate_size_bytes "$dir")
         local space_freed=$((space_before - space_after))
+        # Validate space_freed is not negative (directory may have grown during cleanup)
+        if [[ $space_freed -lt 0 ]]; then
+          space_freed=0
+          log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+        fi
         total_space_freed=$((total_space_freed + space_freed))
         processed_count=$((processed_count + 1))
         log_message "INFO" "Cleaned container cache: $app_name (freed $(format_bytes $space_freed))"
@@ -78,10 +90,20 @@ clean_container_caches() {
       print_info "Container caches were already empty."
     fi
     
-    track_space_saved "Application Container Caches" $total_space_freed
+    # Manual cleanup doesn't use safe_clean_dir, so we need to track space manually
+    # But we don't double-count since we're not using safe_clean_dir
+    MC_SPACE_SAVED_BY_OPERATION["Application Container Caches"]=$total_space_freed
+    MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + total_space_freed))
+    # Write to space tracking file if in background process (with locking)
+    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+      _write_space_tracking_file "Application Container Caches" "$total_space_freed"
+    fi
   else
     print_warning "No application containers found."
-    track_space_saved "Application Container Caches" 0
+    MC_SPACE_SAVED_BY_OPERATION["Application Container Caches"]=0
+    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
+      _write_space_tracking_file "Application Container Caches" 0
+    fi
   fi
 }
 
@@ -92,10 +114,19 @@ clean_saved_states() {
   
   if [[ -d "$saved_states_dir" ]]; then
     local space_before=$(calculate_size_bytes "$saved_states_dir")
-    backup "$saved_states_dir" "saved_app_states"
+    if ! backup "$saved_states_dir" "saved_app_states"; then
+      print_error "Backup failed for saved application states. Aborting cleanup to prevent data loss."
+      log_message "ERROR" "Backup failed, aborting saved states cleanup"
+      return 1
+    fi
     safe_clean_dir "$saved_states_dir" "saved application states"
     local space_after=$(calculate_size_bytes "$saved_states_dir")
     local space_freed=$((space_before - space_after))
+    # Validate space_freed is not negative (directory may have grown during cleanup)
+    if [[ $space_freed -lt 0 ]]; then
+      space_freed=0
+      log_message "WARNING" "Directory size increased during cleanup: $saved_states_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+    fi
     # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
     MC_SPACE_SAVED_BY_OPERATION["Saved Application States"]=$space_freed
     # Write to space tracking file if in background process (with locking)

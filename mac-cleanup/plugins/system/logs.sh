@@ -9,7 +9,11 @@ clean_app_logs() {
   local logs_dir="$HOME/Library/Logs"
   local space_before=$(calculate_size_bytes "$logs_dir")
   
-  backup "$logs_dir" "application_logs"
+  if ! backup "$logs_dir" "application_logs"; then
+    print_error "Backup failed for application logs. Aborting cleanup to prevent data loss."
+    log_message "ERROR" "Backup failed, aborting application logs cleanup"
+    return 1
+  fi
   
   # Collect all log directories first
   local log_dirs=()
@@ -84,14 +88,22 @@ clean_system_logs() {
       log_message "DRY_RUN" "Would clean system logs"
     else
       # Clean log files without removing them (zero their size instead)
-      # Properly escape logs_dir to prevent command injection
-      run_as_admin "find \"$logs_dir\" -type f -name '*.log' -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
+      # Properly escape logs_dir to prevent command injection - use printf %q for safe escaping
+      local escaped_logs_dir=$(printf '%q' "$logs_dir")
+      run_as_admin "find $escaped_logs_dir -type f -name '*.log' -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
       
       # Clean archived logs
-      run_as_admin "find \"$logs_dir\" -type f -name '*.log.*' -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
+      run_as_admin "find $escaped_logs_dir -type f -name '*.log.*' -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
       
       local space_after=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
       local space_freed=$((space_before - space_after))
+      
+      # Validate space_freed is not negative
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $logs_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+      fi
+      
       track_space_saved "System Logs" $space_freed
       
       print_success "System logs cleaned."

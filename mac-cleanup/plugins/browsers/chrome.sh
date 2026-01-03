@@ -22,7 +22,15 @@ clean_chrome_cache() {
     else
       safe_clean_dir "$chrome_cache_dir" "Chrome cache"
       local space_after=$(calculate_size_bytes "$chrome_cache_dir")
-      total_space_freed=$((total_space_freed + space_before - space_after))
+      local space_freed=$((space_before - space_after))
+      
+      # Validate space_freed is not negative
+      if [[ $space_freed -lt 0 ]]; then
+        space_freed=0
+        log_message "WARNING" "Directory size increased during cleanup: $chrome_cache_dir"
+      fi
+      
+      total_space_freed=$((total_space_freed + space_freed))
       print_success "Cleaned Chrome cache."
     fi
   fi
@@ -63,7 +71,15 @@ clean_chrome_cache() {
       else
         safe_clean_dir "$dir" "Chrome $profile_name $dir_name"
         local space_after=$(calculate_size_bytes "$dir")
-        total_space_freed=$((total_space_freed + space_before - space_after))
+        local space_freed=$((space_before - space_after))
+        
+        # Validate space_freed is not negative
+        if [[ $space_freed -lt 0 ]]; then
+          space_freed=0
+          log_message "WARNING" "Directory size increased during cleanup: $dir"
+        fi
+        
+        total_space_freed=$((total_space_freed + space_freed))
         print_success "Cleaned Chrome $profile_name $dir_name."
       fi
     done

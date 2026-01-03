@@ -124,40 +124,56 @@ mc_setup_traps() {
   trap mc_cleanup_script EXIT
 }
 
+# Helper function to normalize plugin names (removes quotes and brackets)
+_normalize_plugin_name() {
+  local name="$1"
+  # Use parameter expansion instead of multiple sed calls for better performance
+  name="${name#\"}"  # Remove leading quote
+  name="${name%\"}"  # Remove trailing quote
+  name="${name#\[}"  # Remove leading bracket
+  name="${name%\]}"  # Remove trailing bracket
+  echo "$name"
+}
+
+# Plugin registry for size calculation functions (PERF-3)
+typeset -A MC_PLUGIN_SIZE_FUNCTIONS
+
 # Plugin registry functions
 mc_register_plugin() {
   local name="$1"
   local category="$2"
   local function="$3"
   local requires_admin="${4:-false}"
+  local size_function="${5:-}"  # Optional size calculation function (PERF-3)
   
-  # Strip any quotes from the plugin name (they shouldn't be part of the key)
-  name=$(echo "$name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
+  # Normalize plugin name at registration time to avoid redundant lookups
+  name=$(_normalize_plugin_name "$name")
   
   MC_PLUGIN_REGISTRY["$name"]="$function|$category|$requires_admin"
+  
+  # Register size calculation function if provided (PERF-3)
+  if [[ -n "$size_function" ]]; then
+    MC_PLUGIN_SIZE_FUNCTIONS["$name"]="$size_function"
+  fi
 }
 
 mc_get_plugin_function() {
   local name="$1"
-  # Try direct lookup first
-  local result="${MC_PLUGIN_REGISTRY[$name]}"
+  # Normalize the input name once
+  local normalized_name=$(_normalize_plugin_name "$name")
+  
+  # Try direct lookup with normalized name (most common case)
+  local result="${MC_PLUGIN_REGISTRY[$normalized_name]}"
   if [[ -n "$result" ]]; then
     echo "$result" | cut -d'|' -f1
     return
   fi
   
-  # If not found, try with quotes (in case registry has quoted keys)
-  result="${MC_PLUGIN_REGISTRY[\"$name\"]}"
-  if [[ -n "$result" ]]; then
-    echo "$result" | cut -d'|' -f1
-    return
-  fi
-  
-  # If still not found, search through all keys and match by cleaned name
+  # If not found, search through all keys (fallback for edge cases)
+  # Since names are normalized at registration, this should rarely be needed
   for key in "${(@k)MC_PLUGIN_REGISTRY}"; do
-    local clean_key=$(echo "$key" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
-    local clean_name=$(echo "$name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
-    if [[ "$clean_key" == "$clean_name" ]]; then
+    local normalized_key=$(_normalize_plugin_name "$key")
+    if [[ "$normalized_key" == "$normalized_name" ]]; then
       echo "${MC_PLUGIN_REGISTRY[$key]}" | cut -d'|' -f1
       return
     fi
@@ -169,32 +185,29 @@ mc_get_plugin_function() {
 
 mc_get_plugin_category() {
   local name="$1"
-  # Try direct lookup first
-  local result="${MC_PLUGIN_REGISTRY[$name]}"
+  # Normalize the input name once (PERF-8)
+  local normalized_name=$(_normalize_plugin_name "$name")
+  
+  # Try direct lookup with normalized name (most common case)
+  local result="${MC_PLUGIN_REGISTRY[$normalized_name]}"
   if [[ -n "$result" ]]; then
     local category=$(echo "$result" | cut -d'|' -f2)
-    # Strip quotes from category before returning
-    echo "$category" | sed -E 's/^"//' | sed -E 's/"$//'
+    # Use parameter expansion instead of sed (PERF-5)
+    category="${category#\"}"
+    category="${category%\"}"
+    echo "$category"
     return
   fi
   
-  # If not found, try with quotes (in case registry has quoted keys)
-  result="${MC_PLUGIN_REGISTRY[\"$name\"]}"
-  if [[ -n "$result" ]]; then
-    local category=$(echo "$result" | cut -d'|' -f2)
-    # Strip quotes from category before returning
-    echo "$category" | sed -E 's/^"//' | sed -E 's/"$//'
-    return
-  fi
-  
-  # If still not found, search through all keys and match by cleaned name
+  # If not found, search through all keys (fallback for edge cases)
   for key in "${(@k)MC_PLUGIN_REGISTRY}"; do
-    local clean_key=$(echo "$key" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
-    local clean_name=$(echo "$name" | sed -E 's/^"//' | sed -E 's/"$//' | sed -E 's/^\[//' | sed -E 's/\]$//')
-    if [[ "$clean_key" == "$clean_name" ]]; then
+    local normalized_key=$(_normalize_plugin_name "$key")
+    if [[ "$normalized_key" == "$normalized_name" ]]; then
       local category=$(echo "${MC_PLUGIN_REGISTRY[$key]}" | cut -d'|' -f2)
-      # Strip quotes from category before returning
-      echo "$category" | sed -E 's/^"//' | sed -E 's/"$//'
+      # Use parameter expansion instead of sed (PERF-5)
+      category="${category#\"}"
+      category="${category%\"}"
+      echo "$category"
       return
     fi
   done

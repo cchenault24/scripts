@@ -43,10 +43,19 @@ clean_safari_cache() {
       # Check if directory has meaningful content (more than just directory overhead ~4KB)
       if [[ $space_before -gt 4096 ]]; then
         dirs_with_content=$((dirs_with_content + 1))
-        backup "$dir" "safari_$dir_name"
+        if ! backup "$dir" "safari_$dir_name"; then
+          print_error "Backup failed for Safari $dir_name. Skipping this directory."
+          log_message "ERROR" "Backup failed for Safari $dir_name, skipping"
+          continue
+        fi
         safe_clean_dir "$dir" "Safari $dir_name"
         local space_after=$(calculate_size_bytes "$dir")
         local space_freed=$((space_before - space_after))
+        # Validate space_freed is not negative (directory may have grown during cleanup)
+        if [[ $space_freed -lt 0 ]]; then
+          space_freed=0
+          log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+        fi
         total_space_freed=$((total_space_freed + space_freed))
         print_success "Cleaned $dir ($(format_bytes $space_freed))."
       else
