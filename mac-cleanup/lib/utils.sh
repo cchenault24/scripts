@@ -482,7 +482,6 @@ safe_remove() {
     fi
     
     local size_before=$(calculate_size_bytes "$path")
-    print_info "Cleaning $description..."
     log_message "INFO" "Removing: $path"
     
     # SAFE-1: Handle symlinks safely - don't follow them
@@ -506,7 +505,6 @@ safe_remove() {
     invalidate_size_cache "$path"
     
     if [[ ! -e "$path" ]]; then
-      print_success "Cleaned $description"
       log_message "SUCCESS" "Removed: $path (freed $(format_bytes $size_before))"
       MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + size_before))
       # Write to space tracking file if in background process (with locking)
@@ -549,58 +547,21 @@ safe_clean_dir() {
   
   if [[ -d "$path" ]]; then
     # SAFE-3: Check write permission
-    # #region agent log
-    local timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:507\",\"message\":\"Before _check_write_permission\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     if ! _check_write_permission "$path"; then
-      # #region agent log
-      timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:510\",\"message\":\"No write permission - returning 1\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-      # #endregion
       print_warning "No write permission for $description. Skipping."
       log_message "WARNING" "No write permission: $path"
       return 1
     fi
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:518\",\"message\":\"Write permission OK\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"utils.sh:525\",\"message\":\"Before calculate_size_bytes\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     local size_before=$(calculate_size_bytes "$path")
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"utils.sh:529\",\"message\":\"After calculate_size_bytes\",\"data\":{\"size_before\":$size_before},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
-    print_info "Cleaning $description..."
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:533\",\"message\":\"After print_info\",\"data\":{},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     log_message "INFO" "Cleaning directory: $path"
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:537\",\"message\":\"After log_message\",\"data\":{},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     
     # Track files that fail to delete for error reporting (SAFE-9)
     local failed_files=()
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:542\",\"message\":\"Before system directory check\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     
     # SAFE-2 & SAFE-6: Pre-check files before deletion (for critical system files)
     # Only check system directories to avoid performance impact
     if [[ "$path" =~ ^/(System|Library|usr) ]]; then
-      # #region agent log
-      timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:556\",\"message\":\"System directory - checking files\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-      # #endregion
       find "$path" -mindepth 1 -not -type l 2>/dev/null | while read -r item; do
         # Skip SIP-protected files (SAFE-6)
         if _check_sip_protected "$item"; then
@@ -616,15 +577,6 @@ safe_clean_dir() {
           continue
         fi
       done
-      # #region agent log
-      timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:575\",\"message\":\"After system directory check\",\"data\":{},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-      # #endregion
-    else
-      # #region agent log
-      timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-      echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:579\",\"message\":\"Not a system directory - skipping pre-check\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-      # #endregion
     fi
     
     # Optimized batch deletion: use find with -delete for better performance
@@ -634,10 +586,6 @@ safe_clean_dir() {
     # Delete items found by glob pattern (more reliable when find fails)
     # Track space freed from files we actually delete (not just directory size difference)
     local actual_space_freed=0
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:592\",\"message\":\"Before deletion loop\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     # Delete symlinks first (but don't follow them)
     # Use /bin/rm explicitly to ensure it's found even if PATH is not set correctly
     # Use (N) qualifier in zsh to handle empty directories gracefully
@@ -691,10 +639,6 @@ safe_clean_dir() {
         done 2>/dev/null
       fi
     fi
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:625\",\"message\":\"After deletion loops\",\"data\":{\"actual_space_freed\":$actual_space_freed},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     # Fallback: try find-based deletion if direct deletion didn't work
     find "$path" -mindepth 1 -not -type l -delete 2>/dev/null || {
       # Fallback: batch delete visible and hidden files separately
@@ -721,7 +665,6 @@ safe_clean_dir() {
     # Invalidate cache for this path since it changed
     invalidate_size_cache "$path"
     
-    print_success "Cleaned $description"
     local size_after=$(calculate_size_bytes "$path")
     # Use actual space freed from deleted files if we tracked it, otherwise use directory size difference
     local space_freed=0
@@ -747,15 +690,7 @@ safe_clean_dir() {
     # Note: We don't write individual safe_clean_dir entries to space tracking file
     # because plugins that use safe_clean_dir typically call track_space_saved()
     # with the total, which will write to the file. Writing both would cause double-counting.
-    # #region agent log
-    timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:634\",\"message\":\"safe_clean_dir success - returning 0\",\"data\":{\"path\":\"$path\",\"space_freed\":$space_freed},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-    # #endregion
     return 0
   fi
-  # #region agent log
-  timestamp=$(/usr/bin/date +%s000 2>/dev/null || echo "0")
-  echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"utils.sh:640\",\"message\":\"safe_clean_dir - path not a directory - returning 0\",\"data\":{\"path\":\"$path\"},\"timestamp\":$timestamp}" >> "/Users/chenaultfamily/Documents/scripts/.cursor/debug.log" 2>/dev/null || true
-  # #endregion
   return 0
 }

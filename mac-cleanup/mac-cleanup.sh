@@ -1486,11 +1486,13 @@ main() {
     # Filter and display output, removing:
     # - Empty lines
     # - Spinner artifacts and control characters
-    # - Redundant "Cleaning..." messages (keep only unique ones)
+    # - Individual "Cleaning..." and "Cleaned..." messages (keep only plugin headers and summaries)
     # - Duplicate success messages
     local output_lines=$(cat "$cleanup_output_file" 2>/dev/null | \
       grep -v "^$" | \
       grep -v "Cleaning. Please wait" | \
+      grep -v "^Cleaning " | \
+      grep -v "^Cleaned " | \
       grep -v "^\r" | \
       sed -E 's/\x1b\[[0-9;]*m//g' | \
       sed -E 's/\r//g' | \
@@ -1530,8 +1532,6 @@ main() {
   if [[ $MC_TOTAL_SPACE_SAVED -gt 0 ]]; then
     print_success "Cleanup completed successfully! Cleaned up $(format_bytes $MC_TOTAL_SPACE_SAVED)!"
     log_message "INFO" "Total space freed: $(format_bytes $MC_TOTAL_SPACE_SAVED)"
-  else
-    print_success "Cleanup completed successfully!"
   fi
   
   # Display space saved summary

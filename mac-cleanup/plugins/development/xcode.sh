@@ -3,141 +3,548 @@
 # plugins/development/xcode.sh - Xcode data cleanup plugin
 #
 
-clean_xcode_data() {
-  print_header "Cleaning Xcode Data"
+# Helper function to clean a directory safely (used for safe temp files)
+_clean_xcode_dir_safe() {
+  local dir="$1"
+  local description="$2"
+  local backup_name="$3"
   
-  print_warning "⚠️ CAUTION: Cleaning Xcode data will remove derived data, archives, and device support."
-  print_warning "This may require Xcode to rebuild projects and re-index."
-  
-  if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Are you sure you want to clean Xcode data?"; then
-    local total_space_freed=0
-    
-    # Xcode Derived Data
-    local derived_data_dir="$HOME/Library/Developer/Xcode/DerivedData"
-    if [[ -d "$derived_data_dir" ]]; then
-      local space_before=$(calculate_size_bytes "$derived_data_dir")
-      if ! backup "$derived_data_dir" "xcode_derived_data"; then
-        print_error "Backup failed for Xcode Derived Data. Skipping this directory."
-        log_message "ERROR" "Backup failed for Xcode Derived Data, skipping"
-      else
-        safe_clean_dir "$derived_data_dir" "Xcode Derived Data" || {
-          print_error "Failed to clean Xcode Derived Data"
-          return 1
-        }
-        
-        local space_after=$(calculate_size_bytes "$derived_data_dir")
-        local space_freed=$((space_before - space_after))
-        
-        # Validate space_freed is not negative
-        if [[ $space_freed -lt 0 ]]; then
-          space_freed=0
-          log_message "WARNING" "Directory size increased during cleanup: $derived_data_dir"
-        fi
-        
-        total_space_freed=$((total_space_freed + space_freed))
-        print_success "Cleaned Xcode Derived Data."
-      fi
-    fi
-    
-    # Xcode Archives
-    local archives_dir="$HOME/Library/Developer/Xcode/Archives"
-    if [[ -d "$archives_dir" ]]; then
-      print_warning "Archives contain built apps. Consider backing up important archives first."
-      if [[ "$MC_DRY_RUN" == "true" ]] || mc_confirm "Do you want to clean Xcode Archives?"; then
-        local space_before=$(calculate_size_bytes "$archives_dir")
-        if ! backup "$archives_dir" "xcode_archives"; then
-          print_error "Backup failed for Xcode Archives. Aborting cleanup to prevent data loss."
-          log_message "ERROR" "Backup failed, aborting Xcode Archives cleanup"
-          return 1
-        fi
-        
-        safe_clean_dir "$archives_dir" "Xcode Archives" || {
-          print_error "Failed to clean Xcode Archives"
-          return 1
-        }
-        
-        local space_after=$(calculate_size_bytes "$archives_dir")
-        local space_freed=$((space_before - space_after))
-        
-        # Validate space_freed is not negative
-        if [[ $space_freed -lt 0 ]]; then
-          space_freed=0
-          log_message "WARNING" "Directory size increased during cleanup: $archives_dir"
-        fi
-        
-        total_space_freed=$((total_space_freed + space_freed))
-        print_success "Cleaned Xcode Archives."
-      fi
-    fi
-    
-    # Xcode Device Support
-    local device_support_dir="$HOME/Library/Developer/Xcode/iOS DeviceSupport"
-    if [[ -d "$device_support_dir" ]]; then
-      local space_before=$(calculate_size_bytes "$device_support_dir")
-      if ! backup "$device_support_dir" "xcode_device_support"; then
-        print_error "Backup failed for Xcode Device Support. Aborting cleanup to prevent data loss."
-        log_message "ERROR" "Backup failed for Xcode Device Support, aborting"
-        return 1
-      fi
-      
-      safe_clean_dir "$device_support_dir" "Xcode Device Support" || {
-        print_error "Failed to clean Xcode Device Support"
-        return 1
-      }
-      
-      local space_after=$(calculate_size_bytes "$device_support_dir")
-      local space_freed=$((space_before - space_after))
-      
-      # Validate space_freed is not negative
-      if [[ $space_freed -lt 0 ]]; then
-        space_freed=0
-        log_message "WARNING" "Directory size increased during cleanup: $device_support_dir"
-      fi
-      
-      total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned Xcode Device Support."
-    fi
-    
-    # Xcode Caches
-    local xcode_caches_dir="$HOME/Library/Caches/com.apple.dt.Xcode"
-    if [[ -d "$xcode_caches_dir" ]]; then
-      local space_before=$(calculate_size_bytes "$xcode_caches_dir")
-      if ! backup "$xcode_caches_dir" "xcode_caches"; then
-        print_error "Backup failed for Xcode Caches. Aborting cleanup to prevent data loss."
-        log_message "ERROR" "Backup failed for Xcode Caches, aborting"
-        return 1
-      fi
-      
-      safe_clean_dir "$xcode_caches_dir" "Xcode Caches" || {
-        print_error "Failed to clean Xcode Caches"
-        return 1
-      }
-      
-      local space_after=$(calculate_size_bytes "$xcode_caches_dir")
-      local space_freed=$((space_before - space_after))
-      
-      # Validate space_freed is not negative
-      if [[ $space_freed -lt 0 ]]; then
-        space_freed=0
-        log_message "WARNING" "Directory size increased during cleanup: $xcode_caches_dir"
-      fi
-      
-      total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned Xcode Caches."
-    fi
-    
-    if [[ $total_space_freed -eq 0 ]]; then
-      print_warning "No Xcode data found to clean."
-      track_space_saved "Xcode Data" 0
-    else
-      # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
-      track_space_saved "Xcode Data" $total_space_freed "true"
-      print_warning "You may need to rebuild Xcode projects after this cleanup."
-    fi
-  else
-    print_info "Skipping Xcode data cleanup"
-    track_space_saved "Xcode Data" 0
+  if [[ ! -d "$dir" ]]; then
+    echo "0"
+    return 0
   fi
+  
+  local space_before=$(calculate_size_bytes "$dir")
+  if [[ $space_before -eq 0 ]]; then
+    echo "0"
+    return 0
+  fi
+  
+  if ! backup "$dir" "$backup_name"; then
+    print_error "Backup failed for $description. Skipping this directory." >&2
+    log_message "ERROR" "Backup failed for $description, skipping"
+    echo "0"
+    return 1
+  fi
+  
+  safe_clean_dir "$dir" "$description" || {
+    print_error "Failed to clean $description" >&2
+    echo "0"
+    return 1
+  }
+  
+  local space_after=$(calculate_size_bytes "$dir")
+  local space_freed=$((space_before - space_after))
+  
+  # Validate space_freed is not negative
+  if [[ $space_freed -lt 0 ]]; then
+    space_freed=0
+    log_message "WARNING" "Directory size increased during cleanup: $dir"
+  fi
+  
+  if [[ $space_freed -gt 0 ]]; then
+    print_success "Cleaned $description ($(format_bytes $space_freed))." >&2
+  fi
+  
+  echo "$space_freed"
+  return 0
+}
+
+# Helper function to find and clean old files/directories (older than N days)
+_clean_xcode_old_items() {
+  local base_dir="$1"
+  local description="$2"
+  local backup_name="$3"
+  local days_old="${4:-90}"
+  
+  if [[ ! -d "$base_dir" ]]; then
+    echo "0"
+    return 0
+  fi
+  
+  # Find directories older than specified days
+  local old_items=()
+  while IFS= read -r item; do
+    if [[ -n "$item" && -e "$item" ]]; then
+      old_items+=("$item")
+    fi
+  done < <(find "$base_dir" -mindepth 1 -maxdepth 1 -type d -mtime +$days_old 2>/dev/null)
+  
+  if [[ ${#old_items[@]} -eq 0 ]]; then
+    echo "0"
+    return 0
+  fi
+  
+  local total_space_freed=0
+  
+  for item in "${old_items[@]}"; do
+    local item_name=$(basename "$item")
+    local space_before=$(calculate_size_bytes "$item")
+    
+    if [[ $space_before -eq 0 ]]; then
+      continue
+    fi
+    
+    if ! backup "$item" "${backup_name}_${item_name}"; then
+      print_warning "Backup failed for $item_name. Skipping." >&2
+      log_message "WARNING" "Backup failed for $item, skipping"
+      continue
+    fi
+    
+    safe_remove "$item" "$description: $item_name" || {
+      print_warning "Failed to remove $item_name" >&2
+      continue
+    }
+    
+    total_space_freed=$((total_space_freed + space_before))
+    print_success "Removed old $item_name ($(format_bytes $space_before))." >&2
+  done
+  
+  echo "$total_space_freed"
+  return 0
+}
+
+# Clean safe Xcode temp files (caches, simulator caches, documentation cache)
+# These are always safe to delete and will be regenerated by Xcode
+clean_xcode_safe_temp_files() {
+  print_header "Cleaning Xcode Safe Temp Files"
+  print_info "Cleaning Xcode caches and temporary files (safe to delete, will be regenerated)..."
+  
+  local total_space_freed=0
+  local space_freed=0
+  
+  # Xcode Caches (always safe)
+  space_freed=$(_clean_xcode_dir_safe \
+    "$HOME/Library/Caches/com.apple.dt.Xcode" \
+    "Xcode Caches" \
+    "xcode_caches")
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  # CoreSimulator Caches (always safe)
+  space_freed=$(_clean_xcode_dir_safe \
+    "$HOME/Library/Developer/CoreSimulator/Caches" \
+    "CoreSimulator Caches" \
+    "xcode_simulator_caches")
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  # Documentation Cache (always safe)
+  space_freed=$(_clean_xcode_dir_safe \
+    "$HOME/Library/Developer/Xcode/DocumentationCache" \
+    "Xcode Documentation Cache" \
+    "xcode_documentation_cache")
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_info "No Xcode temp files found to clean."
+    track_space_saved "Xcode Safe Temp Files" 0 "true"
+  else
+    track_space_saved "Xcode Safe Temp Files" $total_space_freed "true"
+  fi
+  
+  return 0
+}
+
+# Clean Xcode Derived Data (with option to keep recent)
+clean_xcode_derived_data() {
+  print_header "Cleaning Xcode Derived Data"
+  print_info "Derived data contains build artifacts. Xcode will rebuild projects as needed."
+  
+  local derived_data_dir="$HOME/Library/Developer/Xcode/DerivedData"
+  if [[ ! -d "$derived_data_dir" ]]; then
+    print_info "No Xcode Derived Data found."
+    track_space_saved "Xcode Derived Data" 0
+    return 0
+  fi
+  
+  # Check if user wants to clean all or just old derived data
+  local clean_all=false
+  local is_interactive=false
+  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+    is_interactive=true
+  fi
+  
+  if [[ "$MC_DRY_RUN" == "true" ]]; then
+    # In dry-run, default to cleaning all
+    clean_all=true
+  elif [[ "$is_interactive" == "true" ]]; then
+    # #region agent log
+    echo "{\"id\":\"log_$(date +%s)_before_prompt\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:162\",\"message\":\"Before derived data prompt\",\"data\":{\"stdin_available\":\"true\",\"stdout_available\":\"true\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+    # #endregion
+    print_info "Options:"
+    print_info "  1) Clean all derived data (may require rebuilding all projects)"
+    print_info "  2) Clean only old derived data (older than 90 days)"
+    print_info "  3) Skip derived data cleanup"
+    
+    local choice=""
+    local loop_count=0
+    while [[ -z "$choice" ]]; do
+      loop_count=$((loop_count + 1))
+      # #region agent log
+      echo "{\"id\":\"log_$(date +%s)_read_attempt\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:170\",\"message\":\"Before read prompt\",\"data\":{\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+      # #endregion
+      # Use timeout to prevent hanging
+      if ! read -t 30 -r "choice?Enter choice (1-3): "; then
+        # #region agent log
+        echo "{\"id\":\"log_$(date +%s)_read_timeout\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:172\",\"message\":\"Read timeout or failed\",\"data\":{\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+        # #endregion
+        print_warning "Input timeout. Using default: clean only old derived data (older than 90 days)."
+        clean_all=false
+        break
+      fi
+      # #region agent log
+      echo "{\"id\":\"log_$(date +%s)_read_success\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:178\",\"message\":\"Read successful\",\"data\":{\"choice\":\"$choice\",\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+      # #endregion
+      case "$choice" in
+        1)
+          clean_all=true
+          ;;
+        2)
+          clean_all=false
+          ;;
+        3)
+          print_info "Skipping Xcode Derived Data cleanup"
+          track_space_saved "Xcode Derived Data" 0
+          return 0
+          ;;
+        *)
+          print_warning "Invalid choice. Please enter 1, 2, or 3."
+          choice=""
+          ;;
+      esac
+    done
+  else
+    # Non-interactive mode: default to cleaning only old items (safer default)
+    # #region agent log
+    echo "{\"id\":\"log_$(date +%s)_non_interactive\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:207\",\"message\":\"Non-interactive mode for derived data\",\"data\":{\"default\":\"clean_old_only\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+    # #endregion
+    print_info "Non-interactive mode: cleaning only old derived data (older than 90 days)."
+    clean_all=false
+  fi
+  
+  local total_space_freed=0
+  
+  if [[ "$clean_all" == "true" ]]; then
+    # Clean all derived data
+    local space_freed=$(_clean_xcode_dir_safe \
+      "$derived_data_dir" \
+      "Xcode Derived Data" \
+      "xcode_derived_data")
+    total_space_freed=$((total_space_freed + space_freed))
+  else
+    # Clean only old derived data (older than 90 days)
+    print_info "Cleaning derived data older than 90 days..."
+    local space_freed=$(_clean_xcode_old_items \
+      "$derived_data_dir" \
+      "Xcode Derived Data" \
+      "xcode_derived_data" \
+      90)
+    total_space_freed=$((total_space_freed + space_freed))
+  fi
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_info "No Xcode Derived Data found to clean."
+    track_space_saved "Xcode Derived Data" 0
+  else
+    track_space_saved "Xcode Derived Data" $total_space_freed "true"
+  fi
+  
+  return 0
+}
+
+# Clean Xcode Device Support (with option to keep recent)
+clean_xcode_device_support() {
+  print_header "Cleaning Xcode Device Support"
+  print_info "Device support files can be re-downloaded when devices are connected."
+  
+  local device_support_dir="$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+  if [[ ! -d "$device_support_dir" ]]; then
+    print_info "No Xcode Device Support found."
+    track_space_saved "Xcode Device Support" 0
+    return 0
+  fi
+  
+  # Check if user wants to clean all or just old device support
+  local clean_all=false
+  local is_interactive=false
+  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+    is_interactive=true
+  fi
+  
+  if [[ "$MC_DRY_RUN" == "true" ]]; then
+    # In dry-run, default to cleaning all
+    clean_all=true
+  elif [[ "$is_interactive" == "true" ]]; then
+    # #region agent log
+    echo "{\"id\":\"log_$(date +%s)_before_device_prompt\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:260\",\"message\":\"Before device support prompt\",\"data\":{\"stdin_available\":\"true\",\"stdout_available\":\"true\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+    # #endregion
+    print_info "Options:"
+    print_info "  1) Clean all device support (will re-download when devices connect)"
+    print_info "  2) Clean only old device support (older than 90 days)"
+    print_info "  3) Skip device support cleanup"
+    
+    local choice=""
+    local loop_count=0
+    while [[ -z "$choice" ]]; do
+      loop_count=$((loop_count + 1))
+      # #region agent log
+      echo "{\"id\":\"log_$(date +%s)_device_read_attempt\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:268\",\"message\":\"Before device read prompt\",\"data\":{\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+      # #endregion
+      # Use timeout to prevent hanging
+      if ! read -t 30 -r "choice?Enter choice (1-3): "; then
+        # #region agent log
+        echo "{\"id\":\"log_$(date +%s)_device_read_timeout\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:270\",\"message\":\"Device read timeout or failed\",\"data\":{\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+        # #endregion
+        print_warning "Input timeout. Using default: clean only old device support (older than 90 days)."
+        clean_all=false
+        break
+      fi
+      # #region agent log
+      echo "{\"id\":\"log_$(date +%s)_device_read_success\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:276\",\"message\":\"Device read successful\",\"data\":{\"choice\":\"$choice\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+      # #endregion
+      case "$choice" in
+        1)
+          clean_all=true
+          ;;
+        2)
+          clean_all=false
+          ;;
+        3)
+          print_info "Skipping Xcode Device Support cleanup"
+          track_space_saved "Xcode Device Support" 0
+          return 0
+          ;;
+        *)
+          print_warning "Invalid choice. Please enter 1, 2, or 3."
+          choice=""
+          ;;
+      esac
+    done
+  else
+    # Non-interactive mode: default to cleaning only old items (safer default)
+    # #region agent log
+    echo "{\"id\":\"log_$(date +%s)_device_non_interactive\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:305\",\"message\":\"Non-interactive mode for device support\",\"data\":{\"default\":\"clean_old_only\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+    # #endregion
+    print_info "Non-interactive mode: cleaning only old device support (older than 90 days)."
+    clean_all=false
+  fi
+  
+  local total_space_freed=0
+  
+  if [[ "$clean_all" == "true" ]]; then
+    # Clean all device support
+    local space_freed=$(_clean_xcode_dir_safe \
+      "$device_support_dir" \
+      "Xcode Device Support" \
+      "xcode_device_support")
+    total_space_freed=$((total_space_freed + space_freed))
+  else
+    # Clean only old device support (older than 90 days)
+    print_info "Cleaning device support older than 90 days..."
+    local space_freed=$(_clean_xcode_old_items \
+      "$device_support_dir" \
+      "Xcode Device Support" \
+      "xcode_device_support" \
+      90)
+    total_space_freed=$((total_space_freed + space_freed))
+  fi
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_info "No Xcode Device Support found to clean."
+    track_space_saved "Xcode Device Support" 0
+  else
+    track_space_saved "Xcode Device Support" $total_space_freed "true"
+  fi
+  
+  return 0
+}
+
+# Clean Xcode Archives (with optional age filter)
+clean_xcode_archives() {
+  print_header "Cleaning Xcode Archives"
+  print_info "Archives contain built apps. Consider backing up important archives first."
+  
+  local archives_dir="$HOME/Library/Developer/Xcode/Archives"
+  if [[ ! -d "$archives_dir" ]]; then
+    print_info "No Xcode Archives found."
+    track_space_saved "Xcode Archives" 0
+    return 0
+  fi
+  
+  # Always require confirmation for archives
+  if [[ "$MC_DRY_RUN" != "true" ]] && ! mc_confirm "Do you want to clean Xcode Archives?"; then
+    print_info "Skipping Xcode Archives cleanup"
+    track_space_saved "Xcode Archives" 0
+    return 0
+  fi
+  
+  # Check if user wants to clean all or just old archives
+  local clean_all=false
+  local is_interactive=false
+  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+    is_interactive=true
+  fi
+  
+  if [[ "$MC_DRY_RUN" == "true" ]]; then
+    # In dry-run, default to cleaning all
+    clean_all=true
+  elif [[ "$is_interactive" == "true" ]]; then
+    # #region agent log
+    echo "{\"id\":\"log_$(date +%s)_before_archive_prompt\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:355\",\"message\":\"Before archive prompt\",\"data\":{\"stdin_available\":\"true\",\"stdout_available\":\"true\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+    # #endregion
+    print_info "Options:"
+    print_info "  1) Clean all archives"
+    print_info "  2) Clean only old archives (older than 90 days)"
+    print_info "  3) Cancel"
+    
+    local choice=""
+    local loop_count=0
+    while [[ -z "$choice" ]]; do
+      loop_count=$((loop_count + 1))
+      # #region agent log
+      echo "{\"id\":\"log_$(date +%s)_archive_read_attempt\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:363\",\"message\":\"Before archive read prompt\",\"data\":{\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+      # #endregion
+      # Use timeout to prevent hanging
+      if ! read -t 30 -r "choice?Enter choice (1-3): "; then
+        # #region agent log
+        echo "{\"id\":\"log_$(date +%s)_archive_read_timeout\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:365\",\"message\":\"Archive read timeout or failed\",\"data\":{\"loop_count\":\"$loop_count\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+        # #endregion
+        print_warning "Input timeout. Cancelling archives cleanup."
+        track_space_saved "Xcode Archives" 0
+        return 0
+      fi
+      # #region agent log
+      echo "{\"id\":\"log_$(date +%s)_archive_read_success\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:371\",\"message\":\"Archive read successful\",\"data\":{\"choice\":\"$choice\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+      # #endregion
+      case "$choice" in
+        1)
+          clean_all=true
+          ;;
+        2)
+          clean_all=false
+          ;;
+        3)
+          print_info "Cancelling Xcode Archives cleanup"
+          track_space_saved "Xcode Archives" 0
+          return 0
+          ;;
+        *)
+          print_warning "Invalid choice. Please enter 1, 2, or 3."
+          choice=""
+          ;;
+      esac
+    done
+  else
+    # Non-interactive mode: skip archives (safest default)
+    # #region agent log
+    echo "{\"id\":\"log_$(date +%s)_archive_non_interactive\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:400\",\"message\":\"Non-interactive mode for archives\",\"data\":{\"default\":\"skip\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+    # #endregion
+    print_info "Non-interactive mode: skipping archives cleanup (requires explicit confirmation)."
+    track_space_saved "Xcode Archives" 0
+    return 0
+  fi
+  
+  local total_space_freed=0
+  
+  if [[ "$clean_all" == "true" ]]; then
+    # Clean all archives
+    local space_freed=$(_clean_xcode_dir_safe \
+      "$archives_dir" \
+      "Xcode Archives" \
+      "xcode_archives")
+    total_space_freed=$((total_space_freed + space_freed))
+  else
+    # Clean only old archives (older than 90 days)
+    print_info "Cleaning archives older than 90 days..."
+    local space_freed=$(_clean_xcode_old_items \
+      "$archives_dir" \
+      "Xcode Archives" \
+      "xcode_archives" \
+      90)
+    total_space_freed=$((total_space_freed + space_freed))
+  fi
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_info "No Xcode Archives found to clean."
+    track_space_saved "Xcode Archives" 0
+  else
+    track_space_saved "Xcode Archives" $total_space_freed "true"
+  fi
+  
+  return 0
+}
+
+# Main cleanup function (backward compatibility)
+# This function coordinates all Xcode cleanup operations
+clean_xcode_data() {
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_entry\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:384\",\"message\":\"clean_xcode_data entry\",\"data\":{\"MC_DRY_RUN\":\"${MC_DRY_RUN:-false}\",\"stdin_available\":\"$([[ -t 0 ]] && echo true || echo false)\",\"stdout_available\":\"$([[ -t 1 ]] && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  
+  print_header "Cleaning Xcode Data"
+  print_info "This will clean Xcode temporary files, caches, and build artifacts."
+  print_info "Project files are never touched - only Xcode-generated data in Library/Developer."
+  
+  local total_space_freed=0
+  local space_freed=0
+  
+  # 1. Clean safe temp files (no warnings, auto-clean - these are always safe)
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_before_safe\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:400\",\"message\":\"Before clean_xcode_safe_temp_files\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  clean_xcode_safe_temp_files
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_after_safe\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:402\",\"message\":\"After clean_xcode_safe_temp_files\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  space_freed=$(get_space_saved "Xcode Safe Temp Files")
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_get_safe\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:403\",\"message\":\"get_space_saved result\",\"data\":{\"space_freed\":\"$space_freed\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"C\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  # 2. Clean derived data (with options - asks user for preferences)
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_before_derived\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:407\",\"message\":\"Before clean_xcode_derived_data\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  clean_xcode_derived_data
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_after_derived\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:409\",\"message\":\"After clean_xcode_derived_data\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  space_freed=$(get_space_saved "Xcode Derived Data")
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  # 3. Clean device support (with options - asks user for preferences)
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_before_device\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:414\",\"message\":\"Before clean_xcode_device_support\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  clean_xcode_device_support
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_after_device\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:416\",\"message\":\"After clean_xcode_device_support\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  space_freed=$(get_space_saved "Xcode Device Support")
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  # 4. Clean archives (requires confirmation - asks user explicitly)
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_before_archives\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:421\",\"message\":\"Before clean_xcode_archives\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  clean_xcode_archives
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_after_archives\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:423\",\"message\":\"After clean_xcode_archives\",\"data\":{},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  space_freed=$(get_space_saved "Xcode Archives")
+  total_space_freed=$((total_space_freed + space_freed))
+  
+  if [[ $total_space_freed -eq 0 ]]; then
+    print_info "No Xcode data found to clean."
+    track_space_saved "Xcode Data" 0
+  else
+    track_space_saved "Xcode Data" $total_space_freed "true"
+    print_success "Xcode cleanup completed! Freed $(format_bytes $total_space_freed)."
+  fi
+  
+  # #region agent log
+  echo "{\"id\":\"log_$(date +%s)_exit\",\"timestamp\":$(($(date +%s) * 1000)),\"location\":\"xcode.sh:435\",\"message\":\"clean_xcode_data exit\",\"data\":{\"total_space_freed\":\"$total_space_freed\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
   
   return 0
 }
@@ -151,6 +558,8 @@ _calculate_xcode_data_size_bytes() {
     "$HOME/Library/Developer/Xcode/Archives"
     "$HOME/Library/Developer/Xcode/iOS DeviceSupport"
     "$HOME/Library/Caches/com.apple.dt.Xcode"
+    "$HOME/Library/Developer/CoreSimulator/Caches"
+    "$HOME/Library/Developer/Xcode/DocumentationCache"
   )
   for dir in "${xcode_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
