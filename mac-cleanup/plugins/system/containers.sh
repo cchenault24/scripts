@@ -58,6 +58,12 @@ clean_container_caches() {
         if [[ -d "$dir" ]]; then
           safe_clean_dir "$dir" "container cache: $app_name" || {
             # Fallback: try find -delete if safe_clean_dir fails
+            # Backup is already done at line 15 for entire containers_dir, but ensure backup for this specific dir
+            if ! backup "$dir" "container_cache_${app_name}"; then
+              print_error "Backup failed for $app_name container cache. Skipping fallback cleanup."
+              log_message "ERROR" "Backup failed for fallback cleanup: $dir"
+              continue
+            fi
             find "$dir" -mindepth 1 -delete 2>/dev/null || {
               find "$dir" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null
               find "$dir" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null

@@ -524,6 +524,14 @@ safe_remove() {
     fi
     
     local size_before=$(calculate_size_bytes "$path")
+    
+    # Backup before destructive operation
+    if ! backup "$path" "safe_remove_${description// /_}"; then
+      print_error "Backup failed for $description. Aborting removal to prevent data loss."
+      log_message "ERROR" "Backup failed, aborting safe_remove: $path"
+      return 1
+    fi
+    
     log_message "INFO" "Removing: $path"
     
     # SAFE-1: Handle symlinks safely - don't follow them
@@ -611,6 +619,14 @@ safe_clean_dir() {
     fi
     
     local size_before=$(calculate_size_bytes "$path")
+    
+    # Backup before destructive operation
+    if ! backup "$path" "safe_clean_dir_${description// /_}"; then
+      print_error "Backup failed for $description. Aborting directory cleanup to prevent data loss."
+      log_message "ERROR" "Backup failed, aborting safe_clean_dir: $path"
+      return 1
+    fi
+    
     log_message "INFO" "Cleaning directory: $path"
     
     # Track files that fail to delete for error reporting (SAFE-9)

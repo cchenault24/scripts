@@ -40,6 +40,11 @@ clean_system_cache() {
       # and safe_clean_dir cannot be easily used in a sudo context. The path is validated (hardcoded)
       # and properly escaped, making this safe from injection attacks.
       local escaped_cache_dir=$(printf '%q' "$cache_dir")
+      # Ensure backup is called immediately before destructive operation (backup was also called at line 23)
+      if ! backup "$cache_dir" "system_caches_final"; then
+        print_error "Backup failed before destructive operation. Aborting."
+        return 1
+      fi
       run_as_admin "find $escaped_cache_dir -maxdepth 1 -type d ! -path $escaped_cache_dir -exec rm -rf {} + 2>/dev/null" "system cache cleanup" || {
         print_error "Failed to clean system cache"
         return 1

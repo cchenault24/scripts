@@ -122,6 +122,11 @@ clean_system_logs() {
       }
       
       # Clean archived logs
+      # Backup is already done at line 106, but ensure backup is called immediately before this operation
+      if ! backup "$logs_dir" "system_logs_archived"; then
+        print_error "Backup failed before cleaning archived logs. Aborting."
+        return 1
+      fi
       run_as_admin "find $escaped_logs_dir -type f -name '*.log.*' -delete 2>/dev/null" "system logs cleanup (archived logs)" || {
         print_error "Failed to clean archived system logs"
         return 1
