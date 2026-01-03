@@ -35,9 +35,19 @@ _create_backup_dir() {
   if [[ ! -d "$MC_BACKUP_DIR" ]]; then
     if ! mkdir -p "$MC_BACKUP_DIR" 2>/dev/null; then
       print_error "Failed to create backup directory at $MC_BACKUP_DIR"
+      print_info "This may be due to insufficient permissions or disk space."
       print_info "Creating backup directory in /tmp instead..."
-      MC_BACKUP_DIR="${MC_BACKUP_FALLBACK_DIR}/$(date +%Y-%m-%d-%H-%M-%S)"
-      mkdir -p "$MC_BACKUP_DIR"
+      MC_BACKUP_DIR="${MC_BACKUP_FALLBACK_DIR:-/tmp/mac-cleanup-backups}/$(date +%Y-%m-%d-%H-%M-%S)"
+      if ! mkdir -p "$MC_BACKUP_DIR" 2>/dev/null; then
+        print_error "Failed to create fallback backup directory. Cannot proceed safely."
+        print_info "Next steps:"
+        print_info "  • Check disk space: df -h"
+        print_info "  • Check permissions on /tmp"
+        print_info "  • Set MC_BACKUP_DIR to a writable location"
+        exit 1
+      fi
+      print_warning "Using fallback backup location: $MC_BACKUP_DIR"
+      log_message "WARNING" "Using fallback backup directory: $MC_BACKUP_DIR"
     fi
     print_success "Created backup directory at $MC_BACKUP_DIR"
   fi
@@ -70,6 +80,7 @@ mc_core_init() {
 }
 
 # Check for tools the script depends on
+# Phase 4.3: Enhanced with actionable error messages
 mc_check_dependencies() {
   local missing_deps=()
   
@@ -81,34 +92,55 @@ mc_check_dependencies() {
   
   if [[ ${#missing_deps[@]} -gt 0 ]]; then
     print_error "Missing required dependencies: ${missing_deps[*]}"
-    print_info "Please install these tools before running the script."
+    print_info "These tools are required for the script to function."
+    print_info "Next steps:"
+    print_info "  • On macOS, these tools should be pre-installed"
+    print_info "  • If missing, try: xcode-select --install"
+    print_info "  • Or reinstall macOS command line tools"
+    log_message "ERROR" "Missing required dependencies: ${missing_deps[*]}"
     exit 1
   fi
 }
 
 # Clean up any temporary files created by the script
+# Phase 4.2: Enhanced with progress file cleanup
 mc_cleanup_script() {
   # Perform any necessary cleanup before exiting
-  print_info "Cleaning up script resources..."
+  if [[ -t 1 ]]; then
+    print_info "Cleaning up script resources..."
+  fi
+  
+  # Phase 4.2: Clean up progress files and locks
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp.lock 2>/dev/null || true
   
   # Remove any temp files (N qualifier prevents error if no matches)
   rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-temp-"*(/N) 2>/dev/null
   rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-"*.tmp(N) 2>/dev/null
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-"*.tmp 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-space-"*.tmp 2>/dev/null || true
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool
   
   # Compress backup logs if they exist
-  if [[ -d "$MC_BACKUP_DIR" && $(find "$MC_BACKUP_DIR" -type f | wc -l) -gt 0 ]]; then
-    find "$MC_BACKUP_DIR" -type f -name "*.log" -exec gzip {} \; 2>/dev/null
+  if [[ -d "$MC_BACKUP_DIR" && $(find "$MC_BACKUP_DIR" -type f 2>/dev/null | wc -l) -gt 0 ]]; then
+    find "$MC_BACKUP_DIR" -type f -name "*.log" ! -name "*.gz" -exec gzip {} \; 2>/dev/null || true
   fi
 }
 
 # Handle script interruptions gracefully
+# Phase 4.2: Enhanced with progress file cleanup
 mc_handle_interrupt() {
   echo ""
   print_warning "Script interrupted by user."
   print_info "Cleaning up and exiting..."
+  
+  # Phase 4.2: Clean up progress files
+  if [[ -n "${MC_PROGRESS_FILE:-}" && -f "$MC_PROGRESS_FILE" ]]; then
+    rm -f "$MC_PROGRESS_FILE" "${MC_PROGRESS_FILE}.lock" 2>/dev/null || true
+    log_message "INFO" "Cleaned up progress file on interrupt"
+  fi
   
   # Kill background cleanup process if running
   if [[ -n "${MC_CLEANUP_PID:-}" && "$MC_CLEANUP_PID" =~ ^[0-9]+$ ]]; then
@@ -127,12 +159,20 @@ mc_handle_interrupt() {
     fi
   fi
   
-  # Clean up sweep temp files (N qualifier prevents error if no matches)
+  # Phase 4.2: Clean up all temp files including progress files
   rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-"*.tmp(N) 2>/dev/null
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp 2>/dev/null || true
+  rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-"*.tmp.lock 2>/dev/null || true
   rm -f "${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-"*.tmp 2>/dev/null || true
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool
+  
+  # Phase 4.3: Provide helpful message about backups
+  if [[ -n "${MC_BACKUP_DIR:-}" && -d "$MC_BACKUP_DIR" ]]; then
+    print_info "Backups are safe in: $MC_BACKUP_DIR"
+    print_info "You can restore using: $SCRIPT_NAME --undo"
+  fi
   
   # Exit with non-zero status
   exit 1

@@ -10,6 +10,7 @@ clean_homebrew_cache() {
   
   if ! command -v brew &> /dev/null; then
     print_warning "Homebrew is not installed."
+    print_info "To install Homebrew: Visit https://brew.sh or run: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     track_space_saved "Homebrew Cache" 0
     return 0
   fi

@@ -10,6 +10,7 @@ clean_pip_cache() {
   
   if ! command -v pip &> /dev/null && ! command -v pip3 &> /dev/null; then
     print_warning "pip is not installed."
+  print_info "To install pip: Install Python from https://python.org or use: brew install python"
     return
   fi
   

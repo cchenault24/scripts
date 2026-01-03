@@ -195,27 +195,75 @@ cleanup_gum() {
 }
 
 # Confirmation prompt function (replaces gum confirm)
+# Phase 4: Enhanced with better non-interactive detection and timeout handling
 mc_confirm() {
   local prompt="$1"
+  local default="${2:-}"  # Optional default value: "y" or "n"
+  local timeout="${3:-10}"  # Timeout in seconds (default 10)
   local response
   
-  # Check if stdin is available and we're in an interactive terminal
-  # Also check if we're in a background job (jobs[%] would be set)
-  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
-    # Check if we can actually read from stdin by trying a non-blocking test
-    # In background processes, read will hang even if -t 0 returns true
-    # So we use a timeout and catch any errors
-    if read -t 10 -q "?$prompt (y/n) " response 2>/dev/null; then
-      echo ""
-      [[ "$response" == "y" || "$response" == "Y" ]]
+  # Phase 4.1: Check for explicit non-interactive mode first
+  if [[ -n "${MC_NON_INTERACTIVE:-}" ]] || [[ "${MC_NON_INTERACTIVE:-}" == "true" ]]; then
+    # Non-interactive mode: use default if provided, otherwise return false
+    if [[ "$default" == "y" || "$default" == "Y" ]]; then
+      log_message "INFO" "Non-interactive mode: auto-confirming '$prompt' (default: yes)"
+      return 0
     else
-      # If read times out or fails, we're likely in a non-interactive context
-      # This can happen in background processes even if -t 0 is true
-      echo ""
+      log_message "INFO" "Non-interactive mode: auto-rejecting '$prompt' (default: no)"
       return 1
     fi
+  fi
+  
+  # Phase 4.1: Check if stdin is available and we're in an interactive terminal
+  # Also check if we're in a background job or have piped input
+  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+    # Phase 4.1: Check for piped input (e.g., echo "y" | script.sh)
+    # If stdin is a pipe, try to read from it first
+    if [[ -p /dev/stdin ]] || [[ -S /dev/stdin ]]; then
+      # Piped input detected - read one character
+      if IFS= read -r -t 1 response 2>/dev/null; then
+        response=$(echo "$response" | tr '[:upper:]' '[:lower:]' | cut -c1)
+        if [[ "$response" == "y" ]]; then
+          log_message "INFO" "Piped input confirmed: '$prompt'"
+          return 0
+        else
+          log_message "INFO" "Piped input rejected: '$prompt'"
+          return 1
+        fi
+      fi
+    fi
+    
+    # Phase 4.1: Try to read from terminal with timeout
+    # Use read -t with timeout to prevent hanging in background processes
+    # In background processes, read will hang even if -t 0 returns true
+    if read -t "$timeout" -q "?$prompt (y/n)${default:+ [default: ${default}]} " response 2>/dev/null; then
+      echo ""
+      response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+      if [[ "$response" == "y" || "$response" == "Y" ]]; then
+        return 0
+      else
+        return 1
+      fi
+    else
+      # Phase 4.1: Timeout or read failed - use default if provided
+      echo ""
+      if [[ "$default" == "y" || "$default" == "Y" ]]; then
+        log_message "WARNING" "Input timeout for '$prompt', using default: yes"
+        return 0
+      else
+        log_message "WARNING" "Input timeout for '$prompt', using default: no"
+        return 1
+      fi
+    fi
   else
-    # Non-interactive: default to no
-    return 1
+    # Phase 4.1: Non-interactive context detected
+    # Use default if provided, otherwise return false (safe default)
+    if [[ "$default" == "y" || "$default" == "Y" ]]; then
+      log_message "INFO" "Non-interactive context: auto-confirming '$prompt' (default: yes)"
+      return 0
+    else
+      log_message "INFO" "Non-interactive context: auto-rejecting '$prompt' (default: no)"
+      return 1
+    fi
   fi
 }

@@ -8,8 +8,10 @@ set -euo pipefail  # Exit on error, undefined vars, pipe failures
 clean_npm_cache() {
   print_header "Cleaning npm Cache"
   
+  # Phase 4.4: Enhanced dependency check with actionable message
   if ! command -v npm &> /dev/null; then
     print_warning "npm is not installed."
+    print_info "To install npm: Install Node.js from https://nodejs.org or use: brew install node"
     # Track 0 space saved since npm is not available
     track_space_saved "npm Cache" 0
     return 0

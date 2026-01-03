@@ -9,18 +9,39 @@ set -euo pipefail  # Exit on error, undefined vars, pipe failures
 typeset -A MC_SIZE_CACHE
 
 # Helper function to safely write to progress file with locking (SAFE-7)
+# Phase 4.2: Enhanced with better error handling and cleanup
 _write_progress_file() {
   local progress_file="$1"
   local content="$2"
   
+  # Phase 4.2: Validate inputs
   if [[ -z "$progress_file" || -z "$content" ]]; then
+    log_message "WARNING" "_write_progress_file called with empty arguments"
     return 1
+  fi
+  
+  # Phase 4.2: Ensure parent directory exists
+  local progress_dir=$(dirname "$progress_file" 2>/dev/null)
+  if [[ -n "$progress_dir" && ! -d "$progress_dir" ]]; then
+    mkdir -p "$progress_dir" 2>/dev/null || {
+      log_message "ERROR" "Failed to create progress directory: $progress_dir"
+      return 1
+    }
   fi
   
   # Use file locking to prevent race conditions (SAFE-7)
   local lock_file="${progress_file}.lock"
   local lock_acquired=false
   local attempts=0
+  
+  # Phase 4.2: Clean up stale lock files (older than 30 seconds)
+  if [[ -f "$lock_file" ]]; then
+    local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_file" 2>/dev/null || echo 0)))
+    if [[ $lock_age -gt 30 ]]; then
+      log_message "WARNING" "Removing stale progress lock file (age: ${lock_age}s)"
+      rm -f "$lock_file" 2>/dev/null || true
+    fi
+  fi
   
   # Try to acquire lock (wait up to 5 seconds)
   while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
@@ -34,7 +55,11 @@ _write_progress_file() {
           if [[ "$lock_pid" == "$$" ]]; then
             lock_acquired=true
             # Write to progress file
-            echo "$content" > "$progress_file" 2>/dev/null || true
+            echo "$content" > "$progress_file" 2>/dev/null || {
+              log_message "ERROR" "Failed to write progress file: $progress_file"
+              rm -f "$lock_file" 2>/dev/null || true
+              return 1
+            }
             # Release lock
             rm -f "$lock_file" 2>/dev/null || true
             return 0
@@ -47,9 +72,13 @@ _write_progress_file() {
     attempts=$((attempts + 1))
   done
   
-  # If lock acquisition failed, try one more time without lock (better than losing progress)
-  echo "$content" > "$progress_file" 2>/dev/null || true
-  log_message "WARNING" "Progress file lock timeout, wrote without lock"
+  # Phase 4.2: If lock acquisition failed, try one more time without lock (better than losing progress)
+  # But log a warning
+  echo "$content" > "$progress_file" 2>/dev/null || {
+    log_message "ERROR" "Failed to write progress file even without lock: $progress_file"
+    return 1
+  }
+  log_message "WARNING" "Progress file lock timeout after ${attempts} attempts, wrote without lock"
   return 0
 }
 
@@ -443,15 +472,25 @@ _check_sip_protected() {
 }
 
 # Safely remove a directory or file
+# Phase 4.4: Enhanced with better edge case handling
 safe_remove() {
   local path="$1"
   local description="$2"
   
-  # Validate input
+  # Phase 4.4: Validate input
   if [[ -z "$path" ]]; then
     print_error "safe_remove called with empty path"
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "safe_remove called with empty path"
     return 1
+  fi
+  
+  # Phase 4.4: Handle empty directories gracefully
+  if [[ -d "$path" ]]; then
+    local item_count=$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "${item_count:-0}" -eq 0 ]]; then
+      log_message "INFO" "Directory is empty, skipping: $path"
+      return 0
+    fi
   fi
   
   if [[ "$MC_DRY_RUN" == "true" ]]; then
@@ -476,9 +515,10 @@ safe_remove() {
       return 1
     fi
     
-    # SAFE-2: Check if file is in use
+    # Phase 4.4: SAFE-2: Check if file is in use with better error message
     if _check_file_in_use "$path"; then
       print_warning "File is in use: $path. Skipping to prevent data corruption."
+      print_info "To fix: Close any applications using this file and try again"
       log_message "WARNING" "File in use, skipped: $path"
       return 1
     fi
@@ -527,15 +567,29 @@ safe_remove() {
 }
 
 # Safely clean a directory (remove contents but keep the directory)
+# Phase 4.4: Enhanced with better edge case handling
 safe_clean_dir() {
   local path="$1"
   local description="$2"
   
-  # Validate input
+  # Phase 4.4: Validate input
   if [[ -z "$path" ]]; then
     print_error "safe_clean_dir called with empty path"
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "safe_clean_dir called with empty path"
     return 1
+  fi
+  
+  # Phase 4.4: Handle non-existent directories gracefully
+  if [[ ! -d "$path" ]]; then
+    log_message "INFO" "Directory does not exist, skipping: $path"
+    return 0
+  fi
+  
+  # Phase 4.4: Handle empty directories gracefully
+  local item_count=$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "${item_count:-0}" -eq 0 ]]; then
+    log_message "INFO" "Directory is empty, skipping: $path"
+    return 0
   fi
   
   if [[ "$MC_DRY_RUN" == "true" ]]; then
@@ -548,9 +602,10 @@ safe_clean_dir() {
   fi
   
   if [[ -d "$path" ]]; then
-    # SAFE-3: Check write permission
+    # Phase 4.4: SAFE-3: Check write permission with better error message
     if ! _check_write_permission "$path"; then
       print_warning "No write permission for $description. Skipping."
+      print_info "To fix: Check directory permissions or run with appropriate privileges"
       log_message "WARNING" "No write permission: $path"
       return 1
     fi

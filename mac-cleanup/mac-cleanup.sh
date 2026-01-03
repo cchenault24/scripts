@@ -697,24 +697,38 @@ main() {
   fi
   
   echo ""
-  # Prompt user to proceed
-  if [[ -t 0 ]]; then
+  # Phase 4.1: Prompt user to proceed with better non-interactive handling
+  if [[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
     local response
-    read -q "?Press 'y' to begin cleanup, 'n' to exit: " response
-    echo ""
-    
-    if [[ "$response" != "y" && "$response" != "Y" ]]; then
-      # User chose to exit - kill sweep if still running
-      if [[ -n "$sweep_pid" ]]; then
-        kill $sweep_pid 2>/dev/null || true
-        wait $sweep_pid 2>/dev/null || true
+    # Phase 4.1: Use timeout to prevent hanging in edge cases
+    if read -t 30 -q "?Press 'y' to begin cleanup, 'n' to exit: " response 2>/dev/null; then
+      echo ""
+      
+      if [[ "$response" != "y" && "$response" != "Y" ]]; then
+        # User chose to exit - kill sweep if still running
+        if [[ -n "$sweep_pid" ]]; then
+          kill $sweep_pid 2>/dev/null || true
+          wait $sweep_pid 2>/dev/null || true
+        fi
+        rm -f "$sweep_file" 2>/dev/null || true
+        print_info "Exiting. Goodbye!"
+        exit 0
       fi
-      rm -f "$sweep_file" 2>/dev/null || true
-      print_info "Exiting. Goodbye!"
-      exit 0
+    else
+      # Phase 4.1: Timeout or read failed - check if non-interactive mode should be enabled
+      echo ""
+      if [[ -n "${MC_NON_INTERACTIVE:-}" ]] || [[ "${MC_NON_INTERACTIVE:-}" == "true" ]]; then
+        print_info "Non-interactive mode: proceeding automatically"
+      else
+        print_warning "Input timeout. Assuming non-interactive mode and proceeding."
+        export MC_NON_INTERACTIVE=true
+      fi
     fi
   else
-    # Non-interactive mode - proceed automatically
+    # Phase 4.1: Non-interactive mode - proceed automatically
+    if [[ -z "${MC_NON_INTERACTIVE:-}" ]]; then
+      export MC_NON_INTERACTIVE=true
+    fi
     print_info "Non-interactive mode: proceeding automatically"
   fi
   
@@ -928,16 +942,17 @@ main() {
     fi
   done
   
-  # Check if we have categories
+  # Phase 4.4: Check if we have categories with better messaging
   if [[ ${#category_list[@]} -eq 0 ]]; then
-    print_error "No cleanup options available!"
+    print_info "No cleanup options available!"
     print_info "No categories with cleanup opportunities found."
     print_info "This could mean:"
-    print_info "  - Your system is already clean (all caches are empty)"
-    print_info "  - No plugins found files to clean"
-    print_info "  - All cleanup targets have zero size"
+    print_info "  • Your system is already clean (all caches are empty)"
+    print_info "  • No plugins found files to clean"
+    print_info "  • All cleanup targets have zero size"
     echo ""
-    print_info "Found ${#plugin_array[@]} plugins, but none have files to clean."
+    print_info "Found ${#plugin_array[@]} plugin(s), but none have files to clean."
+    print_info "This is normal if you've recently cleaned your system or have minimal cache usage."
     mc_cleanup_selection_tool
     exit 0
   fi
@@ -1054,9 +1069,11 @@ main() {
     fi
   done
   
-  # Check if we have plugins to show
+  # Phase 4.4: Check if we have plugins to show with better messaging
   if [[ ${#plugin_option_list[@]} -eq 0 ]]; then
-    print_warning "No plugins with cleanup opportunities in selected categories."
+    print_info "No plugins with cleanup opportunities in selected categories."
+    print_info "This means all selected cleanup targets are already empty or have no data to clean."
+    print_info "Try selecting different categories or check back later after using your system."
     mc_cleanup_selection_tool
     exit 0
   fi
@@ -1217,17 +1234,21 @@ main() {
       echo "{\"id\":\"log_${log_timestamp}_plugin_lookup_result\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1136\",\"message\":\"Plugin function lookup result\",\"data\":{\"option\":\"$option\",\"function\":\"$function\",\"function_empty\":\"$([[ -z \"$function\" ]] && echo true || echo false)\",\"function_type\":\"$(type \"$function\" 2>&1 | head -1 || echo \"not found\")\",\"function_available\":\"$(type \"$function\" &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
       # #endregion
       
-      # Check if function exists - if not, it means the plugin file wasn't sourced properly
+      # Phase 4.3: Check if function exists - if not, it means the plugin file wasn't sourced properly
       if [[ -z "$function" ]]; then
-        print_error "Plugin function not found or invalid: $function (for plugin: $option)" >> "$cleanup_output_file"
+        print_error "Plugin function not found for: $option" >> "$cleanup_output_file"
+        print_info "This plugin may not be properly installed or loaded." >> "$cleanup_output_file"
+        print_info "Check the log file for details: $MC_LOG_FILE" >> "$cleanup_output_file"
         log_message "ERROR" "Plugin function not found: $function (for plugin: $option)"
         _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
         continue
       fi
       
-      # Verify function actually exists (not just registered)
+      # Phase 4.3: Verify function actually exists (not just registered)
       if ! type "$function" &>/dev/null; then
-        print_error "Plugin function '$function' is registered but not defined (for plugin: $option)" >> "$cleanup_output_file"
+        print_error "Plugin function '$function' is registered but not defined for: $option" >> "$cleanup_output_file"
+        print_info "This indicates a plugin configuration issue." >> "$cleanup_output_file"
+        print_info "Check the log file for details: $MC_LOG_FILE" >> "$cleanup_output_file"
         log_message "ERROR" "Plugin function '$function' registered but not available (for plugin: $option)"
         _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
         continue
@@ -1249,9 +1270,11 @@ main() {
           waited=$((waited + 1))
         done
         
-        # If still running after timeout, kill it
+        # Phase 4.3: If still running after timeout, kill it with better error message
         if kill -0 $func_pid 2>/dev/null; then
-          print_error "Plugin $option timed out after $plugin_timeout seconds" >> "$cleanup_output_file"
+          print_error "Plugin '$option' timed out after $plugin_timeout seconds" >> "$cleanup_output_file"
+          print_info "This may indicate the plugin is processing a large amount of data." >> "$cleanup_output_file"
+          print_info "The plugin has been stopped to prevent hanging. Check the log for details." >> "$cleanup_output_file"
           log_message "ERROR" "Plugin $option timed out after $plugin_timeout seconds"
           kill -TERM $func_pid 2>/dev/null || true
           sleep 2
@@ -1259,11 +1282,12 @@ main() {
           kill -KILL $func_pid 2>/dev/null || true
           wait $func_pid 2>/dev/null || true
         else
-          # Function completed, wait for it to get exit code
+          # Phase 4.3: Function completed, wait for it to get exit code with better error message
           wait $func_pid 2>/dev/null || {
             local exit_code=$?
             if [[ $exit_code -ne 0 ]]; then
-              print_error "Plugin $option failed with exit code $exit_code" >> "$cleanup_output_file"
+              print_error "Plugin '$option' failed with exit code $exit_code" >> "$cleanup_output_file"
+              print_info "Check the log file for detailed error information: $MC_LOG_FILE" >> "$cleanup_output_file"
               log_message "ERROR" "Plugin $option failed with exit code $exit_code"
             fi
           }

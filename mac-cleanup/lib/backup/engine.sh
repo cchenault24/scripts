@@ -47,6 +47,10 @@ mc_backup_create() {
   if ! mc_storage_has_space "$backup_dir" "$path_size"; then
     local available=$(mc_storage_check_space "$backup_dir")
     print_error "Insufficient disk space for backup. Available: $(format_bytes $available), Needed: $(format_bytes $path_size)"
+    print_info "Next steps:"
+    print_info "  • Free up disk space: df -h"
+    print_info "  • Remove old backups: $MC_BACKUP_DIR"
+    print_info "  • Use a different backup location by setting MC_BACKUP_DIR"
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Insufficient disk space for backup: $backup_name"
     return 1
   fi
