@@ -36,7 +36,11 @@ backup() {
       
       # Skip backup for very small directories (< 1MB) to save time
       local dir_size=$(calculate_size_bytes "$path" 2>/dev/null || echo "0")
-      if [[ -n "$dir_size" && "$dir_size" =~ ^[0-9]+$ && $dir_size -lt 1048576 ]]; then
+      # Load constants if not already loaded
+      if [[ -z "${MC_MIN_BACKUP_SIZE:-}" ]]; then
+        local MC_MIN_BACKUP_SIZE=1048576  # Fallback if constants not loaded
+      fi
+      if [[ -n "$dir_size" && "$dir_size" =~ ^[0-9]+$ && $dir_size -lt $MC_MIN_BACKUP_SIZE ]]; then
         print_info "Skipping backup of small directory (< 1MB): $path"
         log_message "INFO" "Skipped backup of small directory: $path ($(format_bytes $dir_size))"
         return 0

@@ -46,10 +46,16 @@ clean_docker_cache() {
             if [[ "$size_str" =~ ^([0-9.]+)([KMGT]?B)$ ]]; then
               local num=$(echo "$size_str" | sed -E 's/([KMGT]?B)$//')
               local unit=$(echo "$size_str" | sed -E 's/^[0-9.]+//')
+              # Load constants if not already loaded
+              if [[ -z "${MC_BYTES_PER_GB:-}" ]]; then
+                local MC_BYTES_PER_GB=1073741824
+                local MC_BYTES_PER_MB=1048576
+                local MC_BYTES_PER_KB=1024
+              fi
               case "$unit" in
-                GB) size_bytes=$(echo "$num * 1073741824" | awk '{printf "%.0f", $1 * $2}') ;;
-                MB) size_bytes=$(echo "$num * 1048576" | awk '{printf "%.0f", $1 * $2}') ;;
-                KB) size_bytes=$(echo "$num * 1024" | awk '{printf "%.0f", $1 * $2}') ;;
+                GB) size_bytes=$(echo "$num * $MC_BYTES_PER_GB" | awk '{printf "%.0f", $1 * $2}') ;;
+                MB) size_bytes=$(echo "$num * $MC_BYTES_PER_MB" | awk '{printf "%.0f", $1 * $2}') ;;
+                KB) size_bytes=$(echo "$num * $MC_BYTES_PER_KB" | awk '{printf "%.0f", $1 * $2}') ;;
                 B|"") size_bytes=$(echo "$num" | awk '{printf "%.0f", $1}') ;;
               esac
             fi
@@ -73,10 +79,16 @@ clean_docker_cache() {
             if [[ "$size_str" =~ ^([0-9.]+)([KMGT]?B)$ ]]; then
               local num=$(echo "$size_str" | sed -E 's/([KMGT]?B)$//')
               local unit=$(echo "$size_str" | sed -E 's/^[0-9.]+//')
+              # Load constants if not already loaded
+              if [[ -z "${MC_BYTES_PER_GB:-}" ]]; then
+                local MC_BYTES_PER_GB=1073741824
+                local MC_BYTES_PER_MB=1048576
+                local MC_BYTES_PER_KB=1024
+              fi
               case "$unit" in
-                GB) size_bytes=$(echo "$num * 1073741824" | awk '{printf "%.0f", $1 * $2}') ;;
-                MB) size_bytes=$(echo "$num * 1048576" | awk '{printf "%.0f", $1 * $2}') ;;
-                KB) size_bytes=$(echo "$num * 1024" | awk '{printf "%.0f", $1 * $2}') ;;
+                GB) size_bytes=$(echo "$num * $MC_BYTES_PER_GB" | awk '{printf "%.0f", $1 * $2}') ;;
+                MB) size_bytes=$(echo "$num * $MC_BYTES_PER_MB" | awk '{printf "%.0f", $1 * $2}') ;;
+                KB) size_bytes=$(echo "$num * $MC_BYTES_PER_KB" | awk '{printf "%.0f", $1 * $2}') ;;
                 B|"") size_bytes=$(echo "$num" | awk '{printf "%.0f", $1}') ;;
               esac
             fi

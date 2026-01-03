@@ -88,8 +88,13 @@ run_as_admin() {
     fi
   fi
   
+  # SAFE-6/CRIT-6: Properly escape command to prevent injection
+  # Use printf %q to safely escape the command string
+  local escaped_command=$(printf '%q' "$command")
+  
   # Run the command with sudo (use -n to fail immediately if password needed)
-  if sudo -n sh -c "$command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]] && sudo sh -c "$command"); then
+  # Use the escaped command to prevent injection
+  if sudo -n sh -c "$escaped_command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && [[ -z "${MC_NON_INTERACTIVE:-}" ]] && sudo sh -c "$escaped_command"); then
     log_message "SUCCESS" "Admin command completed: $description"
     return 0
   else

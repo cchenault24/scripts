@@ -40,8 +40,12 @@ clean_safari_cache() {
       update_operation_progress $current_item $total_items "$dir_name"
       
       local space_before=$(calculate_size_bytes "$dir")
+      # Load constants if not already loaded
+      if [[ -z "${MC_MIN_DIR_SIZE:-}" ]]; then
+        local MC_MIN_DIR_SIZE=4096  # Fallback if constants not loaded
+      fi
       # Check if directory has meaningful content (more than just directory overhead ~4KB)
-      if [[ $space_before -gt 4096 ]]; then
+      if [[ $space_before -gt $MC_MIN_DIR_SIZE ]]; then
         dirs_with_content=$((dirs_with_content + 1))
         if ! backup "$dir" "safari_$dir_name"; then
           print_error "Backup failed for Safari $dir_name. Skipping this directory."

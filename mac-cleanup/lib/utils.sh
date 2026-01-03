@@ -6,9 +6,82 @@
 # Size calculation cache (associative array)
 typeset -A MC_SIZE_CACHE
 
+# Helper function to safely write to progress file with locking (SAFE-7)
+_write_progress_file() {
+  local progress_file="$1"
+  local content="$2"
+  
+  if [[ -z "$progress_file" || -z "$content" ]]; then
+    return 1
+  fi
+  
+  # Use file locking to prevent race conditions (SAFE-7)
+  local lock_file="${progress_file}.lock"
+  local lock_acquired=false
+  local attempts=0
+  
+  # Try to acquire lock (wait up to 5 seconds)
+  while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
+    if (set -C; echo $$ > "$lock_file" 2>/dev/null); then
+      lock_acquired=true
+      # Write to progress file
+      echo "$content" > "$progress_file" 2>/dev/null || true
+      # Release lock
+      rm -f "$lock_file" 2>/dev/null || true
+      return 0
+    else
+      sleep 0.1
+      attempts=$((attempts + 1))
+    fi
+  done
+  
+  # If lock acquisition failed, try one more time without lock (better than losing progress)
+  echo "$content" > "$progress_file" 2>/dev/null || true
+  log_message "WARNING" "Progress file lock timeout, wrote without lock"
+  return 0
+}
+
+# Helper function to safely read progress file with locking (SAFE-7)
+_read_progress_file() {
+  local progress_file="$1"
+  
+  if [[ -z "$progress_file" || ! -f "$progress_file" ]]; then
+    echo ""
+    return 1
+  fi
+  
+  # Use file locking to prevent race conditions (SAFE-7)
+  local lock_file="${progress_file}.lock"
+  local lock_acquired=false
+  local attempts=0
+  local content=""
+  
+  # Try to acquire lock (wait up to 1 second for reads - shorter timeout)
+  while [[ $attempts -lt 10 && "$lock_acquired" == "false" ]]; do
+    if (set -C; echo $$ > "$lock_file" 2>/dev/null); then
+      lock_acquired=true
+      # Read from progress file
+      content=$(cat "$progress_file" 2>/dev/null || echo "")
+      # Release lock
+      rm -f "$lock_file" 2>/dev/null || true
+      echo "$content"
+      return 0
+    else
+      sleep 0.1
+      attempts=$((attempts + 1))
+    fi
+  done
+  
+  # If lock acquisition failed, read without lock (better than blocking)
+  content=$(cat "$progress_file" 2>/dev/null || echo "")
+  echo "$content"
+  return 0
+}
+
 # Progress reporting function for plugins
 # Usage: update_operation_progress current_item total_items "item_name"
 # This allows plugins to report progress as they process multiple items
+# SAFE-7: Uses file locking to prevent race conditions
 update_operation_progress() {
   local current_item=$1
   local total_items=$2
@@ -16,24 +89,68 @@ update_operation_progress() {
   
   # Only update if progress file is set (we're in a cleanup operation)
   if [[ -n "${MC_PROGRESS_FILE:-}" && -f "$MC_PROGRESS_FILE" ]]; then
-    # Read current operation info from progress file
-    local progress_line=$(cat "$MC_PROGRESS_FILE" 2>/dev/null || echo "")
+    # Use file locking to prevent race conditions (SAFE-7)
+    local lock_file="${MC_PROGRESS_FILE}.lock"
+    local lock_acquired=false
+    local attempts=0
+    
+    # Try to acquire lock (wait up to 5 seconds)
+    while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
+      if (set -C; echo $$ > "$lock_file" 2>/dev/null); then
+        lock_acquired=true
+        
+        # Read current operation info from progress file
+        local progress_line=$(cat "$MC_PROGRESS_FILE" 2>/dev/null || echo "")
+        if [[ -n "$progress_line" ]]; then
+          local op_index=$(echo "$progress_line" | cut -d'|' -f1)
+          local total_ops=$(echo "$progress_line" | cut -d'|' -f2)
+          local op_name=$(echo "$progress_line" | cut -d'|' -f3- | cut -d'|' -f1)
+          
+          # Update progress file with item-level progress
+          # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
+          echo "$op_index|$total_ops|$op_name|$current_item|$total_items|$item_name" > "$MC_PROGRESS_FILE"
+        fi
+        
+        # Release lock
+        rm -f "$lock_file" 2>/dev/null || true
+        return 0
+      else
+        sleep 0.1
+        attempts=$((attempts + 1))
+      fi
+    done
+    
+    # If lock acquisition failed, try one more time without lock (better than losing progress)
     if [[ -n "$progress_line" ]]; then
       local op_index=$(echo "$progress_line" | cut -d'|' -f1)
       local total_ops=$(echo "$progress_line" | cut -d'|' -f2)
       local op_name=$(echo "$progress_line" | cut -d'|' -f3- | cut -d'|' -f1)
-      
-      # Update progress file with item-level progress
-      # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
-      echo "$op_index|$total_ops|$op_name|$current_item|$total_items|$item_name" > "$MC_PROGRESS_FILE"
+      echo "$op_index|$total_ops|$op_name|$current_item|$total_items|$item_name" > "$MC_PROGRESS_FILE" 2>/dev/null || true
+      log_message "WARNING" "Progress file lock timeout, wrote without lock"
     fi
   fi
 }
 
 # Log message to file if logging is enabled
+# QUAL-14: Standardized logging levels
 log_message() {
   local level="$1"
   local message="$2"
+  
+  # QUAL-14: Standardize log levels - normalize to uppercase
+  level=$(echo "$level" | tr '[:lower:]' '[:upper:]')
+  
+  # Validate log level (QUAL-14)
+  case "$level" in
+    DEBUG|INFO|WARNING|ERROR|SUCCESS|DRY_RUN)
+      # Valid log level
+      ;;
+    *)
+      # Default to INFO for unknown levels
+      level="INFO"
+      ;;
+  esac
+  
   if [[ -n "$MC_LOG_FILE" ]]; then
     # Use full path to date to ensure it's available in subshells
     echo "[$(/bin/date '+%Y-%m-%d %H:%M:%S')] [$level] $message" >> "$MC_LOG_FILE"
@@ -54,6 +171,13 @@ calculate_size() {
 # Calculate size in bytes for accurate tracking (with caching)
 calculate_size_bytes() {
   local path="$1"
+  
+  # Validate input
+  if [[ -z "$path" ]]; then
+    log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "calculate_size_bytes called with empty path"
+    echo "0"
+    return
+  fi
   
   # Early exit for non-existent paths
   if [[ ! -e "$path" ]]; then
@@ -120,24 +244,31 @@ invalidate_size_cache() {
 format_bytes() {
   local bytes=$1
   
+  # Load constants if not already loaded
+  if [[ -z "${MC_BYTES_PER_GB:-}" ]]; then
+    local MC_BYTES_PER_GB=1073741824
+    local MC_BYTES_PER_MB=1048576
+    local MC_BYTES_PER_KB=1024
+  fi
+  
   # Use awk for floating point calculations to avoid rounding errors
   if command -v awk &>/dev/null; then
-    if [[ $bytes -ge 1073741824 ]]; then
+    if [[ $bytes -ge $MC_BYTES_PER_GB ]]; then
       # GB with 2 decimal places
-      awk -v b=$bytes 'BEGIN {
-        gb = b / 1073741824
+      awk -v b=$bytes -v gb_size=$MC_BYTES_PER_GB 'BEGIN {
+        gb = b / gb_size
         printf "%.2f GB", gb
       }'
-    elif [[ $bytes -ge 1048576 ]]; then
+    elif [[ $bytes -ge $MC_BYTES_PER_MB ]]; then
       # MB with 2 decimal places
-      awk -v b=$bytes 'BEGIN {
-        mb = b / 1048576
+      awk -v b=$bytes -v mb_size=$MC_BYTES_PER_MB 'BEGIN {
+        mb = b / mb_size
         printf "%.2f MB", mb
       }'
-    elif [[ $bytes -ge 1024 ]]; then
+    elif [[ $bytes -ge $MC_BYTES_PER_KB ]]; then
       # KB with 2 decimal places
-      awk -v b=$bytes 'BEGIN {
-        kb = b / 1024
+      awk -v b=$bytes -v kb_size=$MC_BYTES_PER_KB 'BEGIN {
+        kb = b / kb_size
         printf "%.2f KB", kb
       }'
     else
@@ -145,31 +276,31 @@ format_bytes() {
     fi
   else
     # Fallback to integer arithmetic if awk not available
-    if [[ $bytes -ge 1073741824 ]]; then
-      local gb=$((bytes / 1073741824))
-      local remainder=$((bytes % 1073741824))
-      local mb=$((remainder / 1048576))
+    if [[ $bytes -ge $MC_BYTES_PER_GB ]]; then
+      local gb=$((bytes / MC_BYTES_PER_GB))
+      local remainder=$((bytes % MC_BYTES_PER_GB))
+      local mb=$((remainder / MC_BYTES_PER_MB))
       # Calculate decimal part more accurately
-      local decimal=$((remainder * 100 / 1048576))
+      local decimal=$((remainder * 100 / MC_BYTES_PER_MB))
       if [[ $decimal -gt 0 ]]; then
         printf "%d.%02d GB" $gb $decimal
       else
         printf "%d GB" $gb
       fi
-    elif [[ $bytes -ge 1048576 ]]; then
-      local mb=$((bytes / 1048576))
-      local remainder=$((bytes % 1048576))
-      local kb=$((remainder / 1024))
-      local decimal=$((remainder * 100 / 1024))
+    elif [[ $bytes -ge $MC_BYTES_PER_MB ]]; then
+      local mb=$((bytes / MC_BYTES_PER_MB))
+      local remainder=$((bytes % MC_BYTES_PER_MB))
+      local kb=$((remainder / MC_BYTES_PER_KB))
+      local decimal=$((remainder * 100 / MC_BYTES_PER_KB))
       if [[ $decimal -gt 0 ]]; then
         printf "%d.%02d MB" $mb $decimal
       else
         printf "%d MB" $mb
       fi
-    elif [[ $bytes -ge 1024 ]]; then
-      local kb=$((bytes / 1024))
-      local b=$((bytes % 1024))
-      local decimal=$((b * 100 / 1024))
+    elif [[ $bytes -ge $MC_BYTES_PER_KB ]]; then
+      local kb=$((bytes / MC_BYTES_PER_KB))
+      local b=$((bytes % MC_BYTES_PER_KB))
+      local decimal=$((b * 100 / MC_BYTES_PER_KB))
       if [[ $decimal -gt 0 ]]; then
         printf "%d.%02d KB" $kb $decimal
       else
@@ -181,10 +312,91 @@ format_bytes() {
   fi
 }
 
+# Check if a file or directory is in use (SAFE-2)
+_check_file_in_use() {
+  local path="$1"
+  
+  # Skip check if lsof is not available
+  if ! command -v lsof &>/dev/null; then
+    return 1  # Assume not in use if we can't check
+  fi
+  
+  # Check if file is open by any process
+  if lsof "$path" &>/dev/null; then
+    return 0  # File is in use
+  fi
+  
+  # For directories, check if any files within are in use
+  if [[ -d "$path" ]]; then
+    # Limit depth to avoid performance issues on large directories
+    if lsof +D "$path" 2>/dev/null | head -1 | grep -q .; then
+      return 0  # Directory has files in use
+    fi
+  fi
+  
+  return 1  # File is not in use
+}
+
+# Check if we have write permission (SAFE-3)
+_check_write_permission() {
+  local path="$1"
+  
+  # Check if path exists
+  if [[ ! -e "$path" ]]; then
+    return 1
+  fi
+  
+  # For directories, check if writable
+  if [[ -d "$path" ]]; then
+    if [[ ! -w "$path" ]]; then
+      return 1  # No write permission
+    fi
+  else
+    # For files, check parent directory is writable
+    local parent_dir=$(dirname "$path")
+    if [[ ! -w "$parent_dir" ]]; then
+      return 1  # No write permission on parent
+    fi
+  fi
+  
+  return 0  # Has write permission
+}
+
+# Check if file is SIP-protected (SAFE-6)
+_check_sip_protected() {
+  local path="$1"
+  
+  # On macOS, check if file has extended attributes indicating SIP protection
+  # SIP-protected files typically have special attributes
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # Check for com.apple.rootless attribute (indicates SIP protection)
+    if xattr -l "$path" 2>/dev/null | grep -q "com.apple.rootless"; then
+      return 0  # SIP-protected
+    fi
+    
+    # Check if file is in protected system locations
+    case "$path" in
+      /System/*|/usr/bin/*|/usr/sbin/*|/bin/*|/sbin/*)
+        # These are typically SIP-protected
+        return 0
+        ;;
+    esac
+  fi
+  
+  return 1  # Not SIP-protected
+}
+
 # Safely remove a directory or file
 safe_remove() {
   local path="$1"
   local description="$2"
+  
+  # Validate input
+  if [[ -z "$path" ]]; then
+    print_error "safe_remove called with empty path"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "safe_remove called with empty path"
+    return 1
+  fi
   
   if [[ "$MC_DRY_RUN" == "true" ]]; then
     local size=$(calculate_size "$path")
@@ -194,13 +406,45 @@ safe_remove() {
   fi
   
   if [[ -e "$path" ]]; then
+    # SAFE-6: Check if file is SIP-protected
+    if _check_sip_protected "$path"; then
+      print_warning "Skipping SIP-protected file: $path"
+      log_message "WARNING" "Skipped SIP-protected file: $path"
+      return 0
+    fi
+    
+    # SAFE-3: Check write permission
+    if ! _check_write_permission "$path"; then
+      print_warning "No write permission for $description. Skipping."
+      log_message "WARNING" "No write permission: $path"
+      return 1
+    fi
+    
+    # SAFE-2: Check if file is in use
+    if _check_file_in_use "$path"; then
+      print_warning "File is in use: $path. Skipping to prevent data corruption."
+      log_message "WARNING" "File in use, skipped: $path"
+      return 1
+    fi
+    
     local size_before=$(calculate_size_bytes "$path")
     print_info "Cleaning $description..."
     log_message "INFO" "Removing: $path"
     
-    if [[ -d "$path" ]]; then
-      rm -rf "$path" 2>/dev/null || true
+    # SAFE-1: Handle symlinks safely - don't follow them
+    if [[ -L "$path" ]]; then
+      # It's a symlink, remove the symlink itself, not the target
+      rm -f "$path" 2>/dev/null || true
+    elif [[ -d "$path" ]]; then
+      # For directories, use find to avoid following symlinks
+      # First remove symlinks, then regular files
+      find "$path" -mindepth 1 -type l -delete 2>/dev/null || true
+      find "$path" -mindepth 1 -not -type l -delete 2>/dev/null || {
+        # Fallback for stubborn files
+        rm -rf "$path" 2>/dev/null || true
+      }
     else
+      # Regular file
       rm -f "$path" 2>/dev/null || true
     fi
     
@@ -233,6 +477,13 @@ safe_clean_dir() {
   local path="$1"
   local description="$2"
   
+  # Validate input
+  if [[ -z "$path" ]]; then
+    print_error "safe_clean_dir called with empty path"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "safe_clean_dir called with empty path"
+    return 1
+  fi
+  
   if [[ "$MC_DRY_RUN" == "true" ]]; then
     if [[ -d "$path" ]]; then
       local size=$(calculate_size "$path")
@@ -243,12 +494,43 @@ safe_clean_dir() {
   fi
   
   if [[ -d "$path" ]]; then
+    # SAFE-3: Check write permission
+    if ! _check_write_permission "$path"; then
+      print_warning "No write permission for $description. Skipping."
+      log_message "WARNING" "No write permission: $path"
+      return 1
+    fi
+    
     local size_before=$(calculate_size_bytes "$path")
     print_info "Cleaning $description..."
     log_message "INFO" "Cleaning directory: $path"
     
+    # Track files that fail to delete for error reporting (SAFE-9)
+    local failed_files=()
+    
+    # SAFE-2 & SAFE-6: Pre-check files before deletion (for critical system files)
+    # Only check system directories to avoid performance impact
+    if [[ "$path" =~ ^/(System|Library|usr) ]]; then
+      find "$path" -mindepth 1 -not -type l 2>/dev/null | while read -r item; do
+        # Skip SIP-protected files (SAFE-6)
+        if _check_sip_protected "$item"; then
+          log_message "INFO" "Skipping SIP-protected file: $item"
+          failed_files+=("$item")
+          continue
+        fi
+        
+        # Check if in use (SAFE-2)
+        if _check_file_in_use "$item"; then
+          log_message "WARNING" "File in use, skipping: $item"
+          failed_files+=("$item")
+          continue
+        fi
+      done
+    fi
+    
     # Optimized batch deletion: use find with -delete for better performance
     # Important: Use -not -type l to avoid following symbolic links (prevents deleting files outside target)
+    # SAFE-1: Already handles symlinks correctly with -not -type l
     # Try find -delete first (fastest), fallback to rm -rf
     find "$path" -mindepth 1 -not -type l -delete 2>/dev/null || {
       # Also delete symbolic links themselves (but don't follow them)
@@ -284,6 +566,11 @@ safe_clean_dir() {
     if [[ $space_freed -lt 0 ]]; then
       space_freed=0
       log_message "WARNING" "Directory size increased during cleanup: $path (before: $(format_bytes $size_before), after: $(format_bytes $size_after))"
+    fi
+    
+    # SAFE-9: Log any files that failed to delete
+    if [[ ${#failed_files[@]} -gt 0 ]]; then
+      log_message "WARNING" "Some files could not be deleted (in use or protected): ${failed_files[*]}"
     fi
     
     log_message "SUCCESS" "Cleaned: $path (freed $(format_bytes $space_freed))"

@@ -20,13 +20,18 @@ declare -A MC_PLUGIN_REGISTRY
 # Get script directory for relative paths
 MC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")/.." && pwd)"
 
+# Load constants if not already loaded
+if [[ -z "${MC_BYTES_PER_MB:-}" ]]; then
+  source "$MC_SCRIPT_DIR/lib/constants.sh" 2>/dev/null || true
+fi
+
 # Create backup directory if it doesn't exist
 create_backup_dir() {
   if [[ ! -d "$MC_BACKUP_DIR" ]]; then
     mkdir -p "$MC_BACKUP_DIR" 2>/dev/null || {
       print_error "Failed to create backup directory at $MC_BACKUP_DIR"
       print_info "Creating backup directory in /tmp instead..."
-      MC_BACKUP_DIR="/tmp/mac-cleanup-backups/$(date +%Y-%m-%d-%H-%M-%S)"
+      MC_BACKUP_DIR="${MC_BACKUP_FALLBACK_DIR}/$(date +%Y-%m-%d-%H-%M-%S)"
       mkdir -p "$MC_BACKUP_DIR"
     }
     print_success "Created backup directory at $MC_BACKUP_DIR"
@@ -72,8 +77,8 @@ mc_cleanup_script() {
   print_info "Cleaning up script resources..."
   
   # Remove any temp files (N qualifier prevents error if no matches)
-  rm -f /tmp/mac-cleanup-temp-*(/N) 2>/dev/null
-  rm -f /tmp/mac-cleanup-sweep-*.tmp(N) 2>/dev/null
+  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-temp-*(/N) 2>/dev/null
+  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-*.tmp(N) 2>/dev/null
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool
@@ -108,8 +113,8 @@ mc_handle_interrupt() {
   fi
   
   # Clean up sweep temp files (N qualifier prevents error if no matches)
-  rm -f /tmp/mac-cleanup-sweep-*.tmp(N) 2>/dev/null
-  rm -f /tmp/mac-cleanup-*.tmp 2>/dev/null || true
+  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-*.tmp(N) 2>/dev/null
+  rm -f ${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-*.tmp 2>/dev/null || true
   
   # Clean up selection tool if it was installed by this script
   mc_cleanup_selection_tool
@@ -137,6 +142,12 @@ _normalize_plugin_name() {
 
 # Plugin registry for size calculation functions (PERF-3)
 typeset -A MC_PLUGIN_SIZE_FUNCTIONS
+# Plugin registry for versions (QUAL-12)
+typeset -A MC_PLUGIN_VERSIONS
+# Plugin registry for dependencies (QUAL-9)
+typeset -A MC_PLUGIN_DEPENDENCIES
+# Plugin registry for category metadata (QUAL-10)
+typeset -A MC_PLUGIN_CATEGORY_METADATA
 
 # Plugin registry functions
 mc_register_plugin() {
@@ -145,15 +156,40 @@ mc_register_plugin() {
   local function="$3"
   local requires_admin="${4:-false}"
   local size_function="${5:-}"  # Optional size calculation function (PERF-3)
+  local version="${6:-}"  # Optional version string (QUAL-12)
+  local dependencies="${7:-}"  # Optional space-separated dependencies (QUAL-9)
   
   # Normalize plugin name at registration time to avoid redundant lookups
   name=$(_normalize_plugin_name "$name")
   
-  MC_PLUGIN_REGISTRY["$name"]="$function|$category|$requires_admin"
+  # Validate function exists
+  if [[ -z "$function" ]]; then
+    print_error "Plugin registration failed: function name is empty for plugin: $name"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: empty function for: $name"
+    return 1
+  fi
+  
+  # Store full registry entry: function|category|requires_admin|version
+  MC_PLUGIN_REGISTRY["$name"]="$function|$category|$requires_admin|${version:-unknown}"
   
   # Register size calculation function if provided (PERF-3)
   if [[ -n "$size_function" ]]; then
     MC_PLUGIN_SIZE_FUNCTIONS["$name"]="$size_function"
+  fi
+  
+  # Register version if provided (QUAL-12)
+  if [[ -n "$version" ]]; then
+    MC_PLUGIN_VERSIONS["$name"]="$version"
+  fi
+  
+  # Register dependencies if provided (QUAL-9)
+  if [[ -n "$dependencies" ]]; then
+    MC_PLUGIN_DEPENDENCIES["$name"]="$dependencies"
+  fi
+  
+  # Store category metadata (QUAL-10) - allows plugins to define custom categories
+  if [[ -n "$category" ]]; then
+    MC_PLUGIN_CATEGORY_METADATA["$category"]="${MC_PLUGIN_CATEGORY_METADATA[$category]:-}"
   fi
 }
 

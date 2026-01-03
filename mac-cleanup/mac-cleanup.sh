@@ -17,11 +17,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${(%):-%x}}")" && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]:-${(%):-%x}}")"
 
 # Load core libraries
+source "$SCRIPT_DIR/lib/constants.sh"
 source "$SCRIPT_DIR/lib/core.sh"
 source "$SCRIPT_DIR/lib/ui.sh"
 source "$SCRIPT_DIR/lib/utils.sh"
 source "$SCRIPT_DIR/lib/admin.sh"
 source "$SCRIPT_DIR/lib/backup.sh"
+source "$SCRIPT_DIR/lib/validation.sh"
+source "$SCRIPT_DIR/lib/error_handler.sh"
 
 # Load plugin base
 source "$SCRIPT_DIR/plugins/base.sh"
@@ -146,7 +149,7 @@ run_async_sweep() {
   
   for plugin_name in "${plugin_list[@]}"; do
     # Create temp file for this plugin's result
-    local temp_file="/tmp/mac-cleanup-sweep-$$-$plugin_index.tmp"
+    local temp_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-$$-$plugin_index.tmp"
     temp_files+=("$temp_file")
     
     # Calculate size in background
@@ -616,7 +619,7 @@ main() {
   fi
   
   # Start async sweep in background
-  local sweep_file="/tmp/mac-cleanup-sweep-$$.tmp"
+  local sweep_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-$$.tmp"
   local sweep_pid=""
   if [[ ${#plugin_array[@]} -gt 0 ]]; then
     # Run sweep in background - use () to create subshell that inherits functions
@@ -722,7 +725,7 @@ main() {
       fi
       
       # Create temp file for this plugin's result
-      local temp_file="/tmp/mac-cleanup-size-$$-$plugin_index.tmp"
+      local temp_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-size-$$-$plugin_index.tmp"
       temp_files+=("$temp_file")
       
       # Calculate size in background
@@ -1070,9 +1073,9 @@ main() {
   print_info "Starting cleanup operations..."
   
   # Create temp files for cleanup output, progress tracking, and space tracking
-  local cleanup_output_file="/tmp/mac-cleanup-output-$$.tmp"
-  local progress_file="/tmp/mac-cleanup-progress-$$.tmp"
-  local space_tracking_file="/tmp/mac-cleanup-space-$$.tmp"
+  local cleanup_output_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-$$.tmp"
+  local progress_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-$$.tmp"
+  local space_tracking_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-space-$$.tmp"
   : > "$cleanup_output_file" 2>&1 || true
   : > "$progress_file" 2>&1 || true
   : > "$space_tracking_file" 2>&1 || true
@@ -1089,27 +1092,60 @@ main() {
     local current_op=0
     for option in "${selected_options[@]}"; do
       current_op=$((current_op + 1))
-      # Write progress update BEFORE starting the operation
+      # Write progress update BEFORE starting the operation (SAFE-7: with locking)
       # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
-      echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
+      _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
       
       local function=$(mc_get_plugin_function "$option")
-      if [[ -n "$function" ]] && type "$function" &>/dev/null; then
-        $function >> "$cleanup_output_file" 2>&1
+      if [[ -n "$function" ]] && mc_validate_plugin_function "$function" "$option"; then
+        # SAFE-8: Add timeout for plugin execution (default 30 minutes per plugin)
+        local plugin_timeout="${MC_PLUGIN_TIMEOUT:-1800}"  # 30 minutes default
+        
+        # Use a timeout mechanism that works with zsh functions
+        # Run function in background and monitor with timeout
+        $function >> "$cleanup_output_file" 2>&1 &
+        local func_pid=$!
+        
+        # Wait for function to complete or timeout
+        local waited=0
+        while kill -0 $func_pid 2>/dev/null && [[ $waited -lt $plugin_timeout ]]; do
+          sleep 1
+          waited=$((waited + 1))
+        done
+        
+        # If still running after timeout, kill it
+        if kill -0 $func_pid 2>/dev/null; then
+          print_error "Plugin $option timed out after $plugin_timeout seconds" >> "$cleanup_output_file"
+          log_message "ERROR" "Plugin $option timed out after $plugin_timeout seconds"
+          kill -TERM $func_pid 2>/dev/null || true
+          sleep 2
+          # Force kill if still running
+          kill -KILL $func_pid 2>/dev/null || true
+          wait $func_pid 2>/dev/null || true
+        else
+          # Function completed, wait for it to get exit code
+          wait $func_pid 2>/dev/null || {
+            local exit_code=$?
+            if [[ $exit_code -ne 0 ]]; then
+              print_error "Plugin $option failed with exit code $exit_code" >> "$cleanup_output_file"
+              log_message "ERROR" "Plugin $option failed with exit code $exit_code"
+            fi
+          }
+        fi
         # Clear size cache after plugin execution to ensure fresh calculations for next plugin
         clear_size_cache
         sync_globals
-        # Write progress update AFTER completing the operation
-        echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
+        # Write progress update AFTER completing the operation (SAFE-7: with locking)
+        _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
       else
         print_error "Plugin function not found or invalid: $function (for plugin: $option)" >> "$cleanup_output_file"
         log_message "ERROR" "Plugin function not found: $function (for plugin: $option)"
         # Still mark as completed even if function not found
-        echo "$current_op|$total_operations|$option|0|0|" > "$progress_file"
+        _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
       fi
     done
-    # Mark completion
-    echo "$total_operations|$total_operations|Complete|0|0|" > "$progress_file"
+    # Mark completion (SAFE-7: with locking)
+    _write_progress_file "$progress_file" "$total_operations|$total_operations|Complete|0|0|"
   ) &
   local cleanup_pid=$!
   MC_CLEANUP_PID=$cleanup_pid  # Store in global for interrupt handler
@@ -1154,7 +1190,8 @@ main() {
       loop_count=$((loop_count + 1))
       
       if [[ -f "$progress_file" ]]; then
-        local progress_line=$(cat "$progress_file" 2>/dev/null || echo "")
+        # SAFE-7: Read progress file with locking to prevent race conditions
+        local progress_line=$(_read_progress_file "$progress_file")
         
         if [[ -n "$progress_line" ]]; then
           local current=$(echo "$progress_line" | cut -d'|' -f1)

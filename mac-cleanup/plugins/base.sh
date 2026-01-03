@@ -3,25 +3,54 @@
 # plugins/base.sh - Base plugin interface for mac-cleanup plugins
 #
 
-# Plugin interface functions that each plugin should implement:
-# - plugin_name() - Returns display name
-# - plugin_description() - Returns description  
-# - plugin_calculate_size() - Calculates size to be cleaned
-# - plugin_clean() - Performs the cleanup
-# - plugin_requires_admin() - Returns true if admin needed
-# - plugin_warnings() - Returns array of warnings (optional)
+#==============================================================================
+# Plugin API Documentation
+#==============================================================================
+#
+# Plugin Registration:
+#   register_plugin <name> <category> <clean_function> <requires_admin> [size_function] [version] [dependencies]
+#
+# Parameters:
+#   - name: Display name of the plugin (string)
+#   - category: Category name (e.g., "browsers", "system", "package-managers")
+#   - clean_function: Function name that performs the cleanup (must exist)
+#   - requires_admin: "true" or "false" - whether plugin needs admin privileges
+#   - size_function: (optional) Function name that calculates size to be cleaned
+#   - version: (optional) Plugin version string (e.g., "1.0.0")
+#   - dependencies: (optional) Space-separated list of plugin names that must run first
+#
+# Plugin Function Requirements:
+#   - clean_function: Must exist and be callable. Should handle errors gracefully.
+#   - size_function: (optional) Should return size in bytes as a number
+#
+# Plugin Categories:
+#   Plugins can define custom categories, but standard categories are:
+#   - browsers: Browser cache cleanup
+#   - system: System-level cleanup (may require admin)
+#   - package-managers: Package manager cache cleanup
+#   - development: Development tool cleanup
+#   - maintenance: General maintenance operations
+#
+# Example:
+#   register_plugin "Chrome Cache" "browsers" "clean_chrome_cache" "false" "" "1.0.0" ""
+#
+#==============================================================================
 
 # Helper function to register a plugin
-# Usage: register_plugin "Plugin Name" "category" "clean_function" "requires_admin" ["size_function"]
+# Usage: register_plugin "Plugin Name" "category" "clean_function" "requires_admin" ["size_function"] ["version"] ["dependencies"]
 # PERF-3: Optional size_function parameter allows plugins to register their own size calculation
+# QUAL-12: Optional version parameter for plugin versioning
+# QUAL-9: Optional dependencies parameter for plugin execution order
 register_plugin() {
   local name="$1"
   local category="$2"
   local function="$3"
   local requires_admin="${4:-false}"
   local size_function="${5:-}"  # Optional size calculation function (PERF-3)
+  local version="${6:-}"  # Optional version string (QUAL-12)
+  local dependencies="${7:-}"  # Optional space-separated dependencies (QUAL-9)
   
-  mc_register_plugin "$name" "$category" "$function" "$requires_admin" "$size_function"
+  mc_register_plugin "$name" "$category" "$function" "$requires_admin" "$size_function" "$version" "$dependencies"
 }
 
 # Helper function to safely write to space tracking file with locking
@@ -33,12 +62,17 @@ _write_space_tracking_file() {
     return 0
   fi
   
+  # Load constants if not already loaded
+  if [[ -z "${MC_LOCK_TIMEOUT_ATTEMPTS:-}" ]]; then
+    local MC_LOCK_TIMEOUT_ATTEMPTS=50  # Fallback if constants not loaded
+  fi
+  
   # Use file locking to prevent race conditions when multiple plugins write simultaneously
   local lock_file="${MC_SPACE_TRACKING_FILE}.lock"
   # Try to acquire lock (wait up to 5 seconds)
   local lock_acquired=false
   local attempts=0
-  while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
+  while [[ $attempts -lt $MC_LOCK_TIMEOUT_ATTEMPTS && "$lock_acquired" == "false" ]]; do
     if (set -C; echo $$ > "$lock_file" 2>/dev/null); then
       lock_acquired=true
       # Append to file: plugin_name|space_bytes
