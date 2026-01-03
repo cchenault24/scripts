@@ -23,11 +23,15 @@ clean_dev_tool_temp() {
         if [[ -d "$dir" && "$dir" != "$base_dir" ]]; then
           local space_before=$(calculate_size_bytes "$dir")
           if ! backup "$dir" "intellij_$(basename "$dir")"; then
-            print_error "Backup failed for $dir. Skipping this directory."
-            log_message "ERROR" "Backup failed for $dir, skipping"
-            continue
+            print_error "Backup failed for $dir. Aborting cleanup to prevent data loss."
+            log_message "ERROR" "Backup failed for $dir, aborting"
+            return 1
           fi
-          safe_clean_dir "$dir" "IntelliJ $(basename "$dir")"
+          safe_clean_dir "$dir" "IntelliJ $(basename "$dir")" || {
+            print_error "Failed to clean $dir"
+            return 1
+          }
+          
           local space_after=$(calculate_size_bytes "$dir")
           local space_freed=$((space_before - space_after))
           # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -56,11 +60,16 @@ clean_dev_tool_temp() {
     if [[ -d "$dir" ]]; then
       local space_before=$(calculate_size_bytes "$dir")
       if ! backup "$dir" "vscode_$(basename "$dir")"; then
-        print_error "Backup failed for $dir. Skipping this directory."
-        log_message "ERROR" "Backup failed for $dir, skipping"
-        continue
+        print_error "Backup failed for $dir. Aborting cleanup to prevent data loss."
+        log_message "ERROR" "Backup failed for $dir, aborting"
+        return 1
       fi
-      safe_clean_dir "$dir" "VS Code $(basename "$dir")"
+      
+      safe_clean_dir "$dir" "VS Code $(basename "$dir")" || {
+        print_error "Failed to clean $dir"
+        return 1
+      }
+      
       local space_after=$(calculate_size_bytes "$dir")
       local space_freed=$((space_before - space_after))
       # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -73,13 +82,60 @@ clean_dev_tool_temp() {
     fi
   done
   
-  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
-  MC_SPACE_SAVED_BY_OPERATION["Developer Tool Temp Files"]=$total_space_freed
-  # Write to space tracking file if in background process (with locking)
-  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-    _write_space_tracking_file "Developer Tool Temp Files" "$total_space_freed"
-  fi
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+  track_space_saved "Developer Tool Temp Files" $total_space_freed "true"
+  return 0
 }
 
-# Register plugin
-register_plugin "Developer Tool Temp Files" "development" "clean_dev_tool_temp" "false"
+# Size calculation function for sweep
+_calculate_dev_tool_temp_size_bytes() {
+  local size_bytes=0
+  local dev_tool_size=0
+  
+  # JetBrains: calculate size of subdirectories that will be cleaned
+  typeset -A counted_jetbrains_dirs
+  local jetbrains_base_dirs=(
+    "$HOME/Library/Caches/JetBrains"
+    "$HOME/Library/Application Support/JetBrains"
+    "$HOME/Library/Logs/JetBrains"
+  )
+  for base_dir in "${jetbrains_base_dirs[@]}"; do
+    if [[ -d "$base_dir" ]]; then
+      while IFS= read -r dir; do
+        if [[ -d "$dir" && "$dir" != "$base_dir" && -z "${counted_jetbrains_dirs[$dir]:-}" ]]; then
+          counted_jetbrains_dirs[$dir]=1
+          local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+          [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
+        fi
+      done < <(find "$base_dir" -maxdepth 1 -type d 2>/dev/null)
+      while IFS= read -r dir; do
+        if [[ -d "$dir" && "$dir" != "$base_dir" && -z "${counted_jetbrains_dirs[$dir]:-}" ]]; then
+          counted_jetbrains_dirs[$dir]=1
+          local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+          [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
+        fi
+      done < <(find "$base_dir" -type d -name "caches" 2>/dev/null)
+    fi
+  done
+  
+  # VS Code: specific cache directories
+  local vscode_dirs=(
+    "$HOME/Library/Application Support/Code/Cache"
+    "$HOME/Library/Application Support/Code/CachedData"
+    "$HOME/Library/Application Support/Code/CachedExtensionVSIXs"
+    "$HOME/Library/Application Support/Code/Code Cache"
+    "$HOME/Library/Caches/com.microsoft.VSCode"
+    "$HOME/Library/Caches/com.microsoft.VSCode.ShipIt"
+  )
+  for dir in "${vscode_dirs[@]}"; do
+    if [[ -d "$dir" ]]; then
+      local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+      [[ "$dir_size" =~ ^[0-9]+$ ]] && dev_tool_size=$((dev_tool_size + dir_size))
+    fi
+  done
+  size_bytes=$dev_tool_size
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "Developer Tool Temp Files" "development" "clean_dev_tool_temp" "false" "_calculate_dev_tool_temp_size_bytes"

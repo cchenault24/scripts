@@ -11,6 +11,7 @@ clean_user_cache() {
   # Early exit for non-existent or empty directories (PERF-6)
   if [[ ! -d "$cache_dir" ]] || [[ -z "$(ls -A "$cache_dir" 2>/dev/null)" ]]; then
     print_info "User cache directory is empty or doesn't exist."
+    track_space_saved "User Cache" 0
     return 0
   fi
   
@@ -32,6 +33,7 @@ clean_user_cache() {
   # Early exit if no cache directories found
   if [[ ${#cache_dirs[@]} -eq 0 ]]; then
     print_info "No cache directories found to clean."
+    track_space_saved "User Cache" 0
     return 0
   fi
   
@@ -42,7 +44,10 @@ clean_user_cache() {
     current_item=$((current_item + 1))
     local dir_name=$(basename "$dir")
     update_operation_progress $current_item $total_items "$dir_name"
-    safe_clean_dir "$dir" "$dir_name cache"
+    safe_clean_dir "$dir" "$dir_name cache" || {
+      print_error "Failed to clean $dir_name cache"
+      return 1
+    }
   done
   
   # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we calculate total for display only
@@ -57,15 +62,21 @@ clean_user_cache() {
     log_message "WARNING" "Directory size increased during cleanup: $cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
   fi
   
-  # Update plugin-specific tracking (but don't double-count in total)
-  MC_SPACE_SAVED_BY_OPERATION["User Cache"]=$space_freed
-  # Write to space tracking file if in background process (with locking)
-  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-    _write_space_tracking_file "User Cache" "$space_freed"
-  fi
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+  track_space_saved "User Cache" $space_freed "true"
   
   print_success "User cache cleaned."
+  return 0
 }
 
-# Register plugin
-register_plugin "User Cache" "system" "clean_user_cache" "false"
+# Size calculation function for sweep
+_calculate_user_cache_size_bytes() {
+  local size_bytes=0
+  if [[ -d "$HOME/Library/Caches" ]]; then
+    size_bytes=$(calculate_size_bytes "$HOME/Library/Caches" 2>/dev/null || echo "0")
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "User Cache" "system" "clean_user_cache" "false" "_calculate_user_cache_size_bytes"

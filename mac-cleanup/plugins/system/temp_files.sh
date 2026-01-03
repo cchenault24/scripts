@@ -10,9 +10,15 @@ clean_temp_files() {
   local total_space_freed=0
   
   for temp_dir in "${temp_dirs[@]}"; do
-    # Early exit for non-existent or empty directories (PERF-6)
-    if [[ ! -d "$temp_dir" ]] || [[ -z "$(ls -A "$temp_dir" 2>/dev/null)" ]]; then
+    # Skip non-existent directories
+    if [[ ! -d "$temp_dir" ]]; then
       continue
+    fi
+    
+    # Check if directory is empty
+    local is_empty=false
+    if [[ -z "$(ls -A "$temp_dir" 2>/dev/null)" ]]; then
+      is_empty=true
     fi
     
     # For /tmp, cache find results to avoid running find twice (PERF-4)
@@ -21,6 +27,8 @@ clean_temp_files() {
     
     if [[ "$temp_dir" == "/tmp" ]]; then
       # Single find operation: collect files and calculate size in one pass
+      # Exclude script's own temp files (mac-cleanup-*) to avoid cleaning them
+      local temp_prefix="${MC_TEMP_PREFIX:-mac-cleanup}"
       while IFS= read -r -d '' item; do
         files_to_clean+=("$item")
         # Calculate size incrementally (more efficient than separate find)
@@ -28,14 +36,42 @@ clean_temp_files() {
         if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
           space_before=$((space_before + item_size * 1024))
         fi
-      done < <(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" -print0 2>/dev/null)
+      done < <(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" ! -name "${temp_prefix}-*" -print0 2>/dev/null)
     else
       space_before=$(calculate_size_bytes "$temp_dir")
     fi
     
-    # Early exit if nothing to clean
-    if [[ $space_before -eq 0 ]]; then
-      print_info "No files to clean in $temp_dir (already empty)."
+    # If nothing to clean, remove the directory itself (except /tmp which is a system directory)
+    if [[ $space_before -eq 0 ]] || [[ "$is_empty" == "true" ]]; then
+      
+      # Never remove /tmp (it's a system directory)
+      if [[ "$temp_dir" != "/tmp" ]]; then
+        # Calculate directory size before removal
+        local dir_size=$(calculate_size_bytes "$temp_dir")
+        
+        if [[ $dir_size -gt 0 ]]; then
+          # Backup before removing directory
+          if backup "$temp_dir" "temp_dir_$(basename "$temp_dir")"; then
+            # Remove the empty directory
+            if rmdir "$temp_dir" 2>/dev/null || rm -rf "$temp_dir" 2>/dev/null; then
+              print_success "Removed empty directory: $temp_dir (freed $(format_bytes $dir_size))."
+              log_message "SUCCESS" "Removed empty directory: $temp_dir (freed $(format_bytes $dir_size))"
+              total_space_freed=$((total_space_freed + dir_size))
+              MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + dir_size))
+            else
+              print_warning "Could not remove directory: $temp_dir"
+              log_message "WARNING" "Could not remove directory: $temp_dir"
+            fi
+          else
+            print_warning "Backup failed for empty directory: $temp_dir. Skipping removal."
+            log_message "WARNING" "Backup failed for empty directory: $temp_dir"
+          fi
+        else
+          print_info "Directory $temp_dir is already empty (no space to free)."
+        fi
+      else
+        print_info "No files to clean in $temp_dir (already empty)."
+      fi
       continue
     fi
     
@@ -62,35 +98,55 @@ clean_temp_files() {
     else
       safe_clean_dir "$temp_dir" "$(basename "$temp_dir")"
     fi
-      
-      # Clear cache and recalculate to get accurate space_after
-      invalidate_size_cache "$temp_dir"
-      local space_after=$(calculate_size_bytes "$temp_dir")
-      local space_freed=$((space_before - space_after))
-      
-      # Validate space_freed is not negative (directory may have grown during cleanup)
-      if [[ $space_freed -lt 0 ]]; then
-        space_freed=0
-        log_message "WARNING" "Directory size increased during cleanup: $temp_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
-      fi
-      
-      total_space_freed=$((total_space_freed + space_freed))
-      
-      if [[ $space_freed -gt 0 ]]; then
-        print_success "Cleaned $temp_dir (freed $(format_bytes $space_freed))."
-      else
-        print_info "No files to clean in $temp_dir (already empty)."
-      fi
+    
+    # Clear cache and recalculate to get accurate space_after
+    invalidate_size_cache "$temp_dir"
+    local space_after=$(calculate_size_bytes "$temp_dir")
+    local space_freed=$((space_before - space_after))
+    
+    # Validate space_freed is not negative (directory may have grown during cleanup)
+    if [[ $space_freed -lt 0 ]]; then
+      space_freed=0
+      log_message "WARNING" "Directory size increased during cleanup: $temp_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+    fi
+    
+    total_space_freed=$((total_space_freed + space_freed))
+    
+    if [[ $space_freed -gt 0 ]]; then
+      print_success "Cleaned $temp_dir (freed $(format_bytes $space_freed))."
+    else
+      print_info "No files to clean in $temp_dir (already empty)."
     fi
   done
   
-  # safe_clean_dir/safe_remove already update MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
-  MC_SPACE_SAVED_BY_OPERATION["Temporary Files"]=$total_space_freed
-  # Write to space tracking file if in background process (with locking)
-  if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-    _write_space_tracking_file "Temporary Files" "$total_space_freed"
-  fi
+  # safe_clean_dir/safe_remove already update MC_TOTAL_SPACE_SAVED, so we only track per-operation
+  track_space_saved "Temporary Files" $total_space_freed "true"
+  return 0
 }
 
-# Register plugin
-register_plugin "Temporary Files" "system" "clean_temp_files" "false"
+# Size calculation function for sweep
+_calculate_temp_files_size_bytes() {
+  local size_bytes=0
+  for temp_dir in "/tmp" "$TMPDIR" "$HOME/Library/Application Support/Temp"; do
+    if [[ -d "$temp_dir" ]]; then
+      local dir_size=0
+      # For /tmp, calculate size excluding files that cleanup will skip (.X*, com.apple.*, and script's own temp files)
+      if [[ "$temp_dir" == "/tmp" ]]; then
+        local temp_prefix="${MC_TEMP_PREFIX:-mac-cleanup}"
+        while IFS= read -r -d '' item; do
+          local item_size=$(du -sk "$item" 2>/dev/null | awk '{print $1}')
+          if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
+            dir_size=$((dir_size + item_size * 1024))
+          fi
+        done < <(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" ! -name "${temp_prefix}-*" -print0 2>/dev/null)
+      else
+        dir_size=$(calculate_size_bytes "$temp_dir" 2>/dev/null || echo "0")
+      fi
+      [[ "$dir_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + dir_size))
+    fi
+  done
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "Temporary Files" "system" "clean_temp_files" "false" "_calculate_temp_files_size_bytes"

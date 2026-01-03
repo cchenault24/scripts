@@ -25,10 +25,15 @@ clean_system_cache() {
     if [[ "$MC_DRY_RUN" == "true" ]]; then
       print_info "[DRY RUN] Would clean system cache"
       log_message "DRY_RUN" "Would clean system cache"
+      track_space_saved "System Cache" 0
+      return 0
     else
       # Properly escape cache_dir to prevent command injection - use printf %q for safe escaping
       local escaped_cache_dir=$(printf '%q' "$cache_dir")
-      run_as_admin "find $escaped_cache_dir -maxdepth 1 -type d ! -path $escaped_cache_dir -exec rm -rf {} + 2>/dev/null || true" "system cache cleanup"
+      run_as_admin "find $escaped_cache_dir -maxdepth 1 -type d ! -path $escaped_cache_dir -exec rm -rf {} + 2>/dev/null" "system cache cleanup" || {
+        print_error "Failed to clean system cache"
+        return 1
+      }
       
       local space_after=$(sudo sh -c "du -sk $cache_dir 2>/dev/null | awk '{print \$1 * 1024}'" || echo "0")
       local space_freed=$((space_before - space_after))
@@ -42,11 +47,24 @@ clean_system_cache() {
       track_space_saved "System Cache" $space_freed
       
       print_success "System cache cleaned."
+      return 0
     fi
   else
     print_info "Skipping system cache cleanup"
+    track_space_saved "System Cache" 0
+    return 0
   fi
 }
 
-# Register plugin
-register_plugin "System Cache" "system" "clean_system_cache" "true"
+# Size calculation function for sweep
+_calculate_system_cache_size_bytes() {
+  local size_bytes=0
+  if [[ -d "/Library/Caches" ]]; then
+    # Requires sudo for system directories, but we can try without for size calculation
+    size_bytes=$(sudo sh -c "du -sk /Library/Caches 2>/dev/null | awk '{print \$1 * 1024}'" 2>/dev/null || echo "0")
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "System Cache" "system" "clean_system_cache" "true" "_calculate_system_cache_size_bytes"

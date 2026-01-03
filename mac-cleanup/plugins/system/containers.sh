@@ -24,10 +24,7 @@ clean_container_caches() {
     
     if [[ ${#cache_dirs[@]} -eq 0 ]]; then
       print_info "No container cache directories found."
-      MC_SPACE_SAVED_BY_OPERATION["Application Container Caches"]=0
-      if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-        _write_space_tracking_file "Application Container Caches" 0
-      fi
+      track_space_saved "Application Container Caches" 0
       return 0
     fi
     
@@ -57,12 +54,12 @@ clean_container_caches() {
         # Clean the directory silently (we'll show summary at end)
         if [[ -d "$dir" ]]; then
           find "$dir" -mindepth 1 -delete 2>/dev/null || {
-            find "$dir" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null || true
-            find "$dir" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null || true
+            find "$dir" -mindepth 1 -maxdepth 1 ! -name ".*" -delete 2>/dev/null
+            find "$dir" -mindepth 1 -maxdepth 1 -name ".*" -delete 2>/dev/null
             if [[ -n "${ZSH_VERSION:-}" ]]; then
-              rm -rf "${dir:?}"/*(N) "${dir:?}"/.[!.]*(N) 2>/dev/null || true
+              rm -rf "${dir:?}"/*(N) "${dir:?}"/.[!.]*(N) 2>/dev/null
             else
-              rm -rf "${dir:?}"/* "${dir:?}"/.[!.]* 2>/dev/null || true
+              rm -rf "${dir:?}"/* "${dir:?}"/.[!.]* 2>/dev/null
             fi
           }
           invalidate_size_cache "$dir"
@@ -91,20 +88,13 @@ clean_container_caches() {
     fi
     
     # Manual cleanup doesn't use safe_clean_dir, so we need to track space manually
-    # But we don't double-count since we're not using safe_clean_dir
-    MC_SPACE_SAVED_BY_OPERATION["Application Container Caches"]=$total_space_freed
-    MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + total_space_freed))
-    # Write to space tracking file if in background process (with locking)
-    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-      _write_space_tracking_file "Application Container Caches" "$total_space_freed"
-    fi
+    # Manual cleanup doesn't use safe_clean_dir, so we update the total (don't skip)
+    track_space_saved "Application Container Caches" $total_space_freed
   else
     print_warning "No application containers found."
-    MC_SPACE_SAVED_BY_OPERATION["Application Container Caches"]=0
-    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-      _write_space_tracking_file "Application Container Caches" 0
-    fi
+    track_space_saved "Application Container Caches" 0
   fi
+  return 0
 }
 
 clean_saved_states() {
@@ -127,18 +117,40 @@ clean_saved_states() {
       space_freed=0
       log_message "WARNING" "Directory size increased during cleanup: $saved_states_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
     fi
-    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
-    MC_SPACE_SAVED_BY_OPERATION["Saved Application States"]=$space_freed
-    # Write to space tracking file if in background process (with locking)
-    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-      _write_space_tracking_file "Saved Application States" "$space_freed"
-    fi
+    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+    track_space_saved "Saved Application States" $space_freed "true"
     print_success "Cleaned saved application states."
   else
     print_warning "No saved application states found."
+    track_space_saved "Saved Application States" 0
   fi
+  return 0
 }
 
-# Register plugins
-register_plugin "Application Container Caches" "system" "clean_container_caches" "false"
-register_plugin "Saved Application States" "system" "clean_saved_states" "false"
+# Size calculation functions for sweep
+_calculate_container_caches_size_bytes() {
+  local size_bytes=0
+  if [[ -d "$HOME/Library/Containers" ]]; then
+    local cache_size=0
+    while IFS= read -r cache_dir; do
+      [[ -n "$cache_dir" && -d "$cache_dir" ]] && {
+        local dir_size=$(calculate_size_bytes "$cache_dir" 2>/dev/null || echo "0")
+        [[ "$dir_size" =~ ^[0-9]+$ ]] && cache_size=$((cache_size + dir_size))
+      }
+    done < <(find "$HOME/Library/Containers" -type d -name "Caches" 2>/dev/null)
+    size_bytes=$cache_size
+  fi
+  echo "$size_bytes"
+}
+
+_calculate_saved_states_size_bytes() {
+  local size_bytes=0
+  if [[ -d "$HOME/Library/Saved Application State" ]]; then
+    size_bytes=$(calculate_size_bytes "$HOME/Library/Saved Application State" 2>/dev/null || echo "0")
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugins with size functions
+register_plugin "Application Container Caches" "system" "clean_container_caches" "false" "_calculate_container_caches_size_bytes"
+register_plugin "Saved Application States" "system" "clean_saved_states" "false" "_calculate_saved_states_size_bytes"

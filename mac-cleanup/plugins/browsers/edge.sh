@@ -16,20 +16,25 @@ clean_edge_cache() {
     edge_found=true
     local space_before=$(calculate_size_bytes "$edge_cache_dir")
     if ! backup "$edge_cache_dir" "edge_cache"; then
-      print_error "Backup failed for Edge cache. Skipping this directory."
-      log_message "ERROR" "Backup failed for Edge cache, skipping"
-    else
-      safe_clean_dir "$edge_cache_dir" "Edge cache"
-      local space_after=$(calculate_size_bytes "$edge_cache_dir")
-      local space_freed=$((space_before - space_after))
-      # Validate space_freed is not negative (directory may have grown during cleanup)
-      if [[ $space_freed -lt 0 ]]; then
-        space_freed=0
-        log_message "WARNING" "Directory size increased during cleanup: $edge_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
-      fi
-      total_space_freed=$((total_space_freed + space_freed))
-      print_success "Cleaned Edge cache."
+      print_error "Backup failed for Edge cache. Aborting cleanup to prevent data loss."
+      log_message "ERROR" "Backup failed for Edge cache, aborting"
+      return 1
     fi
+    
+    safe_clean_dir "$edge_cache_dir" "Edge cache" || {
+      print_error "Failed to clean Edge cache"
+      return 1
+    }
+    
+    local space_after=$(calculate_size_bytes "$edge_cache_dir")
+    local space_freed=$((space_before - space_after))
+    # Validate space_freed is not negative (directory may have grown during cleanup)
+    if [[ $space_freed -lt 0 ]]; then
+      space_freed=0
+      log_message "WARNING" "Directory size increased during cleanup: $edge_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+    fi
+    total_space_freed=$((total_space_freed + space_freed))
+    print_success "Cleaned Edge cache."
   fi
   
   # Find and clean all Edge profiles (similar to Chrome)
@@ -63,10 +68,16 @@ clean_edge_cache() {
       
       local space_before=$(calculate_size_bytes "$dir")
       if ! backup "$dir" "edge_${profile_name}_$dir_name"; then
-        print_error "Backup failed for Edge $profile_name $dir_name. Skipping this directory."
-        log_message "ERROR" "Backup failed for Edge $profile_name $dir_name, skipping"
-      else
-        safe_clean_dir "$dir" "Edge $profile_name $dir_name"
+        print_error "Backup failed for Edge $profile_name $dir_name. Aborting cleanup to prevent data loss."
+        log_message "ERROR" "Backup failed for Edge $profile_name $dir_name, aborting"
+        return 1
+      fi
+      
+      safe_clean_dir "$dir" "Edge $profile_name $dir_name" || {
+        print_error "Failed to clean Edge $profile_name $dir_name"
+        return 1
+      }
+      
       local space_after=$(calculate_size_bytes "$dir")
       local space_freed=$((space_before - space_after))
       # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -74,24 +85,50 @@ clean_edge_cache() {
         space_freed=0
         log_message "WARNING" "Directory size increased during cleanup: $dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
       fi
-        total_space_freed=$((total_space_freed + space_freed))
-        print_success "Cleaned Edge $profile_name $dir_name."
-      fi
+      total_space_freed=$((total_space_freed + space_freed))
+      print_success "Cleaned Edge $profile_name $dir_name."
     done
   fi
   
   if [[ "$edge_found" == false ]]; then
     print_warning "Microsoft Edge does not appear to be installed or has never been run."
-  else
-    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
-    MC_SPACE_SAVED_BY_OPERATION["Microsoft Edge Cache"]=$total_space_freed
-    # Write to space tracking file if in background process (with locking)
-    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-      _write_space_tracking_file "Microsoft Edge Cache" "$total_space_freed"
-    fi
-    print_warning "You may need to restart Edge for changes to take effect"
+    track_space_saved "Microsoft Edge Cache" 0
+    return 0
   fi
+  
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+  track_space_saved "Microsoft Edge Cache" $total_space_freed "true"
+  print_warning "You may need to restart Edge for changes to take effect"
+  return 0
 }
 
-# Register plugin
-register_plugin "Microsoft Edge Cache" "browsers" "clean_edge_cache" "false"
+# Size calculation function for sweep
+_calculate_edge_cache_size_bytes() {
+  local size_bytes=0
+  local edge_size=0
+  
+  if [[ -d "$HOME/Library/Caches/com.microsoft.edgemac" ]]; then
+    edge_size=$(calculate_size_bytes "$HOME/Library/Caches/com.microsoft.edgemac" 2>/dev/null || echo "0")
+    [[ "$edge_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + edge_size))
+  fi
+  
+  if [[ -d "$HOME/Library/Application Support/Microsoft Edge" ]]; then
+    for profile_dir in "$HOME/Library/Application Support/Microsoft Edge"/*/; do
+      if [[ -d "$profile_dir" ]]; then
+        [[ -d "$profile_dir/Cache" ]] && {
+          local edge_cache_size=$(calculate_size_bytes "$profile_dir/Cache" 2>/dev/null || echo "0")
+          [[ "$edge_cache_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + edge_cache_size))
+        }
+        [[ -d "$profile_dir/Code Cache" ]] && {
+          local edge_code_size=$(calculate_size_bytes "$profile_dir/Code Cache" 2>/dev/null || echo "0")
+          [[ "$edge_code_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + edge_code_size))
+        }
+      fi
+    done
+  fi
+  
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "Microsoft Edge Cache" "browsers" "clean_edge_cache" "false" "_calculate_edge_cache_size_bytes"

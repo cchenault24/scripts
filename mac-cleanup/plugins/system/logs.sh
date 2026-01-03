@@ -21,6 +21,13 @@ clean_app_logs() {
     [[ -n "$dir" && -d "$dir" ]] && log_dirs+=("$dir")
   done < <(find "$logs_dir" -maxdepth 1 -type d ! -path "$logs_dir" 2>/dev/null)
   
+  # Early exit if no log directories found
+  if [[ ${#log_dirs[@]} -eq 0 ]]; then
+    print_info "No log directories found to clean."
+    track_space_saved "Application Logs" 0
+    return 0
+  fi
+  
   local total_items=${#log_dirs[@]}
   local current_item=0
   
@@ -28,14 +35,29 @@ clean_app_logs() {
     current_item=$((current_item + 1))
     local dir_name=$(basename "$dir")
     update_operation_progress $current_item $total_items "$dir_name"
-    safe_clean_dir "$dir" "$dir_name logs"
+    safe_clean_dir "$dir" "$dir_name logs" || {
+      print_error "Failed to clean $dir_name logs"
+      return 1
+    }
   done
   
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we calculate total for display only
+  # Invalidate cache first to ensure fresh calculation
+  invalidate_size_cache "$logs_dir"
   local space_after=$(calculate_size_bytes "$logs_dir")
   local space_freed=$((space_before - space_after))
-  track_space_saved "Application Logs" $space_freed
+  
+  # Validate space_freed is not negative
+  if [[ $space_freed -lt 0 ]]; then
+    space_freed=0
+    log_message "WARNING" "Directory size increased during cleanup: $logs_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+  fi
+  
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+  track_space_saved "Application Logs" $space_freed "true"
   
   print_success "Application logs cleaned."
+  return 0
 }
 
 clean_system_logs() {
@@ -90,10 +112,16 @@ clean_system_logs() {
       # Clean log files without removing them (zero their size instead)
       # Properly escape logs_dir to prevent command injection - use printf %q for safe escaping
       local escaped_logs_dir=$(printf '%q' "$logs_dir")
-      run_as_admin "find $escaped_logs_dir -type f -name '*.log' -exec truncate -s 0 {} + 2>/dev/null || true" "system logs cleanup (current logs)"
+      run_as_admin "find $escaped_logs_dir -type f -name '*.log' -exec truncate -s 0 {} + 2>/dev/null" "system logs cleanup (current logs)" || {
+        print_error "Failed to clean current system logs"
+        return 1
+      }
       
       # Clean archived logs
-      run_as_admin "find $escaped_logs_dir -type f -name '*.log.*' -delete 2>/dev/null || true" "system logs cleanup (archived logs)"
+      run_as_admin "find $escaped_logs_dir -type f -name '*.log.*' -delete 2>/dev/null" "system logs cleanup (archived logs)" || {
+        print_error "Failed to clean archived system logs"
+        return 1
+      }
       
       local space_after=$(sudo -n sh -c "du -sk $logs_dir 2>/dev/null | awk '{print \$1 * 1024}'" 2>&1 || echo "0")
       local space_freed=$((space_before - space_after))
@@ -113,6 +141,28 @@ clean_system_logs() {
   fi
 }
 
-# Register plugins
-register_plugin "Application Logs" "system" "clean_app_logs" "false"
-register_plugin "System Logs" "system" "clean_system_logs" "true"
+# Size calculation functions for sweep
+_calculate_app_logs_size_bytes() {
+  local size_bytes=0
+  if [[ -d "$HOME/Library/Logs" ]]; then
+    size_bytes=$(calculate_size_bytes "$HOME/Library/Logs" 2>/dev/null || echo "0")
+  fi
+  echo "$size_bytes"
+}
+
+_calculate_system_logs_size_bytes() {
+  local size_bytes=0
+  if [[ -d "/var/log" ]]; then
+    # Calculate size of only .log files (matching what cleanup actually removes/truncates)
+    local find_output=$(find "/var/log" -type f \( -name "*.log" -o -name "*.log.*" \) -exec du -sk {} + 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+    if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
+      size_bytes=$(echo "$find_output * 1024" | awk '{printf "%.0f", $1 * $2}')
+      [[ ! "$size_bytes" =~ ^[0-9]+$ ]] && size_bytes=0
+    fi
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugins with size functions
+register_plugin "Application Logs" "system" "clean_app_logs" "false" "_calculate_app_logs_size_bytes"
+register_plugin "System Logs" "system" "clean_system_logs" "true" "_calculate_system_logs_size_bytes"

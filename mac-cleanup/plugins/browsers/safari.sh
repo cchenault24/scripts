@@ -12,7 +12,8 @@ clean_safari_cache() {
   
   if ! command -v safaridriver &> /dev/null && [[ ! -d "$HOME/Library/Safari" ]]; then
     print_warning "Safari does not appear to be installed or has never been run."
-    return
+    track_space_saved "Safari Cache" 0
+    return 0
   fi
   
   local safari_cache_dirs=(
@@ -23,19 +24,12 @@ clean_safari_cache() {
   )
   
   local total_space_freed=0
-  local dirs_processed=0
-  local dirs_with_content=0
-  
-  # Store initial total to calculate what safe_clean_dir adds (to avoid double-counting)
-  local initial_total=$MC_TOTAL_SPACE_SAVED
-  
   local total_items=${#safari_cache_dirs[@]}
   local current_item=0
   
   for dir in "${safari_cache_dirs[@]}"; do
     if [[ -d "$dir" ]]; then
       current_item=$((current_item + 1))
-      dirs_processed=$((dirs_processed + 1))
       local dir_name=$(basename "$dir")
       update_operation_progress $current_item $total_items "$dir_name"
       
@@ -46,13 +40,17 @@ clean_safari_cache() {
       fi
       # Check if directory has meaningful content (more than just directory overhead ~4KB)
       if [[ $space_before -gt $MC_MIN_DIR_SIZE ]]; then
-        dirs_with_content=$((dirs_with_content + 1))
         if ! backup "$dir" "safari_$dir_name"; then
-          print_error "Backup failed for Safari $dir_name. Skipping this directory."
-          log_message "ERROR" "Backup failed for Safari $dir_name, skipping"
-          continue
+          print_error "Backup failed for Safari $dir_name. Aborting cleanup to prevent data loss."
+          log_message "ERROR" "Backup failed for Safari $dir_name, aborting"
+          return 1
         fi
-        safe_clean_dir "$dir" "Safari $dir_name"
+        
+        safe_clean_dir "$dir" "Safari $dir_name" || {
+          print_error "Failed to clean Safari $dir_name"
+          return 1
+        }
+        
         local space_after=$(calculate_size_bytes "$dir")
         local space_freed=$((space_before - space_after))
         # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -68,20 +66,29 @@ clean_safari_cache() {
     fi
   done
   
-  # Calculate what safe_clean_dir actually added to MC_TOTAL_SPACE_SAVED
-  local space_added_by_safe_clean=$((MC_TOTAL_SPACE_SAVED - initial_total))
-  
-  # Update operation-specific tracking without double-counting
-  # safe_clean_dir already updated MC_TOTAL_SPACE_SAVED, so we just update per-operation tracking
-  if [[ $space_added_by_safe_clean -gt 0 ]]; then
-    MC_SPACE_SAVED_BY_OPERATION["Safari Cache"]=$space_added_by_safe_clean
-  elif [[ $dirs_processed -gt 0 && $dirs_with_content -eq 0 ]]; then
-    print_info "All Safari cache directories are already empty or contain minimal data."
-    MC_SPACE_SAVED_BY_OPERATION["Safari Cache"]=0
-  fi
-  
+  # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+  track_space_saved "Safari Cache" $total_space_freed "true"
   print_warning "You may need to restart Safari for changes to take effect"
+  return 0
 }
 
-# Register plugin
-register_plugin "Safari Cache" "browsers" "clean_safari_cache" "false"
+# Size calculation function for sweep
+_calculate_safari_cache_size_bytes() {
+  local size_bytes=0
+  local safari_dirs=(
+    "$HOME/Library/Caches/com.apple.Safari"
+    "$HOME/Library/Safari/LocalStorage"
+    "$HOME/Library/Safari/Databases"
+    "$HOME/Library/Safari/ServiceWorkers"
+  )
+  for dir in "${safari_dirs[@]}"; do
+    if [[ -d "$dir" ]]; then
+      local dir_size=$(calculate_size_bytes "$dir" 2>/dev/null || echo "0")
+      [[ "$dir_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + dir_size))
+    fi
+  done
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "Safari Cache" "browsers" "clean_safari_cache" "false" "_calculate_safari_cache_size_bytes"

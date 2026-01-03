@@ -91,14 +91,22 @@ _write_space_tracking_file() {
 }
 
 # Helper function to track space saved for a plugin
+# Usage: track_space_saved <plugin_name> <space_bytes> [skip_total]
+#   - plugin_name: Name of the plugin
+#   - space_bytes: Space freed in bytes
+#   - skip_total: (optional) If "true", don't update MC_TOTAL_SPACE_SAVED (use when safe_clean_dir/safe_remove already updated it)
 track_space_saved() {
   local plugin_name="$1"
   local space_bytes=$2
+  local skip_total="${3:-false}"
   
   MC_SPACE_SAVED_BY_OPERATION["$plugin_name"]=$space_bytes
-  # Also update the total space saved if it's not already being tracked
-  # (some plugins use safe_clean_dir/safe_remove which already update the total)
-  MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + space_bytes))
+  
+  # Only update the total space saved if not skipped
+  # (safe_clean_dir/safe_remove already update MC_TOTAL_SPACE_SAVED, so we skip to avoid double-counting)
+  if [[ "$skip_total" != "true" ]]; then
+    MC_TOTAL_SPACE_SAVED=$((MC_TOTAL_SPACE_SAVED + space_bytes))
+  fi
   
   # If we're in a background process, write to space tracking file with locking
   # This allows the parent process to read the space saved data

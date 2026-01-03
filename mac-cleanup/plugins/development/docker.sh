@@ -65,7 +65,10 @@ clean_docker_cache() {
       fi
       
       # Clean unused data
-      docker system prune -a --volumes -f 2>&1 | log_message "INFO"
+      docker system prune -a --volumes -f 2>&1 | log_message "INFO" || {
+        print_error "Failed to clean Docker cache"
+        return 1
+      }
       
       # Get disk usage after
       local docker_size_after=0
@@ -108,11 +111,22 @@ clean_docker_cache() {
       print_success "Docker cache cleaned."
       log_message "SUCCESS" "Docker cache cleaned (freed $(format_bytes $docker_space_freed))"
       track_space_saved "Docker Cache" $docker_space_freed
+      return 0
     fi
   else
     print_info "Skipping Docker cache cleanup"
+    track_space_saved "Docker Cache" 0
+    return 0
   fi
 }
 
-# Register plugin
-register_plugin "Docker Cache" "development" "clean_docker_cache" "false"
+# Size calculation function for sweep
+# Docker cleanup uses 'docker system prune' which cleans Docker's internal data
+# This is different from file system directories. The cleanup function doesn't track
+# exact bytes freed (returns 0), so we also return 0 here for consistency.
+_calculate_docker_cache_size_bytes() {
+  echo "0"
+}
+
+# Register plugin with size function
+register_plugin "Docker Cache" "development" "clean_docker_cache" "false" "_calculate_docker_cache_size_bytes"

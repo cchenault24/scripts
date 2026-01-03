@@ -40,8 +40,26 @@ create_backup_dir() {
 
 # Initialize core
 mc_core_init() {
+  # #region agent log
+  local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+  echo "{\"id\":\"log_${log_timestamp}_core_init_entry\",\"timestamp\":${log_timestamp}000,\"location\":\"core.sh:42\",\"message\":\"mc_core_init() called\",\"data\":{\"MC_BACKUP_DIR\":\"$MC_BACKUP_DIR\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  
   # Create backup directory
   create_backup_dir
+  
+  # #region agent log
+  log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+  echo "{\"id\":\"log_${log_timestamp}_after_create_backup_dir\",\"timestamp\":${log_timestamp}000,\"location\":\"core.sh:44\",\"message\":\"After create_backup_dir\",\"data\":{\"MC_BACKUP_DIR\":\"$MC_BACKUP_DIR\",\"backup_dir_exists\":\"$([[ -d $MC_BACKUP_DIR ]] && echo true || echo false)\",\"backup_dir_writable\":\"$([[ -w $MC_BACKUP_DIR ]] && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
+  
+  # Initialize backup manifest file (even if empty, so restore knows the session exists)
+  touch "$MC_BACKUP_DIR/backup_manifest.txt" 2>/dev/null || true
+  
+  # #region agent log
+  log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+  echo "{\"id\":\"log_${log_timestamp}_after_touch_manifest\",\"timestamp\":${log_timestamp}000,\"location\":\"core.sh:47\",\"message\":\"After touch manifest\",\"data\":{\"manifest_path\":\"$MC_BACKUP_DIR/backup_manifest.txt\",\"manifest_exists\":\"$([[ -f $MC_BACKUP_DIR/backup_manifest.txt ]] && echo true || echo false)\",\"manifest_writable\":\"$([[ -w $MC_BACKUP_DIR/backup_manifest.txt ]] && echo true || echo false)\",\"manifest_size\":\"$(stat -f%z \"$MC_BACKUP_DIR/backup_manifest.txt\" 2>/dev/null || echo 0)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"D\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>/dev/null || true
+  # #endregion
   
   # Clear size calculation cache to ensure fresh calculations
   clear_size_cache

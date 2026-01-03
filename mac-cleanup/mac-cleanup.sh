@@ -98,10 +98,23 @@ load_plugins() {
   if [[ -d "$plugins_dir/system" ]]; then
     for plugin_file in "$plugins_dir/system"/*.sh(N); do
       if [[ -f "$plugin_file" ]]; then
-        if ! source "$plugin_file" 2>/dev/null; then
+        local plugin_name=$(basename "$plugin_file" .sh)
+        # #region agent log
+        local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+        echo "{\"id\":\"log_${log_timestamp}_before_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:98\",\"message\":\"Before sourcing plugin\",\"data\":{\"plugin_file\":\"$plugin_file\",\"plugin_name\":\"$plugin_name\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"I\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+        # #endregion
+        
+        if ! source "$plugin_file" 2>&1; then
           print_error "Failed to load plugin: $plugin_file"
           log_message "ERROR" "Plugin load failure: $plugin_file"
           load_errors=$((load_errors + 1))
+        else
+          # #region agent log
+          log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+          # Check if a function matching the plugin name exists (e.g., clean_user_cache for user_cache)
+          local expected_function="clean_${plugin_name}"
+          echo "{\"id\":\"log_${log_timestamp}_after_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:107\",\"message\":\"After sourcing plugin\",\"data\":{\"plugin_file\":\"$plugin_file\",\"plugin_name\":\"$plugin_name\",\"expected_function\":\"$expected_function\",\"function_exists\":\"$(type \"$expected_function\" &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"I\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+          # #endregion
         fi
       fi
     done
@@ -135,8 +148,10 @@ run_async_sweep() {
   
   # Source required libraries in case they're not available in subshell
   # (functions should be inherited, but this ensures they're available)
-  if [[ -n "$script_dir" && -f "$script_dir/lib/utils.sh" ]]; then
-    source "$script_dir/lib/utils.sh" 2>/dev/null || true
+  if [[ -n "$script_dir" ]]; then
+    [[ -f "$script_dir/lib/constants.sh" ]] && source "$script_dir/lib/constants.sh" 2>/dev/null || true
+    [[ -f "$script_dir/lib/utils.sh" ]] && source "$script_dir/lib/utils.sh" 2>/dev/null || true
+    [[ -f "$script_dir/lib/core.sh" ]] && source "$script_dir/lib/core.sh" 2>/dev/null || true
   fi
   
   # Create temp file for results
@@ -154,8 +169,26 @@ run_async_sweep() {
     
     # Calculate size in background
     (
-      local size_bytes=$(calculate_plugin_size_bytes "$plugin_name" 2>/dev/null || echo "0")
-      local size_formatted=""
+      # Ensure we have access to calculate_plugin_size_bytes and related functions
+      # In zsh, functions should be inherited from parent, but verify availability
+      local size_bytes=0
+      local size_formatted="0B"
+      
+      # Try to call calculate_plugin_size_bytes if available
+      if type calculate_plugin_size_bytes &>/dev/null 2>&1; then
+        size_bytes=$(calculate_plugin_size_bytes "$plugin_name" 2>/dev/null || echo "0")
+      elif type _calculate_plugin_size_fallback &>/dev/null 2>&1; then
+        # Fallback function if main one not available
+        size_bytes=$(_calculate_plugin_size_fallback "$plugin_name" 2>/dev/null || echo "0")
+      else
+        # Last resort: try to calculate based on plugin name
+        # This is a minimal fallback - most plugins won't work without the main function
+        case "$plugin_name" in
+          "Empty Trash")
+            [[ -d "$HOME/.Trash" ]] && size_bytes=$(calculate_size_bytes "$HOME/.Trash" 2>/dev/null || echo "0")
+            ;;
+        esac
+      fi
       
       # Ensure size_bytes is numeric
       size_bytes=$(echo "$size_bytes" | tr -d '[:space:]')
@@ -164,7 +197,12 @@ run_async_sweep() {
       fi
       
       if [[ $size_bytes -gt 0 ]]; then
-        size_formatted=$(format_bytes $size_bytes 2>/dev/null || echo "0B")
+        # Ensure format_bytes is available
+        if type format_bytes &>/dev/null 2>&1; then
+          size_formatted=$(format_bytes $size_bytes 2>/dev/null || echo "0B")
+        else
+          size_formatted="0B"
+        fi
       else
         size_formatted="0B"
       fi
@@ -246,18 +284,18 @@ calculate_plugin_size_bytes() {
       for temp_dir in "/tmp" "$TMPDIR" "$HOME/Library/Application Support/Temp"; do
         if [[ -d "$temp_dir" ]]; then
           local dir_size=0
-          # For /tmp, calculate size excluding files that cleanup will skip (.X* and com.apple.*)
+          # For /tmp, calculate size excluding files that cleanup will skip (.X*, com.apple.*, and script's own temp files)
+          # Use the same method as the cleanup function to ensure accuracy
           if [[ "$temp_dir" == "/tmp" ]]; then
-            # Calculate size of files that will actually be cleaned (exclude .X* and com.apple.*)
-            local find_output=$(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" -print0 2>/dev/null | xargs -0 du -sk 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-            if [[ -n "$find_output" && "$find_output" =~ ^[0-9]+$ ]]; then
-              # Use awk for large number arithmetic to prevent overflow
-              dir_size=$(echo "$find_output * 1024" | awk '{printf "%.0f", $1 * $2}')
-              # Ensure result is numeric
-              if [[ ! "$dir_size" =~ ^[0-9]+$ ]]; then
-                dir_size=0
+            # Calculate size using the same method as clean_temp_files() - iterate through each item
+            # Exclude script's own temp files (mac-cleanup-*) to avoid counting them
+            local temp_prefix="${MC_TEMP_PREFIX:-mac-cleanup}"
+            while IFS= read -r -d '' item; do
+              local item_size=$(du -sk "$item" 2>/dev/null | awk '{print $1}')
+              if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
+                dir_size=$((dir_size + item_size * 1024))
               fi
-            fi
+            done < <(find "$temp_dir" -mindepth 1 ! -name ".X*" ! -name "com.apple.*" ! -name "${temp_prefix}-*" -print0 2>/dev/null)
           else
             # For other temp dirs, calculate full size
             dir_size=$(calculate_size_bytes "$temp_dir")
@@ -624,7 +662,15 @@ main() {
   if [[ ${#plugin_array[@]} -gt 0 ]]; then
     # Run sweep in background - use () to create subshell that inherits functions
     # Pass SCRIPT_DIR so the function can source utils if needed
+    # Export necessary functions and variables for the subshell
     (
+      # Functions should be inherited in zsh, but ensure calculate_plugin_size_bytes is available
+      # by redefining it if needed (it should be inherited, but this is a safety check)
+      if ! type calculate_plugin_size_bytes &>/dev/null; then
+        # If function not available, we need to source the main script or redefine it
+        # For now, we'll rely on function inheritance which should work in zsh
+        :
+      fi
       run_async_sweep "$sweep_file" "$SCRIPT_DIR" "${plugin_array[@]}"
     ) &
     sweep_pid=$!
@@ -634,6 +680,15 @@ main() {
   echo ""
   print_header "macOS Cleanup Utility"
   print_info "This script will help you safely clean up your macOS system."
+  echo ""
+  print_info "Features:"
+  print_info "  • Interactive selection of 20+ cleanup operations with size preview"
+  print_info "  • Clean browser caches (Safari, Chrome, Firefox, Edge)"
+  print_info "  • Remove package manager caches (Homebrew, npm, pip, Gradle, Maven)"
+  print_info "  • Clean development tool temp files (Xcode, Docker, Node.js, IntelliJ, VS Code)"
+  print_info "  • Remove system and user caches, logs, and temporary files"
+  print_info "  • Automatic backups with undo functionality"
+  print_info "  • Disk space calculation and savings summary"
   
   if [[ "$MC_DRY_RUN" == "true" ]]; then
     print_warning "DRY RUN MODE: No changes will be made"
@@ -941,7 +996,9 @@ main() {
     display="${display#\"}"
     display="${display%\"}"
     local option_text="${display%% |*}"  # Remove everything after " | "
-    local category_name="${option_text%% (*}"  # Remove everything after " ("
+    # Extract category name by removing description in parentheses
+    # Use sed to avoid glob pattern issues with parentheses in zsh
+    local category_name=$(echo "$option_text" | sed 's/ (.*$//')
     category_name="${category_name%"${category_name##*[![:space:]]}"}"  # Trim trailing whitespace
     
     # Find category and get its plugins
@@ -1086,6 +1143,56 @@ main() {
   # Set MC_NON_INTERACTIVE flag since we're running in background
   # This prevents interactive prompts from hanging
   (
+    # Source required libraries in subshell to ensure functions are available
+    # Functions should be inherited in zsh, but explicitly sourcing ensures availability
+    # #region agent log
+    local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+    echo "{\"id\":\"log_${log_timestamp}_before_sourcing_libs\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1123\",\"message\":\"Before sourcing libraries\",\"data\":{\"backup_exists_before\":\"$(type backup &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"J\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+    # #endregion
+    
+    [[ -f "$SCRIPT_DIR/lib/constants.sh" ]] && source "$SCRIPT_DIR/lib/constants.sh" 2>&1 || true
+    [[ -f "$SCRIPT_DIR/lib/core.sh" ]] && source "$SCRIPT_DIR/lib/core.sh" 2>&1 || true
+    [[ -f "$SCRIPT_DIR/lib/ui.sh" ]] && source "$SCRIPT_DIR/lib/ui.sh" 2>&1 || true
+    [[ -f "$SCRIPT_DIR/lib/utils.sh" ]] && source "$SCRIPT_DIR/lib/utils.sh" 2>&1 || true
+    [[ -f "$SCRIPT_DIR/lib/admin.sh" ]] && source "$SCRIPT_DIR/lib/admin.sh" 2>&1 || true
+    
+    # #region agent log
+    log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+    echo "{\"id\":\"log_${log_timestamp}_before_backup_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1130\",\"message\":\"Before sourcing backup.sh\",\"data\":{\"backup_file_exists\":\"$([[ -f $SCRIPT_DIR/lib/backup.sh ]] && echo true || echo false)\",\"backup_exists\":\"$(type backup &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"J\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+    # #endregion
+    
+    if [[ -f "$SCRIPT_DIR/lib/backup.sh" ]]; then
+      # Source backup.sh and capture any errors
+      local source_output=""
+      source_output=$(source "$SCRIPT_DIR/lib/backup.sh" 2>&1)
+      local source_exit=$?
+      
+      # #region agent log
+      log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+      echo "{\"id\":\"log_${log_timestamp}_after_backup_source\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1135\",\"message\":\"After sourcing backup.sh\",\"data\":{\"source_exit\":\"$source_exit\",\"backup_exists\":\"$(type backup &>/dev/null && echo true || echo false)\",\"backup_type\":\"$(type backup 2>&1 | head -1 || echo \"not found\")\",\"source_output_length\":\"${#source_output}\",\"source_output\":\"$source_output\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"J\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+      # #endregion
+    fi
+    
+    [[ -f "$SCRIPT_DIR/lib/validation.sh" ]] && source "$SCRIPT_DIR/lib/validation.sh" 2>&1 || true
+    [[ -f "$SCRIPT_DIR/lib/error_handler.sh" ]] && source "$SCRIPT_DIR/lib/error_handler.sh" 2>&1 || true
+    [[ -f "$SCRIPT_DIR/plugins/base.sh" ]] && source "$SCRIPT_DIR/plugins/base.sh" 2>&1 || true
+    
+    # Re-register plugins in subshell since plugin registry is not inherited
+    # The plugin registry is an associative array that doesn't persist across subshells
+    # We need to reload plugins to rebuild the registry
+    # #region agent log
+    local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+    echo "{\"id\":\"log_${log_timestamp}_subshell_start\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1123\",\"message\":\"Subshell started\",\"data\":{\"SCRIPT_DIR\":\"$SCRIPT_DIR\",\"load_plugins_available\":\"$(type load_plugins 2>&1 | head -1 || echo \"not found\")\",\"registry_before\":\"${#MC_PLUGIN_REGISTRY[@]}\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"H\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+    # #endregion
+    
+    load_plugins
+    
+    # #region agent log
+    log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+    local test_function="clean_user_cache"
+    echo "{\"id\":\"log_${log_timestamp}_plugins_reloaded\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1135\",\"message\":\"Plugins reloaded in subshell\",\"data\":{\"registry_after\":\"${#MC_PLUGIN_REGISTRY[@]}\",\"registry_keys\":\"${(@k)MC_PLUGIN_REGISTRY}\",\"test_function_exists\":\"$(type \"$test_function\" &>/dev/null && echo true || echo false)\",\"test_function_type\":\"$(type \"$test_function\" 2>&1 | head -1 || echo \"not found\")\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"H\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+    # #endregion
+    
     export MC_NON_INTERACTIVE=true
     export MC_SPACE_TRACKING_FILE="$space_tracking_file"
     export MC_PROGRESS_FILE="$progress_file"
@@ -1096,7 +1203,34 @@ main() {
       # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
       _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
       
+      # #region agent log
+      local log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+      echo "{\"id\":\"log_${log_timestamp}_plugin_lookup_start\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1134\",\"message\":\"Plugin function lookup\",\"data\":{\"option\":\"$option\",\"MC_PLUGIN_REGISTRY_keys\":\"${(@k)MC_PLUGIN_REGISTRY}\",\"registry_count\":\"${#MC_PLUGIN_REGISTRY[@]}\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+      # #endregion
+      
       local function=$(mc_get_plugin_function "$option")
+      
+      # #region agent log
+      log_timestamp=$(/usr/bin/date +%s 2>/dev/null || echo "0")
+      echo "{\"id\":\"log_${log_timestamp}_plugin_lookup_result\",\"timestamp\":${log_timestamp}000,\"location\":\"mac-cleanup.sh:1136\",\"message\":\"Plugin function lookup result\",\"data\":{\"option\":\"$option\",\"function\":\"$function\",\"function_empty\":\"$([[ -z \"$function\" ]] && echo true || echo false)\",\"function_type\":\"$(type \"$function\" 2>&1 | head -1 || echo \"not found\")\",\"function_available\":\"$(type \"$function\" &>/dev/null && echo true || echo false)\"},\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"G\"}" >> /Users/chenaultfamily/Documents/scripts/.cursor/debug.log 2>&1
+      # #endregion
+      
+      # Check if function exists - if not, it means the plugin file wasn't sourced properly
+      if [[ -z "$function" ]]; then
+        print_error "Plugin function not found or invalid: $function (for plugin: $option)" >> "$cleanup_output_file"
+        log_message "ERROR" "Plugin function not found: $function (for plugin: $option)"
+        _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
+        continue
+      fi
+      
+      # Verify function actually exists (not just registered)
+      if ! type "$function" &>/dev/null; then
+        print_error "Plugin function '$function' is registered but not defined (for plugin: $option)" >> "$cleanup_output_file"
+        log_message "ERROR" "Plugin function '$function' registered but not available (for plugin: $option)"
+        _write_progress_file "$progress_file" "$current_op|$total_operations|$option|0|0|"
+        continue
+      fi
+      
       if [[ -n "$function" ]] && mc_validate_plugin_function "$function" "$option"; then
         # SAFE-8: Add timeout for plugin execution (default 30 minutes per plugin)
         local plugin_timeout="${MC_PLUGIN_TIMEOUT:-1800}"  # 30 minutes default
@@ -1171,11 +1305,11 @@ main() {
     
     # Show initial progress state (0%)
     if [[ "$use_progress_bar" == "true" ]]; then
-      printf '\r\033[K' >&2
-      printf '%b[0/%d] Starting... %s 0%%%b' \
+      local initial_bar=$(printf "%40s" | /usr/bin/tr ' ' '░' 2>/dev/null || printf "%40s" | sed 's/ /░/g')
+      printf '\r\033[K%b[0/%d] Starting... %s 0%%%b' \
         "$cyan_code" \
         "$total_operations" \
-        "$(printf "%40s" | tr ' ' '░')" \
+        "$initial_bar" \
         "$reset_code" >&2
     else
       printf '\r[0/%d] Starting... 0%%' "$total_operations" >&2
@@ -1186,12 +1320,15 @@ main() {
     local last_percent=-1
     
     local loop_count=0
+    local last_displayed_percent=-1
     while kill -0 $cleanup_pid 2>/dev/null; do
       loop_count=$((loop_count + 1))
       
-      if [[ -f "$progress_file" ]]; then
-        # SAFE-7: Read progress file with locking to prevent race conditions
-        local progress_line=$(_read_progress_file "$progress_file")
+      # Throttle progress updates: only check every 5 loops (0.5 seconds) to reduce overhead
+      if [[ $((loop_count % 5)) -eq 0 || $loop_count -eq 1 ]]; then
+        if [[ -f "$progress_file" ]]; then
+          # SAFE-7: Read progress file with locking to prevent race conditions
+          local progress_line=$(_read_progress_file "$progress_file")
         
         if [[ -n "$progress_line" ]]; then
           local current=$(echo "$progress_line" | cut -d'|' -f1)
@@ -1268,15 +1405,15 @@ main() {
                 local empty=$((40 - filled))
                 local bar_chars=""
                 if [[ $filled -gt 0 ]]; then
-                  bar_chars=$(printf "%${filled}s" | tr ' ' '█')
+                  bar_chars=$(printf "%${filled}s" | /usr/bin/tr ' ' '█' 2>/dev/null || printf "%${filled}s" | sed 's/ /█/g')
                 fi
                 if [[ $empty -gt 0 ]]; then
-                  bar_chars="${bar_chars}$(printf "%${empty}s" | tr ' ' '░')"
+                  bar_chars="${bar_chars}$(printf "%${empty}s" | /usr/bin/tr ' ' '░' 2>/dev/null || printf "%${empty}s" | sed 's/ /░/g')"
                 fi
                 
                 # Clear line and print progress (use %b to interpret escape sequences)
-                printf '\r\033[K' >&2
-                printf '%b[%d/%d] %s... %s %d%%%b' \
+                # Use \r to return to start of line, \033[K to clear to end, no trailing newline
+                printf '\r\033[K%b[%d/%d] %s... %s %d%%%b' \
                   "$cyan_code" \
                   "$current" \
                   "$total" \
@@ -1294,6 +1431,7 @@ main() {
               fi
             fi
           fi
+        fi
         fi
       fi
       sleep 0.15

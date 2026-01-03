@@ -26,7 +26,10 @@ clean_npm_cache() {
         log_message "ERROR" "Backup failed, aborting npm cache cleanup"
         return 1
       fi
-      npm cache clean --force 2>&1 | log_message "INFO"
+      npm cache clean --force 2>&1 | log_message "INFO" || {
+        print_error "Failed to clean npm cache"
+        return 1
+      }
       local space_after=$(calculate_size_bytes "$npm_cache_dir")
       total_space_freed=$((space_before - space_after))
       # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -53,10 +56,16 @@ clean_npm_cache() {
         log_message "DRY_RUN" "Would clean yarn cache"
       else
         if ! backup "$yarn_cache_dir" "yarn_cache"; then
-          print_error "Backup failed for yarn cache. Skipping this directory."
-          log_message "ERROR" "Backup failed for yarn cache, skipping"
-        else
-          yarn cache clean 2>&1 | log_message "INFO"
+          print_error "Backup failed for yarn cache. Aborting cleanup to prevent data loss."
+          log_message "ERROR" "Backup failed for yarn cache, aborting"
+          return 1
+        fi
+        
+        yarn cache clean 2>&1 | log_message "INFO" || {
+          print_error "Failed to clean yarn cache"
+          return 1
+        }
+        
         local space_after=$(calculate_size_bytes "$yarn_cache_dir")
         local yarn_space_freed=$((space_before - space_after))
         # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -64,15 +73,35 @@ clean_npm_cache() {
           yarn_space_freed=0
           log_message "WARNING" "Directory size increased during cleanup: $yarn_cache_dir (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
         fi
-          total_space_freed=$((total_space_freed + yarn_space_freed))
-          track_space_saved "npm Cache" $total_space_freed
-          print_success "yarn cache cleaned."
-          log_message "SUCCESS" "yarn cache cleaned (freed $(format_bytes $yarn_space_freed))"
-        fi
+        total_space_freed=$((total_space_freed + yarn_space_freed))
+        track_space_saved "npm Cache" $total_space_freed
+        print_success "yarn cache cleaned."
+        log_message "SUCCESS" "yarn cache cleaned (freed $(format_bytes $yarn_space_freed))"
       fi
     fi
   fi
+  
+  return 0
 }
 
-# Register plugin
-register_plugin "npm Cache" "package-managers" "clean_npm_cache" "false"
+# Size calculation function for sweep
+_calculate_npm_cache_size_bytes() {
+  local size_bytes=0
+  if command -v npm &> /dev/null; then
+    local npm_cache_dir=$(npm config get cache 2>/dev/null || echo "$HOME/.npm")
+    if [[ -d "$npm_cache_dir" ]]; then
+      size_bytes=$(calculate_size_bytes "$npm_cache_dir" 2>/dev/null || echo "0")
+    fi
+  fi
+  if command -v yarn &> /dev/null; then
+    local yarn_cache_dir=$(yarn cache dir 2>/dev/null || echo "$HOME/.yarn/cache")
+    if [[ -d "$yarn_cache_dir" ]]; then
+      local yarn_size=$(calculate_size_bytes "$yarn_cache_dir" 2>/dev/null || echo "0")
+      [[ "$yarn_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + yarn_size))
+    fi
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "npm Cache" "package-managers" "clean_npm_cache" "false" "_calculate_npm_cache_size_bytes"

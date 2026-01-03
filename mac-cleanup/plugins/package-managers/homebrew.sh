@@ -8,22 +8,75 @@ clean_homebrew_cache() {
   
   if ! command -v brew &> /dev/null; then
     print_warning "Homebrew is not installed."
-    return
+    track_space_saved "Homebrew Cache" 0
+    return 0
   fi
   
+  local brew_cache_dirs=(
+    "$(brew --cache 2>/dev/null || echo "$HOME/Library/Caches/Homebrew")"
+    "$HOME/Library/Caches/Homebrew"
+  )
+  
+  local space_before=0
+  for cache_dir in "${brew_cache_dirs[@]}"; do
+    if [[ -d "$cache_dir" ]]; then
+      space_before=$(calculate_size_bytes "$cache_dir" 2>/dev/null || echo "0")
+      break
+    fi
+  done
+  
   if [[ "$MC_DRY_RUN" == "true" ]]; then
-    print_info "[DRY RUN] Would clean Homebrew cache"
+    print_info "[DRY RUN] Would clean Homebrew cache ($(format_bytes $space_before))"
     log_message "DRY_RUN" "Would clean Homebrew cache"
+    track_space_saved "Homebrew Cache" 0
+    return 0
   else
     print_info "Cleaning Homebrew cache..."
     log_message "INFO" "Cleaning Homebrew cache"
     
-    brew cleanup -s 2>&1 | log_message "INFO"
+    brew cleanup -s 2>&1 | log_message "INFO" || {
+      print_error "Failed to clean Homebrew cache"
+      return 1
+    }
     
+    local space_after=0
+    for cache_dir in "${brew_cache_dirs[@]}"; do
+      if [[ -d "$cache_dir" ]]; then
+        space_after=$(calculate_size_bytes "$cache_dir" 2>/dev/null || echo "0")
+        break
+      fi
+    done
+    
+    local space_freed=$((space_before - space_after))
+    if [[ $space_freed -lt 0 ]]; then
+      space_freed=0
+      log_message "WARNING" "Homebrew cache size increased during cleanup (before: $(format_bytes $space_before), after: $(format_bytes $space_after))"
+    fi
+    
+    track_space_saved "Homebrew Cache" $space_freed
     print_success "Homebrew cache cleaned."
-    log_message "SUCCESS" "Homebrew cache cleaned"
+    log_message "SUCCESS" "Homebrew cache cleaned (freed $(format_bytes $space_freed))"
+    return 0
   fi
 }
 
-# Register plugin
-register_plugin "Homebrew Cache" "package-managers" "clean_homebrew_cache" "false"
+# Size calculation function for sweep
+_calculate_homebrew_cache_size_bytes() {
+  local size_bytes=0
+  if command -v brew &> /dev/null; then
+    local brew_cache_dirs=(
+      "$(brew --cache 2>/dev/null || echo "$HOME/Library/Caches/Homebrew")"
+      "$HOME/Library/Caches/Homebrew"
+    )
+    for cache_dir in "${brew_cache_dirs[@]}"; do
+      if [[ -d "$cache_dir" ]]; then
+        size_bytes=$(calculate_size_bytes "$cache_dir" 2>/dev/null || echo "0")
+        break
+      fi
+    done
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "Homebrew Cache" "package-managers" "clean_homebrew_cache" "false" "_calculate_homebrew_cache_size_bytes"

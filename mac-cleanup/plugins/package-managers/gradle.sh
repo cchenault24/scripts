@@ -17,7 +17,11 @@ clean_gradle_cache() {
       log_message "ERROR" "Backup failed, aborting Gradle cache cleanup"
       return 1
     fi
-    safe_clean_dir "$gradle_cache_dir" "Gradle cache"
+    safe_clean_dir "$gradle_cache_dir" "Gradle cache" || {
+      print_error "Failed to clean Gradle cache"
+      return 1
+    }
+    
     local space_after=$(calculate_size_bytes "$gradle_cache_dir")
     local space_freed=$((space_before - space_after))
     # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -36,7 +40,12 @@ clean_gradle_cache() {
       log_message "ERROR" "Backup failed, aborting Gradle wrapper cleanup"
       return 1
     fi
-    safe_clean_dir "$gradle_wrapper_dir" "Gradle wrapper"
+    
+    safe_clean_dir "$gradle_wrapper_dir" "Gradle wrapper" || {
+      print_error "Failed to clean Gradle wrapper"
+      return 1
+    }
+    
     local space_after=$(calculate_size_bytes "$gradle_wrapper_dir")
     local space_freed=$((space_before - space_after))
     # Validate space_freed is not negative (directory may have grown during cleanup)
@@ -50,15 +59,29 @@ clean_gradle_cache() {
   
   if [[ $total_space_freed -eq 0 ]]; then
     print_warning "Gradle cache not found."
+    track_space_saved "Gradle Cache" 0
   else
-    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only update plugin-specific tracking
-    MC_SPACE_SAVED_BY_OPERATION["Gradle Cache"]=$total_space_freed
-    # Write to space tracking file if in background process (with locking)
-    if [[ -n "${MC_SPACE_TRACKING_FILE:-}" && -f "$MC_SPACE_TRACKING_FILE" ]]; then
-      _write_space_tracking_file "Gradle Cache" "$total_space_freed"
-    fi
+    # safe_clean_dir already updates MC_TOTAL_SPACE_SAVED, so we only track per-operation
+    track_space_saved "Gradle Cache" $total_space_freed "true"
   fi
+  
+  return 0
 }
 
-# Register plugin
-register_plugin "Gradle Cache" "package-managers" "clean_gradle_cache" "false"
+# Size calculation function for sweep
+_calculate_gradle_cache_size_bytes() {
+  local size_bytes=0
+  local gradle_size=0
+  if [[ -d "$HOME/.gradle/caches" ]]; then
+    gradle_size=$(calculate_size_bytes "$HOME/.gradle/caches" 2>/dev/null || echo "0")
+    [[ "$gradle_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + gradle_size))
+  fi
+  if [[ -d "$HOME/.gradle/wrapper" ]]; then
+    local wrapper_size=$(calculate_size_bytes "$HOME/.gradle/wrapper" 2>/dev/null || echo "0")
+    [[ "$wrapper_size" =~ ^[0-9]+$ ]] && size_bytes=$((size_bytes + wrapper_size))
+  fi
+  echo "$size_bytes"
+}
+
+# Register plugin with size function
+register_plugin "Gradle Cache" "package-managers" "clean_gradle_cache" "false" "_calculate_gradle_cache_size_bytes"
