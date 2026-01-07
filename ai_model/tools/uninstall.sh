@@ -1,0 +1,376 @@
+#!/bin/bash
+#
+# uninstall.sh - Uninstall tool for local LLM setup
+#
+# Removes models, cleans Continue.dev configs, and optionally removes Ollama
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="$HOME/.local-llm-setup"
+STATE_FILE="$STATE_DIR/state.json"
+LOG_FILE="$STATE_DIR/uninstall.log"
+
+# Colors
+readonly GREEN='\033[0;32m'
+readonly BLUE='\033[0;34m'
+readonly YELLOW='\033[1;33m'
+readonly RED='\033[0;31m'
+readonly CYAN='\033[0;36m'
+readonly BOLD='\033[1m'
+readonly NC='\033[0m'
+
+print_header() {
+  echo ""
+  echo -e "${BOLD}${BLUE}═══════════════════════════════════════════════════════════${NC}"
+  echo -e "${BOLD}${CYAN}$1${NC}"
+  echo -e "${BOLD}${BLUE}═══════════════════════════════════════════════════════════${NC}"
+  echo ""
+}
+
+print_success() {
+  echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_info() {
+  echo -e "${BLUE}ℹ $1${NC}"
+}
+
+print_warn() {
+  echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+print_error() {
+  echo -e "${RED}✗ $1${NC}"
+}
+
+prompt_yes_no() {
+  local prompt="$1"
+  local default="${2:-n}"
+  local choice
+  while true; do
+    echo -e "${YELLOW}$prompt${NC} [y/n] (default: $default): "
+    read -r choice
+    choice=${choice:-$default}
+    case "$choice" in
+      [Yy]|[Yy][Ee][Ss]) return 0 ;;
+      [Nn]|[Nn][Oo]) return 1 ;;
+      *) echo "Please answer yes or no." ;;
+    esac
+  done
+}
+
+# Remove models
+remove_models() {
+  print_header "🗑️  Remove Models"
+  
+  local models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  
+  if [[ -z "$models" ]]; then
+    print_info "No models installed"
+    return 0
+  fi
+  
+  local model_count=$(echo "$models" | wc -l | xargs)
+  print_info "Found $model_count installed model(s)"
+  echo ""
+  
+  echo "Installed models:"
+  echo "$models" | while read -r model; do
+    if [[ -n "$model" ]]; then
+      echo "  • $model"
+    fi
+  done
+  echo ""
+  
+  if ! prompt_yes_no "Remove all installed models?" "n"; then
+    print_info "Skipping model removal"
+    return 0
+  fi
+  
+  # Confirm again
+  if ! prompt_yes_no "This will delete all models. Are you sure?" "n"; then
+    print_info "Model removal cancelled"
+    return 0
+  fi
+  
+  local removed=0
+  local failed=0
+  
+  while IFS= read -r model; do
+    if [[ -n "$model" ]]; then
+      print_info "Removing $model..."
+      
+      if ollama rm "$model" 2>&1 | tee -a "$LOG_FILE"; then
+        print_success "$model removed"
+        ((removed++))
+      else
+        print_error "Failed to remove $model"
+        ((failed++))
+      fi
+    fi
+  done <<< "$models"
+  
+  echo ""
+  print_success "Removed $removed model(s)"
+  if [[ $failed -gt 0 ]]; then
+    print_warn "Failed to remove $failed model(s)"
+  fi
+}
+
+# Clean Continue.dev config
+clean_continue_config() {
+  print_header "🗑️  Clean Continue.dev Config"
+  
+  local config_file="$HOME/.continue/config.json"
+  
+  if [[ ! -f "$config_file" ]]; then
+    print_info "Continue.dev config not found"
+    return 0
+  fi
+  
+  if prompt_yes_no "Remove Continue.dev config file?" "n"; then
+    # Backup first
+    local backup_file="$STATE_DIR/continue-config-backup-$(date +%Y%m%d-%H%M%S).json"
+    cp "$config_file" "$backup_file" 2>/dev/null || true
+    
+    if rm "$config_file" 2>/dev/null; then
+      print_success "Continue.dev config removed"
+      print_info "Backup saved to: $backup_file"
+    else
+      print_error "Failed to remove Continue.dev config"
+    fi
+  else
+    print_info "Keeping Continue.dev config"
+  fi
+}
+
+# Remove VS Code extensions
+remove_vscode_extensions() {
+  print_header "🗑️  Remove VS Code Extensions"
+  
+  # Check if VS Code CLI is available
+  if ! command -v code &>/dev/null; then
+    print_warn "VS Code CLI (code) not found in PATH"
+    print_info "Skipping extension removal"
+    print_info "You can manually remove extensions from VS Code"
+    return 0
+  fi
+  
+  local extensions_file="$SCRIPT_DIR/../vscode/extensions.json"
+  
+  if [[ ! -f "$extensions_file" ]]; then
+    print_info "Extensions file not found"
+    return 0
+  fi
+  
+  # Extract extension IDs from extensions.json
+  local extensions
+  if command -v jq &>/dev/null; then
+    extensions=$(jq -r '.recommendations[]?' "$extensions_file" 2>/dev/null || echo "")
+  else
+    # Fallback: use grep to extract extension IDs from the recommendations array
+    extensions=$(grep -A 100 '"recommendations"' "$extensions_file" | \
+                 grep -o '"[^"]*"' | \
+                 grep -v "recommendations" | \
+                 tr -d '"' | \
+                 grep -v '^$' || echo "")
+  fi
+  
+  if [[ -z "$extensions" ]]; then
+    print_info "No extensions found in extensions.json"
+    return 0
+  fi
+  
+  # Count extensions
+  local ext_count
+  ext_count=$(echo "$extensions" | wc -l | xargs)
+  print_info "Found $ext_count recommended extension(s)"
+  echo ""
+  
+  echo "Recommended extensions:"
+  echo "$extensions" | while read -r ext; do
+    if [[ -n "$ext" ]]; then
+      echo "  • $ext"
+    fi
+  done
+  echo ""
+  
+  if ! prompt_yes_no "Uninstall all recommended extensions?" "n"; then
+    print_info "Skipping extension removal"
+    return 0
+  fi
+  
+  local removed=0
+  local failed=0
+  local not_installed=0
+  
+  while IFS= read -r ext; do
+    if [[ -n "$ext" ]]; then
+      print_info "Checking $ext..."
+      
+      # Check if extension is installed
+      if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
+        print_info "Uninstalling $ext..."
+        
+        # Ensure log directory exists
+        mkdir -p "$STATE_DIR" 2>/dev/null || true
+        
+        # Capture uninstall output and exit code separately
+        # This prevents tee failures from masking successful uninstalls
+        local uninstall_output uninstall_exit_code
+        uninstall_output=$(code --uninstall-extension "$ext" 2>&1)
+        uninstall_exit_code=$?
+        
+        # Log output to file, but don't echo to stdout to avoid duplicates
+        echo "$uninstall_output" >> "$LOG_FILE" 2>/dev/null || true
+        
+        if [ $uninstall_exit_code -eq 0 ]; then
+          print_success "$ext uninstalled"
+          ((removed++))
+        else
+          print_error "Failed to uninstall $ext"
+          # Show error output for failed uninstalls
+          if [[ -n "$uninstall_output" ]]; then
+            echo "$uninstall_output" | sed 's/^/  /'
+          fi
+          ((failed++))
+        fi
+      else
+        print_info "$ext is not installed"
+        ((not_installed++))
+      fi
+    fi
+  done <<< "$extensions"
+  
+  echo ""
+  if [[ $removed -gt 0 ]]; then
+    print_success "Uninstalled $removed extension(s)"
+  fi
+  if [[ $not_installed -gt 0 ]]; then
+    print_info "$not_installed extension(s) were not installed"
+  fi
+  if [[ $failed -gt 0 ]]; then
+    print_warn "Failed to uninstall $failed extension(s)"
+  fi
+}
+
+# Clean VS Code settings
+clean_vscode_settings() {
+  print_header "🗑️  Clean VS Code Settings"
+  
+  local settings_file="$SCRIPT_DIR/../vscode/settings.json"
+  local found_files=0
+  
+  if [[ -f "$settings_file" ]]; then
+    ((found_files++))
+  fi
+  
+  if [[ $found_files -eq 0 ]]; then
+    print_info "VS Code settings file not found"
+    return 0
+  fi
+  
+  if prompt_yes_no "Remove generated VS Code settings file?" "n"; then
+    if [[ -f "$settings_file" ]]; then
+      if rm "$settings_file" 2>/dev/null; then
+        print_success "VS Code settings file removed"
+      else
+        print_error "Failed to remove VS Code settings file"
+      fi
+    fi
+  else
+    print_info "Keeping VS Code settings file"
+  fi
+}
+
+# Clean state files
+clean_state_files() {
+  print_header "🗑️  Clean State Files"
+  
+  if [[ ! -d "$STATE_DIR" ]]; then
+    print_info "No state directory found"
+    return 0
+  fi
+  
+  if prompt_yes_no "Remove all state files and logs?" "n"; then
+    if rm -rf "$STATE_DIR" 2>/dev/null; then
+      print_success "State files removed"
+    else
+      print_error "Failed to remove state files"
+    fi
+  else
+    print_info "Keeping state files"
+  fi
+}
+
+# Remove Ollama (optional)
+remove_ollama() {
+  print_header "🗑️  Remove Ollama"
+  
+  if ! command -v ollama &>/dev/null; then
+    print_info "Ollama not found"
+    return 0
+  fi
+  
+  if prompt_yes_no "Remove Ollama completely? (This will uninstall Ollama via Homebrew)" "n"; then
+    # Confirm again
+    if ! prompt_yes_no "This will uninstall Ollama. Are you absolutely sure?" "n"; then
+      print_info "Ollama removal cancelled"
+      return 0
+    fi
+    
+    # Stop service
+    print_info "Stopping Ollama service..."
+    brew services stop ollama 2>/dev/null || true
+    
+    # Uninstall
+    print_info "Uninstalling Ollama..."
+    if brew uninstall ollama 2>&1 | tee -a "$LOG_FILE"; then
+      print_success "Ollama uninstalled"
+    else
+      print_error "Failed to uninstall Ollama"
+    fi
+  else
+    print_info "Keeping Ollama installed"
+  fi
+}
+
+# Main
+main() {
+  clear
+  print_header "🗑️  Local LLM Uninstall Tool"
+  
+  # Ensure state directory exists for logging
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  
+  print_warn "This tool will help you remove components of your local LLM setup."
+  print_warn "You can choose what to remove."
+  echo ""
+  
+  # Remove models
+  remove_models
+  
+  # Clean Continue.dev config
+  clean_continue_config
+  
+  # Remove VS Code extensions
+  remove_vscode_extensions
+  
+  # Clean VS Code settings
+  clean_vscode_settings
+  
+  # Clean state files
+  clean_state_files
+  
+  # Remove Ollama (optional, last)
+  remove_ollama
+  
+  # Summary
+  print_header "✅ Uninstall Complete"
+  print_success "Uninstall process finished"
+  print_info "Some files may remain. Check manually if needed."
+  echo ""
+}
+
+main "$@"

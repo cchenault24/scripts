@@ -1,0 +1,14 @@
+{
+  "recommendations": [
+    "Continue.continue",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "pranaygp.vscode-css-peek",
+    "ms-vscode.vscode-typescript-next",
+    "dsznajder.es7-react-js-snippets",
+    "formulahendry.auto-rename-tag",
+    "christian-kohler.path-intellisense",
+    "ms-vscode.vscode-json",
+    "esc5221.clipboard-diff-patch"
+  ]
+}

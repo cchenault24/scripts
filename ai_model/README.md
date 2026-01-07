@@ -1,0 +1,546 @@
+# VS Code + Continue.dev Local LLM Setup
+
+Production-grade local AI coding environment optimized for VS Code with Continue.dev integration. Fully local inference, no cloud APIs, enterprise-safe.
+
+## Overview
+
+This setup provides a seamless "zero to productive" local AI coding experience in VS Code where the assistant can:
+- Understand entire repositories (multi-file context)
+- Perform semantic code search
+- Refactor across files with accurate diffs
+- Follow best practices for React + TypeScript + Redux-Saga + MUI + AG Grid + OpenLayers stack
+
+### Key Features
+
+- **Hardware-Aware Auto-Tuning**: Automatically configures models based on your system's RAM tier
+- **Approved Models Only**: Curated list of trusted open-weight models (no DeepSeek)
+- **Continue.dev Integration**: Auto-generated profiles for coding, review, documentation, and deep analysis
+- **VS Code Optimized**: Settings, extensions, and prompts tailored for your stack
+- **Production-Grade**: Idempotent, resumable, with comprehensive error handling
+- **Fully Local**: No cloud APIs, no telemetry, works offline after setup
+
+## Prerequisites
+
+- **macOS Apple Silicon** (M1/M2/M3/M4)
+- **Homebrew** ([install](https://brew.sh))
+- **Xcode Command Line Tools** (`xcode-select --install`)
+- **VS Code** (optional but recommended)
+- **Internet connection** (only for initial setup and model downloads)
+
+## Quick Start
+
+1. **Run the setup script:**
+   ```bash
+   cd ai_model
+   chmod +x setup-local-llm.sh
+   ./setup-local-llm.sh
+   ```
+
+2. **Follow the interactive prompts:**
+   - Hardware will be auto-detected
+   - Select models from the approved list
+   - Models will be auto-tuned for your hardware tier
+   - Continue.dev config will be generated automatically
+
+3. **Install Continue.dev in VS Code:**
+   - Open VS Code
+   - Install the [Continue.dev extension](https://marketplace.visualstudio.com/items?itemName=Continue.continue)
+   - Restart VS Code
+   - Continue.dev will automatically use the generated config at `~/.continue/config.json`
+
+4. **Start coding with AI:**
+   - Use `Cmd+L` to open Continue.dev chat
+   - Use `Cmd+K` for inline edits
+   - Try the starter prompts from `prompts/starter-prompts.md`
+
+## Hardware Tiers and Model Selection
+
+The setup automatically detects your hardware and classifies it into tiers:
+
+### Tier S (≥48GB RAM)
+- **All models available**
+- Aggressive keep-alive (24h)
+- High context window (32K tokens)
+- Best for: Complex refactoring, architecture work
+
+### Tier A (32-47GB RAM)
+- **Excludes**: llama3.1:70b
+- Moderate keep-alive (12h)
+- Medium context window (16K tokens)
+- Best for: General development, code review
+
+### Tier B (16-31GB RAM)
+- **Excludes**: llama3.1:70b, codestral:22b
+- Conservative keep-alive (5m)
+- Smaller context window (8K tokens)
+- Best for: Lightweight development, autocomplete
+
+### Tier C (<16GB RAM)
+- **Only**: qwen2.5-coder:7b, llama3.1:8b
+- Minimal keep-alive (5m)
+- Small context window (4K tokens)
+- Best for: Simple edits, fast autocomplete
+
+### Approved Models
+
+1. **qwen2.5-coder:14b** (Recommended)
+   - Best balance of quality and speed
+   - ~9GB RAM
+   - Excellent for React/TypeScript development
+
+2. **llama3.1:8b**
+   - Fast, general-purpose
+   - ~5GB RAM
+   - Good TypeScript support
+
+3. **llama3.1:70b** (Tier S only)
+   - Highest quality
+   - ~40GB RAM
+   - Best for complex refactoring
+
+4. **codestral:22b**
+   - Excellent code generation
+   - ~14GB RAM
+   - Great for explanations
+
+5. **qwen2.5-coder:7b**
+   - Lightweight, fast
+   - ~4.5GB RAM
+   - Perfect for autocomplete
+
+## Continue.dev Setup and Usage
+
+### Configuration
+
+The setup script automatically generates a Continue.dev config at `~/.continue/config.json` with four profiles:
+
+1. **Coding Assistant** (Primary)
+   - Model: qwen2.5-coder:14b (or your selected primary)
+   - Temperature: 0.7
+   - Best for: General development, code generation
+
+2. **Code Review**
+   - Model: llama3.1:8b (or alternative)
+   - Temperature: 0.3
+   - Best for: Code review, correctness checks
+
+3. **Documentation**
+   - Model: llama3.1:8b
+   - Temperature: 0.5
+   - Best for: Generating documentation
+
+4. **Deep Analysis**
+   - Model: qwen2.5-coder:14b or llama3.1:70b
+   - Temperature: 0.6
+   - Best for: Complex refactoring, architecture
+
+### Using Continue.dev
+
+- **Chat**: `Cmd+L` - Ask questions, get explanations
+- **Inline Edit**: `Cmd+K` - Select code and request changes
+- **Tab Autocomplete**: Automatic suggestions as you type
+- **Context**: Continue.dev automatically indexes your workspace
+
+### Switching Profiles
+
+In Continue.dev chat, you can switch between profiles:
+- Use the profile selector in the chat interface
+- Or mention the profile name in your prompt: "Using Code Review profile, review this code..."
+
+## VS Code Integration
+
+### Settings
+
+The setup generates optimized VS Code settings at `vscode/settings.json`. To use:
+
+1. Copy to your workspace:
+   ```bash
+   cp vscode/settings.json .vscode/settings.json
+   ```
+
+2. Or merge with existing settings manually
+
+Key optimizations:
+- TypeScript strict mode enforcement
+- React/Redux navigation support
+- Import organization
+- Safer refactoring defaults
+- MUI theme token awareness
+- AG Grid type hints
+
+### Extensions
+
+Recommended extensions are listed in `vscode/extensions.json`. The setup script can optionally install them:
+
+- **ESLint** - Code quality
+- **Prettier** - Code formatting
+- **TypeScript** - Enhanced TS support
+- **React snippets** - Productivity
+- **Path IntelliSense** - Import assistance
+- **GitLens** - Git integration
+
+To install manually:
+```bash
+code --install-extension <extension-id>
+```
+
+## Tool Usage
+
+### Diagnose
+
+Check the health of your setup:
+```bash
+./tools/diagnose.sh
+```
+
+Checks:
+- Ollama daemon health
+- Installed models
+- Continue.dev config validity
+- VS Code integration
+- System resources
+- Model response test
+
+### Benchmark
+
+Test model performance:
+```bash
+./tools/benchmark.sh
+```
+
+Measures:
+- Time to first token
+- Tokens per second
+- Memory usage
+- Response quality
+
+### Update
+
+Update Ollama and models:
+```bash
+./tools/update.sh
+```
+
+Updates:
+- Ollama to latest version
+- All installed models
+- Refreshes Continue.dev config (optional)
+
+### Uninstall
+
+Remove components:
+```bash
+./tools/uninstall.sh
+```
+
+Options:
+- Remove models
+- Clean Continue.dev config
+- Remove VS Code settings
+- Clean state files
+- Remove Ollama (optional)
+
+## Tuning and Optimization
+
+### Auto-Tuning
+
+Models are automatically tuned based on your hardware tier. Parameters include:
+- Context window size
+- Max tokens
+- Temperature (role-specific)
+- Top-p
+- Keep-alive duration
+
+### Manual Tuning
+
+To adjust tuning, edit `~/.continue/config.json`:
+
+```json
+{
+  "models": [
+    {
+      "title": "Coding Assistant",
+      "contextLength": 16384,  // Adjust based on needs
+      "temperature": 0.7,       // Lower = more focused
+      ...
+    }
+  ]
+}
+```
+
+### Performance Tips
+
+1. **Use keep-alive** for frequently used models (pre-loads in memory)
+2. **Smaller context** for faster responses
+3. **Multiple models** - use smaller for autocomplete, larger for complex tasks
+4. **Monitor memory** - use `ollama ps` to see loaded models
+
+### Re-running Tuning
+
+To re-run auto-tuning:
+```bash
+./setup-local-llm.sh
+```
+
+The script is idempotent - safe to re-run. It will:
+- Detect existing installation
+- Offer to resume or start fresh
+- Preserve your customizations where possible
+
+## Troubleshooting
+
+### Ollama Service Not Running
+
+```bash
+# Check status
+brew services list | grep ollama
+
+# Start service
+brew services start ollama
+
+# Or start manually
+ollama serve
+```
+
+### Models Not Responding
+
+1. **Check Ollama is running:**
+   ```bash
+   curl http://localhost:11434/api/tags
+   ```
+
+2. **Test model directly:**
+   ```bash
+   ollama run <model-name> "test"
+   ```
+
+3. **Check memory:**
+   ```bash
+   ollama ps
+   ```
+
+4. **Restart Ollama:**
+   ```bash
+   brew services restart ollama
+   ```
+
+### Continue.dev Not Connecting
+
+1. **Verify config exists:**
+   ```bash
+   cat ~/.continue/config.json
+   ```
+
+2. **Check JSON validity:**
+   ```bash
+   jq empty ~/.continue/config.json
+   ```
+
+3. **Verify Ollama endpoint:**
+   - Config should have: `"apiBase": "http://localhost:11434"`
+   - Test: `curl http://localhost:11434/api/tags`
+
+4. **Restart VS Code**
+
+### Model Too Slow
+
+1. **Use a smaller model** for autocomplete
+2. **Reduce context window** in Continue.dev config
+3. **Check system resources:**
+   ```bash
+   ollama ps
+   top
+   ```
+
+4. **Pre-load model** with keep-alive:
+   ```bash
+   ollama run <model-name>
+   # Keep terminal open
+   ```
+
+### Out of Memory
+
+1. **Unload models:**
+   ```bash
+   ollama ps
+   # Stop processes or restart Ollama
+   ```
+
+2. **Use smaller models** for your tier
+3. **Reduce keep-alive** duration
+4. **Close other applications**
+
+### TypeScript/React Issues
+
+1. **Check VS Code settings** - ensure TypeScript settings are applied
+2. **Verify extensions** - ESLint, Prettier, TypeScript
+3. **Check workspace** - ensure `.vscode/settings.json` is in workspace root
+4. **Restart VS Code**
+
+## Stack-Specific Best Practices
+
+### TypeScript
+
+- **Strict typing**: No `any`, use generics and discriminated unions
+- **Type safety**: Enable all strict checks in `tsconfig.json`
+- **Typed selectors**: Use typed Redux selectors
+
+### Redux + Redux-Saga
+
+- **Side effects in sagas**: Never in components
+- **Typed selectors**: Use TypeScript for all selectors
+- **Saga patterns**: Use takeLatest/takeEvery appropriately
+- **Cancellation**: Always handle saga cancellation
+- **Error handling**: Comprehensive error handling in sagas
+
+### Material UI (MUI)
+
+- **Theme-first**: Use sx prop with theme tokens
+- **No inline styles**: Avoid ad-hoc inline styles
+- **Accessibility**: Proper ARIA labels, keyboard navigation
+- **Responsive**: Use MUI breakpoints
+
+### AG Grid
+
+- **Typed column defs**: Use TypeScript for column definitions
+- **Memoized renderers**: Memoize cell renderers for performance
+- **Performance**: Use virtualization, row grouping appropriately
+
+### OpenLayers
+
+- **Lifecycle management**: Clean up on component unmount
+- **Event listeners**: Properly remove all event listeners
+- **Map state**: Isolate map state, don't mix with component state
+- **Memory leaks**: Check for proper cleanup
+
+## Security and Privacy
+
+### Local-First
+
+- **No cloud APIs**: All inference is local
+- **No telemetry**: Continue.dev telemetry disabled
+- **No external calls**: Only initial installs and model downloads require internet
+- **Offline capable**: Works fully offline after setup
+
+### Enterprise-Safe
+
+- **No data leaves your machine**: Code never sent to external services
+- **Auditable**: All code is open-source and inspectable
+- **Restricted environments**: Works in air-gapped networks (after initial setup)
+- **Clearance-friendly**: No external dependencies during operation
+
+### Data Storage
+
+- **Models**: Stored in `~/.ollama/models/`
+- **Config**: `~/.continue/config.json`
+- **State**: `~/.local-llm-setup/`
+- **Logs**: `~/.local-llm-setup/*.log`
+
+All data stays on your local machine.
+
+## Advanced Usage
+
+### Custom Model Configuration
+
+Edit `~/.continue/config.json` to add custom models or adjust parameters:
+
+```json
+{
+  "models": [
+    {
+      "title": "Custom Model",
+      "provider": "ollama",
+      "model": "your-model:tag",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 16384,
+      "temperature": 0.7,
+      "systemMessage": "Your custom system prompt"
+    }
+  ]
+}
+```
+
+### Workspace-Specific Configs
+
+Continue.dev supports workspace-specific configs. Create `.continue/config.json` in your workspace root to override global config.
+
+### Local Embeddings
+
+For better codebase understanding, you can enable local embeddings in Continue.dev config:
+
+```json
+{
+  "embeddingsProvider": {
+    "provider": "ollama",
+    "model": "qwen2.5-coder:14b",
+    "apiBase": "http://localhost:11434"
+  }
+}
+```
+
+Note: This uses more resources but provides better semantic search.
+
+## Getting Help
+
+### Diagnostic Report
+
+Generate a full diagnostic report:
+```bash
+./tools/diagnose.sh
+```
+
+This creates a detailed report with all system information.
+
+### Logs
+
+Check logs for detailed information:
+- Setup: `~/.local-llm-setup/setup.log`
+- Diagnose: `~/.local-llm-setup/diagnose.log`
+- Benchmark: `~/.local-llm-setup/benchmark.log`
+- Update: `~/.local-llm-setup/update.log`
+
+### Common Issues
+
+See the [Troubleshooting](#troubleshooting) section above for common issues and solutions.
+
+### Resources
+
+- [Ollama Documentation](https://github.com/ollama/ollama/blob/main/docs)
+- [Continue.dev Documentation](https://docs.continue.dev)
+- [VS Code Settings](https://code.visualstudio.com/docs/getstarted/settings)
+
+## File Structure
+
+```
+ai_model/
+├── setup-local-llm.sh          # Main setup script
+├── tools/
+│   ├── diagnose.sh              # Health checks and diagnostics
+│   ├── benchmark.sh             # Model performance testing
+│   ├── update.sh                # Update Ollama and models
+│   └── uninstall.sh             # Cleanup and removal
+├── .continue/
+│   └── config.json              # Continue.dev configuration template
+├── vscode/
+│   ├── settings.json            # VS Code settings snippet
+│   └── extensions.json          # Extension recommendations
+├── prompts/
+│   └── starter-prompts.md       # Stack-optimized prompt templates
+└── README.md                    # This file
+```
+
+## License
+
+MIT License - See LICENSE file for details.
+
+## Contributing
+
+This is a production setup script. For improvements:
+1. Test thoroughly on your hardware tier
+2. Ensure idempotency (safe to re-run)
+3. Maintain backward compatibility
+4. Update documentation
+
+---
+
+**Setup completed?** Start coding with AI! Use `Cmd+L` in VS Code to open Continue.dev and try the starter prompts.

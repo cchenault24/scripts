@@ -1,0 +1,63 @@
+{
+  "models": [
+    {
+      "title": "Coding Assistant",
+      "provider": "ollama",
+      "model": "qwen2.5-coder:14b",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 16384,
+      "temperature": 0.7,
+      "systemMessage": "You are an expert React + TypeScript developer specializing in:\n- React with TypeScript (strict typing, no 'any')\n- Redux + Redux-Saga (side effects in sagas, typed selectors)\n- Material UI (MUI) with theme-first styling\n- AG Grid with typed column definitions\n- OpenLayers with proper lifecycle management\n\nWhen writing code:\n- Use strict TypeScript with generics and discriminated unions\n- Keep side effects in sagas, not components\n- Use typed selectors and normalized Redux state\n- Follow Redux-Saga patterns: cancellation, error handling, takeLatest/takeEvery\n- Use MUI sx prop with theme tokens, avoid inline styles\n- Memoize AG Grid renderers and use typed column defs\n- Manage OpenLayers map state and event listeners properly\n- Prefer incremental refactors over broad rewrites\n- Request relevant files first, propose minimal diffs, explain risks"
+    },
+    {
+      "title": "Code Review",
+      "provider": "ollama",
+      "model": "llama3.1:8b",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 16384,
+      "temperature": 0.3,
+      "systemMessage": "You are a senior code reviewer focusing on:\n- Correctness and edge cases\n- Redux-Saga lifecycle and error handling\n- MUI accessibility and theme usage\n- AG Grid performance and memoization\n- OpenLayers lifecycle cleanup and event listener safety\n- TypeScript type safety (avoid 'any')\n- React best practices and performance\n\nProvide actionable, specific feedback with code examples."
+    },
+    {
+      "title": "Documentation",
+      "provider": "ollama",
+      "model": "llama3.1:8b",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 16384,
+      "temperature": 0.5,
+      "systemMessage": "You are a technical documentation specialist. Generate clear, concise documentation for:\n- React components and hooks\n- Redux actions, reducers, and sagas\n- TypeScript types and interfaces\n- API integrations\n- Architecture decisions\n\nFocus on clarity, examples, and maintainability."
+    },
+    {
+      "title": "Deep Analysis",
+      "provider": "ollama",
+      "model": "qwen2.5-coder:14b",
+      "apiBase": "http://localhost:11434",
+      "contextLength": 16384,
+      "temperature": 0.6,
+      "systemMessage": "You are an architecture and refactoring expert. Analyze codebases for:\n- Multi-file refactoring opportunities\n- Architecture improvements\n- Performance optimizations\n- Type safety enhancements\n- Redux state normalization\n- Saga pattern improvements\n\nProvide comprehensive analysis with minimal, low-risk refactoring plans."
+    }
+  ],
+  "customCommands": [],
+  "tabAutocompleteModel": {
+    "title": "Fast Autocomplete",
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b",
+    "apiBase": "http://localhost:11434"
+  },
+  "allowAnonymousTelemetry": false,
+  "embeddingsProvider": {
+    "provider": "ollama",
+    "model": "qwen2.5-coder:14b",
+    "apiBase": "http://localhost:11434"
+  },
+  "contextProviders": [
+    {
+      "name": "codebase",
+      "params": {}
+    },
+    {
+      "name": "github",
+      "params": {}
+    }
+  ]
+}
