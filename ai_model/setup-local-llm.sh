@@ -1679,6 +1679,17 @@ setup_vscode_extensions() {
     
     local installed=0
     local skipped=0
+    local certificate_instructions_shown=false
+    local certificate_settings_updated=false
+    
+    # Configure VS Code settings once for certificate issues (before loop)
+    local vscode_settings_dir=""
+    if [[ "$(uname)" == "Darwin" ]]; then
+      vscode_settings_dir="$HOME/Library/Application Support/Code/User"
+    else
+      vscode_settings_dir="$HOME/.config/Code/User"
+    fi
+    
     for ext in "${selected_extensions[@]}"; do
       # Check if extension is already installed
       if is_extension_installed "$ext"; then
@@ -1703,28 +1714,80 @@ setup_vscode_extensions() {
       # Check for certificate errors
       if [[ $install_exit_code -ne 0 ]] && echo "$install_output" | grep -qiE "(self.?signed|certificate|cert|tls|ssl)"; then
         log_warn "Certificate error detected for $ext"
-        print_warn "Certificate validation error (likely corporate proxy/firewall)"
-        print_info "Attempting to install with certificate validation disabled..."
         
-        # Retry with NODE_TLS_REJECT_UNAUTHORIZED=0 (temporary, only for this command)
-        set +e
-        install_output=$(NODE_TLS_REJECT_UNAUTHORIZED=0 code --install-extension "$ext" 2>&1)
-        install_exit_code=$?
-        set -e
-        
-        echo "$install_output" >> "$LOG_FILE" 2>/dev/null || true
-        
-        if [ $install_exit_code -eq 0 ]; then
-          print_success "$ext installed (certificate validation bypassed)"
-          print_warn "⚠️  Certificate validation was disabled for this installation"
-          print_info "To fix properly, add your corporate CA certificate to the system keychain"
-          ((installed++))
-        else
-          log_error "Failed to install $ext even with certificate validation disabled"
-          if [[ -n "$install_output" ]]; then
-            echo "$install_output" | sed 's/^/  /'
+        # Update VS Code settings once (first certificate error)
+        if [[ "$certificate_settings_updated" == "false" ]]; then
+          print_warn "Certificate validation error detected (likely corporate proxy/firewall)"
+          print_info "Configuring VS Code settings to handle certificate issues..."
+          
+          if [[ -d "$vscode_settings_dir" ]]; then
+            local settings_file="$vscode_settings_dir/settings.json"
+            
+            # Backup existing settings
+            if [[ -f "$settings_file" ]]; then
+              cp "$settings_file" "${settings_file}.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+            fi
+            
+            # Update settings using jq if available
+            if command -v jq &>/dev/null && [[ -f "$settings_file" ]]; then
+              # Merge in the http.proxyStrictSSL setting
+              local updated_settings=$(jq '. + {"http.proxyStrictSSL": false}' "$settings_file" 2>/dev/null)
+              if [[ -n "$updated_settings" ]]; then
+                echo "$updated_settings" > "$settings_file"
+                certificate_settings_updated=true
+                log_info "Updated VS Code settings: http.proxyStrictSSL = false"
+                print_success "VS Code settings updated"
+              fi
+            elif [[ ! -f "$settings_file" ]]; then
+              # Create new settings file
+              mkdir -p "$vscode_settings_dir"
+              echo '{"http.proxyStrictSSL": false}' > "$settings_file"
+              certificate_settings_updated=true
+              log_info "Created VS Code settings with http.proxyStrictSSL = false"
+              print_success "VS Code settings created"
+            fi
+            
+            if [[ "$certificate_settings_updated" == "true" ]]; then
+              print_info "⚠️  You may need to restart VS Code for this setting to take effect"
+            fi
           fi
         fi
+        
+        # Show instructions only once
+        if [[ "$certificate_instructions_shown" == "false" ]]; then
+          certificate_instructions_shown=true
+          log_error "Failed to install extensions due to certificate issues"
+          echo ""
+          print_warn "⚠️  Certificate validation is blocking extension installation"
+          echo ""
+          print_info "📋 To fix this, choose one of the following options:"
+          echo ""
+          echo "  ${BOLD}Option 1: Install via VS Code UI (Recommended)${NC}"
+          echo "    1. Open VS Code"
+          echo "    2. Press ${BOLD}Cmd+Shift+X${NC} (or ${BOLD}Ctrl+Shift+X${NC}) to open Extensions"
+          echo "    3. Search for each extension and click ${BOLD}Install${NC}"
+          echo ""
+          echo "  ${BOLD}Option 2: Configure VS Code to disable strict SSL${NC}"
+          if [[ "$certificate_settings_updated" == "true" ]]; then
+            echo "    ✓ Settings already updated - restart VS Code and try again"
+          else
+            echo "    1. Open VS Code"
+            echo "    2. Press ${BOLD}Cmd+,${NC} (or ${BOLD}Ctrl+,${NC}) to open Settings"
+            echo "    3. Search for: ${CYAN}http.proxyStrictSSL${NC}"
+            echo "    4. Uncheck the option (set to false)"
+            echo "    5. Restart VS Code and try installing extensions again"
+          fi
+          echo ""
+          echo "  ${BOLD}Option 3: Add corporate certificate to macOS Keychain${NC}"
+          echo "    1. Get your corporate CA certificate"
+          echo "    2. Double-click to open in Keychain Access"
+          echo "    3. Add to 'System' keychain and trust the certificate"
+          echo ""
+          echo "  ${CYAN}Affected extensions:${NC}"
+        fi
+        
+        # List the failed extension
+        echo "    - ${YELLOW}$ext${NC}"
       elif [ $install_exit_code -eq 0 ]; then
         print_success "$ext installed"
         ((installed++))
