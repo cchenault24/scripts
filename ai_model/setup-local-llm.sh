@@ -1669,6 +1669,14 @@ setup_vscode_extensions() {
   )
   
   if [[ ${#selected_extensions[@]} -gt 0 ]]; then
+    # Double-check that code command is available
+    if ! command -v code &>/dev/null; then
+      log_error "VS Code CLI (code) command not found, cannot install extensions"
+      print_warn "VS Code CLI not available. Skipping extension installation."
+      VSCODE_EXTENSIONS_INSTALLED=false
+      return 1
+    fi
+    
     local installed=0
     local skipped=0
     for ext in "${selected_extensions[@]}"; do
@@ -1682,9 +1690,12 @@ setup_vscode_extensions() {
       # Install only if not already installed
       # Capture install output and exit code separately
       # This prevents tee failures from masking successful installs
+      # Use set +e temporarily to prevent script exit on command failure
       local install_output install_exit_code
+      set +e
       install_output=$(code --install-extension "$ext" 2>&1)
       install_exit_code=$?
+      set -e
       
       # Log output to file, but don't echo to stdout to avoid duplicates
       echo "$install_output" >> "$LOG_FILE" 2>/dev/null || true
