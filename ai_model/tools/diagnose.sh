@@ -8,7 +8,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$HOME/.local-llm-setup"
-STATE_FILE="$STATE_DIR/state.json"
 LOG_FILE="$STATE_DIR/diagnose.log"
 
 # Colors

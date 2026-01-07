@@ -8,7 +8,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$HOME/.local-llm-setup"
-STATE_FILE="$STATE_DIR/state.json"
 LOG_FILE="$STATE_DIR/update.log"
 
 # Colors
@@ -76,6 +75,21 @@ backup_continue_config() {
   return 0
 }
 
+# Check if Ollama needs updating
+check_ollama_update() {
+  if ! command -v brew &>/dev/null; then
+    return 1
+  fi
+  
+  # Check if Ollama is outdated
+  local outdated=$(brew outdated ollama 2>/dev/null || echo "")
+  if [[ -n "$outdated" ]]; then
+    return 0  # Update available
+  else
+    return 1  # Already up to date
+  fi
+}
+
 # Update Ollama
 update_ollama() {
   print_header "🔄 Updating Ollama"
@@ -87,6 +101,12 @@ update_ollama() {
   
   local current_version=$(ollama --version 2>/dev/null | head -n 1 || echo "unknown")
   print_info "Current version: $current_version"
+  
+  # Check if update is available
+  if ! check_ollama_update; then
+    print_success "Ollama is already up to date"
+    return 0
+  fi
   
   if prompt_yes_no "Update Ollama to latest version?" "y"; then
     print_info "Updating Ollama..."
@@ -113,6 +133,59 @@ update_ollama() {
   fi
 }
 
+# Check which models need updating
+# Note: Ollama doesn't have a dry-run option, so we check by attempting to pull
+# and parsing the output. Models that are up to date won't download anything new.
+check_models_for_updates() {
+  local models="$1"
+  local models_needing_update=()
+  local models_up_to_date=()
+  
+  while IFS= read -r model; do
+    if [[ -n "$model" ]]; then
+      print_info "Checking $model..."
+      # Attempt to pull and capture output
+      # Redirect stderr to stdout to capture all messages
+      local pull_output=$(ollama pull "$model" 2>&1 | tee -a "$LOG_FILE")
+      local pull_exit=$?
+      
+      # Check if output indicates model is already up to date
+      # Ollama typically says "already up to date" or shows no download progress
+      if echo "$pull_output" | grep -qiE "(already up to date|up to date)"; then
+        models_up_to_date+=("$model")
+      elif [[ $pull_exit -eq 0 ]]; then
+        # Pull succeeded - check if any actual data was downloaded
+        # If we see download progress (pulling, downloading, writing, verifying with progress bars),
+        # the model was updated. Otherwise it was already up to date.
+        if echo "$pull_output" | grep -qiE "pulling.*[0-9]+.*[0-9]+.*[GBMB]"; then
+          # Found download progress with size indicators
+          models_needing_update+=("$model")
+        elif echo "$pull_output" | grep -qiE "(downloading|writing|verifying sha256)"; then
+          # Found download-related messages
+          models_needing_update+=("$model")
+        else
+          # No download activity means it was already up to date
+          models_up_to_date+=("$model")
+        fi
+      else
+        # Pull failed - might need update or there was an error
+        # Assume it needs update for now
+        models_needing_update+=("$model")
+      fi
+    fi
+  done <<< "$models"
+  
+  # Print status for models that are up to date (but only if we're checking)
+  if [[ ${#models_up_to_date[@]} -gt 0 ]]; then
+    for model in "${models_up_to_date[@]}"; do
+      print_info "✓ $model is already up to date"
+    done
+  fi
+  
+  # Return the list as a newline-separated string
+  printf '%s\n' "${models_needing_update[@]}"
+}
+
 # Update models
 update_models() {
   print_header "🔄 Updating Models"
@@ -125,7 +198,9 @@ update_models() {
   fi
   
   local model_count=$(echo "$models" | wc -l | xargs)
-  print_info "Found $model_count model(s) to update"
+  print_info "Found $model_count installed model(s)"
+  echo ""
+  print_info "Note: Ollama will automatically skip models that are already up to date."
   echo ""
   
   if ! prompt_yes_no "Update all installed models? (This may take a while)" "y"; then
@@ -135,14 +210,25 @@ update_models() {
   
   local updated=0
   local failed=0
+  local skipped=0
   
   while IFS= read -r model; do
     if [[ -n "$model" ]]; then
       print_info "Updating $model..."
       
-      if ollama pull "$model" 2>&1 | tee -a "$LOG_FILE"; then
-        print_success "$model updated"
-        ((updated++))
+      # Capture pull output to check if model was actually updated
+      local pull_output=$(ollama pull "$model" 2>&1 | tee -a "$LOG_FILE")
+      local pull_exit=$?
+      
+      if [[ $pull_exit -eq 0 ]]; then
+        # Check if model was actually updated or already up to date
+        if echo "$pull_output" | grep -qiE "(already up to date|up to date)"; then
+          print_info "$model is already up to date"
+          ((skipped++))
+        else
+          print_success "$model updated"
+          ((updated++))
+        fi
       else
         print_error "Failed to update $model"
         ((failed++))
@@ -152,7 +238,12 @@ update_models() {
   done <<< "$models"
   
   echo ""
-  print_success "Updated $updated model(s)"
+  if [[ $updated -gt 0 ]]; then
+    print_success "Updated $updated model(s)"
+  fi
+  if [[ $skipped -gt 0 ]]; then
+    print_info "Skipped $skipped model(s) (already up to date)"
+  fi
   if [[ $failed -gt 0 ]]; then
     print_warn "Failed to update $failed model(s)"
   fi

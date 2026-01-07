@@ -21,7 +21,6 @@ set -euo pipefail
 
 # Script metadata
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 STATE_DIR="$HOME/.local-llm-setup"
 STATE_FILE="$STATE_DIR/state.json"
 LOG_FILE="$STATE_DIR/setup.log"
@@ -232,8 +231,6 @@ format_extension_for_gum() {
   local name_width="${4:-30}"  # Default width for name column
   
   local suffix=""
-  
-  local suffix=""
   if [[ "$is_installed" == "true" ]]; then
     suffix=" (installed)"
   fi
@@ -289,16 +286,17 @@ detect_hardware() {
   print_header "🔍 Hardware Detection"
   
   # CPU architecture
-  local cpu_brand=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Unknown")
-  local cpu_arch=$(uname -m)
-  local cpu_cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "0")
+  local cpu_brand cpu_arch cpu_cores ram_bytes ram_gb disk_available
+  cpu_brand=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Unknown")
+  cpu_arch=$(uname -m)
+  cpu_cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "0")
   
   # RAM detection
-  local ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
-  local ram_gb=$((ram_bytes / 1024 / 1024 / 1024))
+  ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
+  ram_gb=$((ram_bytes / 1024 / 1024 / 1024))
   
   # Disk space
-  local disk_available=$(df -h "$HOME" | awk 'NR==2 {print $4}' | sed 's/[^0-9.]//g' || echo "0")
+  disk_available=$(df -h "$HOME" | awk 'NR==2 {print $4}' | sed 's/[^0-9.]//g' || echo "0")
   
   print_info "CPU: $cpu_brand"
   print_info "Architecture: $cpu_arch"
@@ -399,9 +397,11 @@ configure_metal_acceleration() {
   print_header "🎮 Configuring Metal GPU Acceleration"
   
   # Check if Metal framework is available (macOS 10.13+)
-  local macos_version=$(sw_vers -productVersion 2>/dev/null || echo "0.0.0")
-  local major_version=$(echo "$macos_version" | cut -d. -f1)
-  local minor_version=$(echo "$macos_version" | cut -d. -f2)
+  local macos_version major_version minor_version
+  macos_version=$(sw_vers -productVersion 2>/dev/null || echo "0.0.0")
+  IFS='.' read -r major_version minor_version _ <<< "$macos_version"
+  major_version=${major_version:-0}
+  minor_version=${minor_version:-0}
   
   if [[ $major_version -lt 10 ]] || [[ $major_version -eq 10 && $minor_version -lt 13 ]]; then
     log_warn "Metal requires macOS 10.13+. Detected: $macos_version"
@@ -625,6 +625,43 @@ configure_ollama_service() {
   fi
 }
 
+# Get list of installed models (cached to avoid multiple calls)
+get_installed_models() {
+  # Use a global cache variable to avoid multiple ollama list calls
+  if [[ -z "${_INSTALLED_MODELS_CACHE:-}" ]]; then
+    _INSTALLED_MODELS_CACHE=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  fi
+  echo "$_INSTALLED_MODELS_CACHE"
+}
+
+# Check if a specific model is installed
+is_model_installed() {
+  local model="$1"
+  local installed_models
+  installed_models=$(get_installed_models)
+  echo "$installed_models" | grep -q "^${model}$"
+}
+
+# Get list of installed VS Code extensions (cached to avoid multiple calls)
+get_installed_extensions() {
+  # Use a global cache variable to avoid multiple code --list-extensions calls
+  if [[ -z "${_INSTALLED_EXTENSIONS_CACHE:-}" ]] && command -v code &>/dev/null; then
+    _INSTALLED_EXTENSIONS_CACHE=$(code --list-extensions 2>/dev/null || echo "")
+  fi
+  echo "${_INSTALLED_EXTENSIONS_CACHE:-}"
+}
+
+# Check if a specific VS Code extension is installed
+is_extension_installed() {
+  local ext_id="$1"
+  local installed_extensions
+  installed_extensions=$(get_installed_extensions)
+  if [[ -z "$installed_extensions" ]]; then
+    return 1
+  fi
+  echo "$installed_extensions" | grep -q "^${ext_id}$"
+}
+
 # Model eligibility check
 is_model_eligible() {
   local model="$1"
@@ -650,9 +687,16 @@ validate_model_exists() {
   fi
   
   # Check if model is already installed locally
-  if ollama list 2>/dev/null | grep -q "^${model}"; then
+  if is_model_installed "$model"; then
     print_success "Model $model is already installed locally"
     return 0
+  fi
+  
+  # Validate model name format first (cheaper than ollama show)
+  if ! [[ "$model" =~ ^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$ ]]; then
+    print_error "Invalid model name format. Expected format: modelname:tag or modelname"
+    print_info "Example: codellama:13b or llama3.1:8b"
+    return 1
   fi
   
   # Quick check: try to get model info (works for locally installed models)
@@ -663,23 +707,10 @@ validate_model_exists() {
   fi
   
   # For models not yet installed, we can't verify existence without downloading
-  # So we'll do a lightweight format validation during prompt phase
-  # Full validation will happen during installation
-  if [[ "$model" =~ ^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$ ]]; then
-    print_success "Model name format is valid: $model"
-    print_info "Model availability will be verified during installation."
-    return 0
-  else
-    print_error "Invalid model name format. Expected format: modelname:tag or modelname"
-    print_info "Example: codellama:13b or llama3.1:8b"
-    return 1
-  fi
-  
-  # If we get here, model validation failed
-  print_error "Model $model not found in Ollama library"
-  print_info "Tip: Check available models at https://ollama.com/library"
-  print_info "Or run 'ollama list' to see locally installed models"
-  return 1
+  # Format is valid, so accept it - full validation will happen during installation
+  print_success "Model name format is valid: $model"
+  print_info "Model availability will be verified during installation."
+  return 0
 }
 
 # Check if a model is in the approved list
@@ -1071,7 +1102,7 @@ install_model() {
   log_info "Installing model: $model (Ollama auto-optimizes for Apple Silicon)"
   
   # Check if model is already installed
-  if ollama list 2>/dev/null | grep -q "^${model}"; then
+  if is_model_installed "$model"; then
     print_success "$model already installed, skipping download"
     INSTALLED_MODELS+=("$model")
     return 0
@@ -1340,7 +1371,7 @@ resolve_installed_model() {
   local model="$1"
   
   # Check if model is installed
-  if ollama list 2>/dev/null | grep -q "^${model}"; then
+  if is_model_installed "$model"; then
     echo "$model"
     return 0
   fi
@@ -1369,45 +1400,24 @@ generate_continue_config() {
   print_header "📝 Generating Continue.dev Configuration"
   
   local continue_dir="$HOME/.continue"
-  local config_file="$continue_dir/config.json"
+  local config_file="$continue_dir/config.yaml"
   
   mkdir -p "$continue_dir"
   
+  # Backup existing config if it exists
+  if [[ -f "$config_file" ]]; then
+    local backup_file="${config_file}.backup-$(date +%Y%m%d-%H%M%S)"
+    cp "$config_file" "$backup_file"
+    print_info "Backed up existing config to: $backup_file"
+    log_info "Backed up existing config to: $backup_file"
+  fi
+  
   # Determine model assignments by role (using base names)
   local coding_model_base="${SELECTED_MODELS[0]}"
-  local review_model_base=""
-  local docs_model_base=""
-  local analysis_model_base=""
   local autocomplete_model_base=""
   
   # Assign models to roles (optimized for coding tasks)
   for model in "${SELECTED_MODELS[@]}"; do
-    # Review model: prefer codestral for code review, otherwise use secondary
-    if [[ -z "$review_model_base" && "$model" != "$coding_model_base" ]]; then
-      review_model_base="$model"
-    fi
-    # Prefer codestral for review if available (excellent for code review)
-    if [[ "$model" == "codestral:22b" ]]; then
-      review_model_base="$model"
-    fi
-    
-    # Docs model: prefer llama3.1:8b (good for documentation), fallback to any available
-    if [[ -z "$docs_model_base" && "$model" == "llama3.1:8b" ]]; then
-      docs_model_base="$model"
-    fi
-    if [[ -z "$docs_model_base" && "$model" != "$coding_model_base" ]]; then
-      docs_model_base="$model"
-    fi
-    
-    # Analysis model: prefer largest available (70b > 22b > 14b)
-    if [[ "$model" == "llama3.1:70b" ]]; then
-      analysis_model_base="$model"
-    elif [[ -z "$analysis_model_base" && "$model" == "codestral:22b" ]]; then
-      analysis_model_base="$model"
-    elif [[ -z "$analysis_model_base" && "$model" == "qwen2.5-coder:14b" ]]; then
-      analysis_model_base="$model"
-    fi
-    
     # Autocomplete: prefer smallest/fastest (7b > 8b > others)
     if [[ "$model" == "qwen2.5-coder:7b" ]]; then
       autocomplete_model_base="$model"
@@ -1420,123 +1430,76 @@ generate_continue_config() {
   
   # Resolve actual installed model names (may be optimized variants)
   local coding_model=$(resolve_installed_model "$coding_model_base")
-  local review_model=$(resolve_installed_model "${review_model_base:-$coding_model_base}")
-  local docs_model=$(resolve_installed_model "${docs_model_base:-$coding_model_base}")
-  local analysis_model=$(resolve_installed_model "${analysis_model_base:-$coding_model_base}")
   local autocomplete_model=$(resolve_installed_model "${autocomplete_model_base:-$coding_model_base}")
   
   # Defaults
-  review_model="${review_model:-$coding_model}"
-  docs_model="${docs_model:-$coding_model}"
-  analysis_model="${analysis_model:-$coding_model}"
   autocomplete_model="${autocomplete_model:-$coding_model}"
   
-  # Get tuning parameters (extract values from JSON)
-  local coding_tune=$(tune_model "$coding_model" "$HARDWARE_TIER" "coding")
-  local review_tune=$(tune_model "$review_model" "$HARDWARE_TIER" "code-review")
-  local docs_tune=$(tune_model "$docs_model" "$HARDWARE_TIER" "documentation")
-  local analysis_tune=$(tune_model "$analysis_model" "$HARDWARE_TIER" "deep-analysis")
+  # Generate friendly model names
+  local coding_model_name
+  case "$coding_model" in
+    "qwen2.5-coder:14b") coding_model_name="Qwen2.5-Coder 14B" ;;
+    "qwen2.5-coder:7b") coding_model_name="Qwen2.5-Coder 7B" ;;
+    "llama3.1:8b") coding_model_name="Llama 3.1 8B" ;;
+    "llama3.1:70b") coding_model_name="Llama 3.1 70B" ;;
+    "codestral:22b") coding_model_name="Codestral 22B" ;;
+    *) coding_model_name="${coding_model%%:*}" ;;
+  esac
   
-  # Extract values using jq if available, otherwise use grep
-  local coding_ctx coding_temp review_temp docs_temp analysis_temp
+  local autocomplete_model_name
+  case "$autocomplete_model" in
+    "qwen2.5-coder:7b") autocomplete_model_name="Qwen2.5-Coder 7B" ;;
+    "qwen2.5-coder:14b") autocomplete_model_name="Qwen2.5-Coder 14B" ;;
+    "llama3.1:8b") autocomplete_model_name="Llama 3.1 8B" ;;
+    *) autocomplete_model_name="${autocomplete_model%%:*}" ;;
+  esac
   
-  if command -v jq &>/dev/null; then
-    coding_ctx=$(echo "$coding_tune" | jq -r '.context_size')
-    coding_temp=$(echo "$coding_tune" | jq -r '.temperature')
-    review_temp=$(echo "$review_tune" | jq -r '.temperature')
-    docs_temp=$(echo "$docs_tune" | jq -r '.temperature')
-    analysis_temp=$(echo "$analysis_tune" | jq -r '.temperature')
-  else
-    coding_ctx=$(echo "$coding_tune" | grep -o '"context_size": [0-9]*' | grep -o '[0-9]*' || echo "16384")
-    coding_temp=$(echo "$coding_tune" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.7")
-    review_temp=$(echo "$review_tune" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.3")
-    docs_temp=$(echo "$docs_tune" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.5")
-    analysis_temp=$(echo "$analysis_tune" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.6")
+  # Generate config YAML
+  local config_yaml=$(cat <<EOF
+name: Local Config
+version: 1.0.0
+schema: v1
+models:
+  - name: $coding_model_name
+    provider: ollama
+    model: $coding_model
+    roles:
+      - chat
+      - edit
+      - apply
+EOF
+  )
+  
+  # Add autocomplete model if it's different from the main model
+  if [[ "$autocomplete_model" != "$coding_model" ]]; then
+    config_yaml+=$(cat <<EOF
+
+  - name: $autocomplete_model_name
+    provider: ollama
+    model: $autocomplete_model
+    roles:
+      - autocomplete
+EOF
+    )
   fi
   
-  # System prompts for stack-specific guidance (escape for JSON)
-  local coding_system="You are an expert React + TypeScript developer specializing in:\\n- React with TypeScript (strict typing, no 'any')\\n- Redux + Redux-Saga (side effects in sagas, typed selectors)\\n- Material UI (MUI) with theme-first styling\\n- AG Grid with typed column definitions\\n- OpenLayers with proper lifecycle management\\n\\nWhen writing code:\\n- Use strict TypeScript with generics and discriminated unions\\n- Keep side effects in sagas, not components\\n- Use typed selectors and normalized Redux state\\n- Follow Redux-Saga patterns: cancellation, error handling, takeLatest/takeEvery\\n- Use MUI sx prop with theme tokens, avoid inline styles\\n- Memoize AG Grid renderers and use typed column defs\\n- Manage OpenLayers map state and event listeners properly\\n- Prefer incremental refactors over broad rewrites\\n- Request relevant files first, propose minimal diffs, explain risks"
-  
-  local review_system="You are a senior code reviewer focusing on:\\n- Correctness and edge cases\\n- Redux-Saga lifecycle and error handling\\n- MUI accessibility and theme usage\\n- AG Grid performance and memoization\\n- OpenLayers lifecycle cleanup and event listener safety\\n- TypeScript type safety (avoid 'any')\\n- React best practices and performance\\n\\nProvide actionable, specific feedback with code examples."
-  
-  local docs_system="You are a technical documentation specialist. Generate clear, concise documentation for:\\n- React components and hooks\\n- Redux actions, reducers, and sagas\\n- TypeScript types and interfaces\\n- API integrations\\n- Architecture decisions\\n\\nFocus on clarity, examples, and maintainability."
-  
-  local analysis_system="You are an architecture and refactoring expert. Analyze codebases for:\\n- Multi-file refactoring opportunities\\n- Architecture improvements\\n- Performance optimizations\\n- Type safety enhancements\\n- Redux state normalization\\n- Saga pattern improvements\\n\\nProvide comprehensive analysis with minimal, low-risk refactoring plans."
-  
-  # Generate config JSON
-  local config_json=$(cat <<EOF
-{
-  "models": [
-    {
-      "title": "Coding Assistant",
-      "provider": "ollama",
-      "model": "$coding_model",
-      "apiBase": "http://localhost:11434",
-      "contextLength": ${coding_ctx:-16384},
-      "temperature": ${coding_temp:-0.7},
-      "systemMessage": "$coding_system"
-    },
-    {
-      "title": "Code Review",
-      "provider": "ollama",
-      "model": "$review_model",
-      "apiBase": "http://localhost:11434",
-      "contextLength": ${coding_ctx:-16384},
-      "temperature": ${review_temp:-0.3},
-      "systemMessage": "$review_system"
-    },
-    {
-      "title": "Documentation",
-      "provider": "ollama",
-      "model": "$docs_model",
-      "apiBase": "http://localhost:11434",
-      "contextLength": ${coding_ctx:-16384},
-      "temperature": ${docs_temp:-0.5},
-      "systemMessage": "$docs_system"
-    },
-    {
-      "title": "Deep Analysis",
-      "provider": "ollama",
-      "model": "$analysis_model",
-      "apiBase": "http://localhost:11434",
-      "contextLength": ${coding_ctx:-16384},
-      "temperature": ${analysis_temp:-0.6},
-      "systemMessage": "$analysis_system"
-    }
-  ],
-  "customCommands": [],
-  "tabAutocompleteModel": {
-    "title": "Fast Autocomplete",
-    "provider": "ollama",
-    "model": "$autocomplete_model",
-    "apiBase": "http://localhost:11434"
-  },
-  "allowAnonymousTelemetry": false,
-  "embeddingsProvider": {
-    "provider": "ollama",
-    "model": "$coding_model",
-    "apiBase": "http://localhost:11434"
-  },
-  "contextProviders": [
-    {
-      "name": "codebase",
-      "params": {}
-    },
-    {
-      "name": "github",
-      "params": {}
-    }
-  ]
-}
+  # Add embeddings model (use coding model for embeddings)
+  config_yaml+=$(cat <<EOF
+
+  - name: Nomic Embed
+    provider: ollama
+    model: nomic-embed-text:latest
+    roles:
+      - embed
 EOF
   )
   
   # Write config
-  echo "$config_json" > "$config_file"
+  echo "$config_yaml" > "$config_file"
   print_success "Continue.dev config generated: $config_file"
   log_info "Continue.dev config written to $config_file"
   
-  CONTINUE_PROFILES=("coding" "code-review" "documentation" "deep-analysis")
+  CONTINUE_PROFILES=("chat" "edit" "apply" "autocomplete")
 }
 
 # VS Code extensions
@@ -1570,7 +1533,7 @@ setup_vscode_extensions() {
     local skipped=0
     for ext in "${selected_extensions[@]}"; do
       # Check if extension is already installed
-      if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
+      if is_extension_installed "$ext"; then
         print_info "$ext already installed, skipping"
         ((skipped++))
         continue
@@ -1625,6 +1588,350 @@ EOF
   
   echo "$extensions_json" > "$vscode_dir/extensions.json"
   print_success "Extension recommendations saved to $vscode_dir/extensions.json"
+}
+
+# Check if Continue CLI is installed
+check_continue_cli() {
+  if command -v cn &>/dev/null; then
+    return 0
+  elif command -v npx &>/dev/null && npx --yes @continuedev/cli --version &>/dev/null 2>&1; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Install Continue CLI (optional)
+install_continue_cli() {
+  if check_continue_cli; then
+    print_success "Continue CLI found"
+    return 0
+  fi
+  
+  if ! command -v npm &>/dev/null; then
+    print_warn "npm not found. Continue CLI requires Node.js/npm"
+    print_info "Install Node.js from https://nodejs.org/ to use Continue CLI"
+    return 1
+  fi
+  
+  print_info "Continue CLI not found"
+  if prompt_yes_no "Install Continue CLI (cn) for better verification and setup?" "y"; then
+    print_info "Installing @continuedev/cli globally..."
+    if npm install -g @continuedev/cli 2>&1 | tee -a "$LOG_FILE"; then
+      print_success "Continue CLI installed"
+      log_info "Continue CLI installed successfully"
+      return 0
+    else
+      log_warn "Failed to install Continue CLI"
+      print_warn "Continue CLI installation failed, but setup can continue"
+      return 1
+    fi
+  else
+    print_info "Skipping Continue CLI installation"
+    return 1
+  fi
+}
+
+# Configure Continue.dev models from installed Ollama models
+configure_continue_models_from_ollama() {
+  local config_file="${1:-$HOME/.continue/config.yaml}"
+  local continue_dir="$HOME/.continue"
+  
+  mkdir -p "$continue_dir"
+  
+  # Check if Ollama is running
+  if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+    print_error "Ollama service is not running"
+    print_info "Start it with: brew services start ollama"
+    return 1
+  fi
+  
+  # Get installed models
+  local installed_models
+  installed_models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  
+  if [[ -z "$installed_models" ]]; then
+    print_warn "No Ollama models installed"
+    print_info "Install models with: ollama pull <model-name>"
+    return 1
+  fi
+  
+  # Filter out embedding models and separate coding models
+  local coding_models=()
+  local embed_model=""
+  
+  while IFS= read -r model; do
+    if [[ -n "$model" ]]; then
+      if [[ "$model" == *"embed"* ]] || [[ "$model" == *"nomic-embed"* ]]; then
+        embed_model="$model"
+      else
+        coding_models+=("$model")
+      fi
+    fi
+  done <<< "$installed_models"
+  
+  if [[ ${#coding_models[@]} -eq 0 ]]; then
+    print_warn "No coding models found (only embedding models detected)"
+    return 1
+  fi
+  
+  print_info "Found ${#coding_models[@]} coding model(s) available"
+  echo ""
+  
+  # Let user select primary model
+  echo "Available models:"
+  local index=1
+  local selected_models=()
+  for model in "${coding_models[@]}"; do
+    echo "  $index) $model"
+    ((index++))
+  done
+  echo ""
+  
+  # Select primary model (for chat, edit, apply roles)
+  local primary_choice
+  read -p "Select primary model for chat/edit/apply (1-${#coding_models[@]}): " primary_choice
+  
+  if [[ ! "$primary_choice" =~ ^[0-9]+$ ]] || [[ $primary_choice -lt 1 || $primary_choice -gt ${#coding_models[@]} ]]; then
+    print_error "Invalid selection"
+    return 1
+  fi
+  
+  local primary_model="${coding_models[$((primary_choice-1))]}"
+  selected_models+=("$primary_model")
+  
+  # Ask if user wants to add another model for autocomplete
+  if [[ ${#coding_models[@]} -gt 1 ]]; then
+    if prompt_yes_no "Add another model for autocomplete? (recommended for faster suggestions)" "n"; then
+      echo ""
+      echo "Available models (excluding primary):"
+      local available_models=()
+      local index=1
+      for model in "${coding_models[@]}"; do
+        if [[ "$model" != "$primary_model" ]]; then
+          echo "  $index) $model"
+          available_models+=("$model")
+          ((index++))
+        fi
+      done
+      echo ""
+      
+      if [[ ${#available_models[@]} -gt 0 ]]; then
+        local autocomplete_choice
+        read -p "Select autocomplete model (1-${#available_models[@]}): " autocomplete_choice
+        
+        if [[ "$autocomplete_choice" =~ ^[0-9]+$ ]] && [[ $autocomplete_choice -ge 1 && $autocomplete_choice -le ${#available_models[@]} ]]; then
+          local autocomplete_model="${available_models[$((autocomplete_choice-1))]}"
+          selected_models+=("$autocomplete_model")
+        else
+          print_warn "Invalid selection, skipping autocomplete model"
+        fi
+      else
+        print_info "No other models available for autocomplete"
+      fi
+    fi
+  fi
+  
+  # Backup existing config
+  if [[ -f "$config_file" ]]; then
+    local backup_file="${config_file}.backup-$(date +%Y%m%d-%H%M%S)"
+    cp "$config_file" "$backup_file"
+    print_info "Backed up existing config to: $backup_file"
+    log_info "Backed up existing config to: $backup_file"
+  fi
+  
+  # Generate friendly model names
+  get_friendly_model_name() {
+    local model="$1"
+    case "$model" in
+      "qwen2.5-coder:14b") echo "Qwen2.5-Coder 14B" ;;
+      "qwen2.5-coder:7b") echo "Qwen2.5-Coder 7B" ;;
+      "llama3.1:8b") echo "Llama 3.1 8B" ;;
+      "llama3.1:70b") echo "Llama 3.1 70B" ;;
+      "codestral:22b") echo "Codestral 22B" ;;
+      *) echo "${model%%:*}" | sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g' | sed 's/-/ /g' ;;
+    esac
+  }
+  
+  # Generate config YAML
+  local primary_name=$(get_friendly_model_name "$primary_model")
+  local config_yaml=$(cat <<EOF
+name: Local Config
+version: 1.0.0
+schema: v1
+models:
+  - name: $primary_name
+    provider: ollama
+    model: $primary_model
+    roles:
+      - chat
+      - edit
+      - apply
+EOF
+  )
+  
+  # Add autocomplete model if different
+  if [[ ${#selected_models[@]} -gt 1 ]]; then
+    local autocomplete_model="${selected_models[1]}"
+    local autocomplete_name=$(get_friendly_model_name "$autocomplete_model")
+    config_yaml+=$(cat <<EOF
+
+  - name: $autocomplete_name
+    provider: ollama
+    model: $autocomplete_model
+    roles:
+      - autocomplete
+EOF
+    )
+  fi
+  
+  # Add embeddings model (use existing or default)
+  local embed_model_to_use="${embed_model:-nomic-embed-text:latest}"
+  config_yaml+=$(cat <<EOF
+
+  - name: Nomic Embed
+    provider: ollama
+    model: $embed_model_to_use
+    roles:
+      - embed
+EOF
+  )
+  
+  # Write config
+  echo "$config_yaml" > "$config_file"
+  print_success "Continue.dev config updated: $config_file"
+  log_info "Continue.dev config updated with models: ${selected_models[*]}"
+  
+  return 0
+}
+
+# Verify Continue.dev setup
+verify_continue_setup() {
+  print_header "✅ Verifying Continue.dev Setup"
+  
+  local issues=0
+  
+  # Check if Continue.dev extension is installed
+  if [[ "$VSCODE_AVAILABLE" == "true" ]]; then
+    local continue_installed=$(code --list-extensions 2>/dev/null | grep -i "Continue.continue" || echo "")
+    if [[ -n "$continue_installed" ]]; then
+      print_success "Continue.dev extension is installed"
+    else
+      print_warn "Continue.dev extension not found in installed extensions"
+      print_info "You may need to install it manually or restart VS Code"
+      ((issues++))
+    fi
+  else
+    print_warn "VS Code CLI not available, cannot verify extension installation"
+  fi
+  
+  # Check if config file exists (try YAML first, then JSON for backward compatibility)
+  local config_file="$HOME/.continue/config.yaml"
+  local config_file_json="$HOME/.continue/config.json"
+  
+  if [[ -f "$config_file" ]]; then
+    print_success "Continue.dev config file found: $config_file"
+    
+    # Validate YAML structure (basic check)
+    if grep -q "^models:" "$config_file" 2>/dev/null; then
+      print_success "Config file appears to be valid YAML"
+      
+      # Check for models (match indented YAML format)
+      local model_count
+      model_count=$(grep -c "^[[:space:]]*- name:" "$config_file" 2>/dev/null || echo "0")
+      model_count=${model_count//[^0-9]/}  # Remove all non-numeric characters
+      model_count=${model_count:-0}  # Default to 0 if empty
+      if (( model_count > 0 )); then
+        print_success "Found $model_count model(s) in config"
+      else
+        print_warn "No models configured in config file"
+        # Offer to configure models from installed Ollama models
+        if curl -s http://localhost:11434/api/tags &>/dev/null; then
+          if prompt_yes_no "Would you like to configure models from installed Ollama models?" "y"; then
+            configure_continue_models_from_ollama "$config_file"
+            # Re-check model count after configuration
+            model_count=$(grep -c "^[[:space:]]*- name:" "$config_file" 2>/dev/null || echo "0")
+            model_count=${model_count//[^0-9]/}
+            model_count=${model_count:-0}
+            if (( model_count > 0 )); then
+              print_success "Models configured successfully"
+            else
+              ((issues++))
+            fi
+          else
+            ((issues++))
+          fi
+        else
+          ((issues++))
+        fi
+      fi
+    else
+      print_warn "Config file structure may be invalid"
+      ((issues++))
+    fi
+  elif [[ -f "$config_file_json" ]]; then
+    print_warn "Found old JSON config file: $config_file_json"
+    print_info "Consider migrating to YAML format (config.yaml)"
+    # Validate JSON if jq is available
+    if command -v jq &>/dev/null; then
+      if jq empty "$config_file_json" 2>/dev/null; then
+        print_success "Config file is valid JSON"
+        
+        # Check for models
+        local model_count
+        model_count=$(jq '.models | length' "$config_file_json" 2>/dev/null || echo "0")
+        model_count=${model_count//[^0-9]/}  # Remove all non-numeric characters
+        model_count=${model_count:-0}  # Default to 0 if empty
+        if (( model_count > 0 )); then
+          print_success "Found $model_count model profile(s) in config"
+        else
+          print_warn "No models configured in config file"
+          ((issues++))
+        fi
+      else
+        print_error "Config file is not valid JSON"
+        ((issues++))
+      fi
+    fi
+  else
+    print_error "Continue.dev config file not found at $config_file or $config_file_json"
+    ((issues++))
+  fi
+  
+  # Check if Ollama is running
+  if curl -s http://localhost:11434/api/tags &>/dev/null; then
+    print_success "Ollama service is running"
+  else
+    print_warn "Ollama service is not running"
+    print_info "Start it with: brew services start ollama"
+    ((issues++))
+  fi
+  
+  # Check Continue CLI (optional but helpful)
+  if check_continue_cli; then
+    print_success "Continue CLI (cn) is available"
+    print_info "You can use 'cn' in terminal for interactive Continue workflows"
+  else
+    print_info "Continue CLI (cn) not installed (optional)"
+    if prompt_yes_no "Would you like to install Continue CLI (cn) now?" "n"; then
+      print_info "Installing @continuedev/cli globally..."
+      if npm install -g @continuedev/cli 2>&1 | tee -a "$LOG_FILE"; then
+        print_success "Continue CLI installed successfully"
+      else
+        print_warn "Continue CLI installation failed, but setup can continue"
+      fi
+    else
+      print_info "You can install it later with: npm i -g @continuedev/cli"
+    fi
+  fi
+  
+  if [[ $issues -eq 0 ]]; then
+    print_success "Continue.dev setup verified successfully"
+    return 0
+  else
+    print_warn "Found $issues issue(s) with Continue.dev setup"
+    return 1
+  fi
 }
 
 # Generate VS Code settings
@@ -1776,15 +2083,27 @@ prompt_vscode_extensions() {
   local gum_items=()
   local ext_map=()
   
-  # Calculate maximum width for extension names
+  # Get list of installed extensions once (avoid duplicate checks)
+  local installed_extensions_list
+  installed_extensions_list=$(get_installed_extensions)
+  
+  # Calculate maximum width for extension names and build parallel arrays for status
   local max_name_width=0
+  local ext_names=()
+  local ext_installed_flags=()
+  
   for ext in "${extensions[@]}"; do
     local friendly_name=$(get_extension_name "$ext")
     local is_installed=false
+    
     # Check if extension is already installed
-    if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
+    if is_extension_installed "$ext"; then
       is_installed=true
     fi
+    
+    # Store for later use
+    ext_names+=("$friendly_name")
+    ext_installed_flags+=("$is_installed")
     
     # Calculate name width
     local name_len=${#friendly_name}
@@ -1796,16 +2115,15 @@ prompt_vscode_extensions() {
   # Add padding
   max_name_width=$((max_name_width + 2))
   
+  # Build formatted items using stored data
+  local i=0
   for ext in "${extensions[@]}"; do
-    local friendly_name=$(get_extension_name "$ext")
-    local is_installed=false
-    # Check if extension is already installed
-    if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
-      is_installed=true
-    fi
+    local friendly_name="${ext_names[$i]}"
+    local is_installed="${ext_installed_flags[$i]}"
     local formatted=$(format_extension_for_gum "$ext" "$friendly_name" "$is_installed" "$max_name_width")
     gum_items+=("$formatted")
     ext_map+=("$ext")
+    ((i++))
   done
   
   # Use gum choose for multi-select
@@ -1915,14 +2233,39 @@ main() {
   detect_hardware
   check_prerequisites
   
-  # Model selection (contains prompts)
+  # Ask if user wants to install models
+  local install_models=true
   if [[ "$resume_installation" != "true" ]]; then
+    if ! prompt_yes_no "Would you like to install AI models for Continue.dev?" "y"; then
+      install_models=false
+      print_info "Skipping model installation. You can install models later by running this script again."
+      SELECTED_MODELS=()
+    fi
+  fi
+  
+  # Model selection (contains prompts)
+  if [[ "$resume_installation" != "true" && "$install_models" == "true" ]]; then
     select_models
   fi
   
-  # Prompt for VS Code extensions
-  SELECTED_EXTENSIONS=()
-  prompt_vscode_extensions
+  # Ask if user wants to install VS Code extensions
+  local install_extensions=true
+  if [[ "$VSCODE_AVAILABLE" == "true" ]]; then
+    if ! prompt_yes_no "Would you like to install recommended extensions for VS Code?" "y"; then
+      install_extensions=false
+      print_info "Skipping VS Code extension installation."
+      SELECTED_EXTENSIONS=()
+    fi
+  else
+    install_extensions=false
+    SELECTED_EXTENSIONS=()
+  fi
+  
+  # Prompt for VS Code extensions (only if user wants to install)
+  if [[ "$install_extensions" == "true" ]]; then
+    SELECTED_EXTENSIONS=()
+    prompt_vscode_extensions
+  fi
   
   # ============================================
   # PHASE 2: Begin all installations/setup
@@ -1931,32 +2274,59 @@ main() {
   echo -e "${CYAN}All configurations collected. Beginning installations and setup...${NC}"
   echo ""
   
-  # Install models
-  print_header "📥 Installing Models"
-  print_info "This may take 10-30 minutes depending on your connection..."
-  echo ""
-  
+  # Install models (only if models were selected)
   local failed_models=()
-  for model in "${SELECTED_MODELS[@]}"; do
-    if install_model "$model"; then
-      # Get the actual installed model name (may be optimized variant)
-      local installed_model=$(resolve_installed_model "$model")
-      if validate_model "$installed_model"; then
-        print_success "$installed_model ready"
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    print_header "📥 Installing Models"
+    print_info "This may take 10-30 minutes depending on your connection..."
+    echo ""
+    
+    for model in "${SELECTED_MODELS[@]}"; do
+      if install_model "$model"; then
+        # Get the actual installed model name (may be optimized variant)
+        local installed_model=$(resolve_installed_model "$model")
+        if validate_model "$installed_model"; then
+          print_success "$installed_model ready"
+        else
+          log_warn "$installed_model installed but validation failed"
+          failed_models+=("$model")
+        fi
       else
-        log_warn "$installed_model installed but validation failed"
         failed_models+=("$model")
       fi
-    else
-      failed_models+=("$model")
-    fi
-  done
+    done
+  else
+    print_info "No models selected for installation. Skipping model installation."
+  fi
   
-  # Generate configurations
-  generate_continue_config
-  setup_vscode_extensions "${SELECTED_EXTENSIONS[@]}"
+  # Generate configurations (only if models were installed)
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    generate_continue_config
+  else
+    print_info "Skipping Continue.dev configuration (no models installed)."
+  fi
+  
+  # Install VS Code extensions (only if extensions were selected)
+  if [[ ${#SELECTED_EXTENSIONS[@]} -gt 0 ]]; then
+    setup_vscode_extensions "${SELECTED_EXTENSIONS[@]}"
+  else
+    print_info "No VS Code extensions selected for installation. Skipping extension installation."
+    VSCODE_EXTENSIONS_INSTALLED=false
+  fi
   generate_vscode_settings
   copy_vscode_settings
+  
+  # Optionally install Continue CLI for better verification
+  if command -v npm &>/dev/null; then
+    install_continue_cli
+  fi
+  
+  # Verify Continue.dev setup (only if models were installed)
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    verify_continue_setup
+  else
+    print_info "Skipping Continue.dev verification (no models installed)."
+  fi
   
   # Save state
   save_state
@@ -1967,9 +2337,13 @@ main() {
   echo -e "${GREEN}${BOLD}Installation Summary:${NC}"
   echo ""
   echo -e "  ${CYAN}Hardware Tier:${NC} $TIER_LABEL"
-  echo -e "  ${CYAN}Selected Models:${NC} ${SELECTED_MODELS[*]}"
-  echo -e "  ${CYAN}Installed Models:${NC} ${INSTALLED_MODELS[*]}"
-  echo -e "  ${CYAN}Continue.dev Profiles:${NC} ${CONTINUE_PROFILES[*]}"
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    echo -e "  ${CYAN}Selected Models:${NC} ${SELECTED_MODELS[*]}"
+    echo -e "  ${CYAN}Installed Models:${NC} ${INSTALLED_MODELS[*]}"
+    echo -e "  ${CYAN}Continue.dev Profiles:${NC} ${CONTINUE_PROFILES[*]}"
+  else
+    echo -e "  ${CYAN}Models:${NC} None selected"
+  fi
   echo ""
   
   if [[ ${#failed_models[@]} -gt 0 ]]; then
@@ -1979,18 +2353,57 @@ main() {
   
   echo -e "${YELLOW}${BOLD}📋 Next Steps:${NC}"
   echo ""
-  if [[ "$VSCODE_EXTENSIONS_INSTALLED" == "true" ]]; then
-    echo "  1. Restart VS Code to activate Continue.dev extension"
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    # Check if Continue.dev extension is actually installed
+    local continue_extension_installed=false
+    if [[ "$VSCODE_AVAILABLE" == "true" ]]; then
+      local continue_check=$(code --list-extensions 2>/dev/null | grep -i "Continue.continue" || echo "")
+      if [[ -n "$continue_check" ]]; then
+        continue_extension_installed=true
+      fi
+    fi
+    
+    if [[ "$continue_extension_installed" == "true" ]] || [[ "$VSCODE_EXTENSIONS_INSTALLED" == "true" ]]; then
+      echo -e "  ${BOLD}IMPORTANT:${NC} You must ${BOLD}fully quit and restart VS Code${NC} (Cmd+Q, not just reload)"
+      echo "  for Continue.dev to detect the configuration."
+      echo ""
+      echo -e "  1. ${BOLD}Quit VS Code completely${NC} (Cmd+Q on macOS)"
+      echo -e "  2. ${BOLD}Reopen VS Code${NC}"
+      echo -e "  3. Press ${BOLD}Cmd+L${NC} (or ${BOLD}Ctrl+L${NC}) to open Continue.dev chat"
+    else
+      echo "  1. Install Continue.dev extension in VS Code:"
+      echo -e "     - Open Extensions view (${BOLD}Cmd+Shift+X${NC})"
+      echo "     - Search for 'Continue' and install 'Continue.dev' by Continue"
+      echo -e "  2. ${BOLD}Quit VS Code completely${NC} (Cmd+Q on macOS)"
+      echo -e "  3. ${BOLD}Reopen VS Code${NC}"
+      echo -e "  4. Press ${BOLD}Cmd+L${NC} (or ${BOLD}Ctrl+L${NC}) to open Continue.dev chat"
+    fi
+    echo ""
+    echo -e "  Continue.dev will automatically use the config at: ${BOLD}~/.continue/config.yaml${NC}"
+    echo ""
+    echo -e "  ${CYAN}Verification:${NC}"
+    echo -e "  - Ensure Ollama is running: ${BOLD}brew services start ollama${NC}"
+    echo -e "  - Check config: ${BOLD}ls -la ~/.continue/config.yaml${NC}"
+    echo ""
+    echo -e "  ${CYAN}Continue CLI (Optional):${NC}"
+    if check_continue_cli; then
+      echo -e "  - Continue CLI (${BOLD}cn${NC}) is installed and ready to use"
+    else
+      echo -e "  - Install: ${BOLD}npm i -g @continuedev/cli${NC}"
+      echo -e "  - Then use ${BOLD}cn${NC} in terminal for interactive workflows"
+    fi
   else
-    echo "  1. Install Continue.dev extension in VS Code (if not already installed)"
-    echo "  2. Restart VS Code"
+    echo "  To install models later, run this script again and select 'yes' when prompted."
+    echo ""
+    if [[ "$VSCODE_EXTENSIONS_INSTALLED" == "true" ]]; then
+      echo "  VS Code extensions have been installed. Restart VS Code to activate them."
+    elif [[ ${#SELECTED_EXTENSIONS[@]} -eq 0 && "$VSCODE_AVAILABLE" == "true" ]]; then
+      echo "  To install VS Code extensions later, run this script again and select 'yes' when prompted."
+    fi
   fi
   echo ""
-  echo "  Continue.dev will automatically use the generated config at:"
-  echo "  ~/.continue/config.json"
-  echo ""
   if [[ -f ".vscode/settings.json" ]]; then
-    echo "  ✓ VS Code settings automatically copied/merged to .vscode/settings.json"
+    echo -e "  ${GREEN}✓${NC} VS Code settings automatically copied/merged to .vscode/settings.json"
   fi
   echo ""
   
