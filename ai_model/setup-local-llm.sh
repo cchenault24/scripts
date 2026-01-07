@@ -1838,13 +1838,49 @@ install_continue_cli() {
   print_info "Continue CLI not found"
   if prompt_yes_no "Install Continue CLI (cn) for better verification and setup?" "y"; then
     print_info "Installing @continuedev/cli globally..."
-    if npm install -g @continuedev/cli 2>&1 | tee -a "$LOG_FILE"; then
+    
+    # Try installation first
+    set +e
+    local install_output
+    install_output=$(npm install -g @continuedev/cli 2>&1)
+    local install_exit_code=$?
+    set -e
+    
+    echo "$install_output" | tee -a "$LOG_FILE" >/dev/null 2>&1 || true
+    
+    # Check for certificate errors
+    if [[ $install_exit_code -ne 0 ]] && echo "$install_output" | grep -qiE "(self.?signed|certificate|cert|tls|ssl|UNABLE_TO_VERIFY_LEAF_SIGNATURE)"; then
+      log_warn "Certificate error detected during Continue CLI installation"
+      print_warn "Certificate validation error detected"
+      echo ""
+      
+      if prompt_yes_no "Would you like to disable strict SSL checking for npm (npm config set strict-ssl false)?" "y"; then
+        print_info "Configuring npm to disable strict SSL checking..."
+        npm config set strict-ssl false
+        log_info "npm configured: strict-ssl = false"
+        print_success "npm configured to disable strict SSL"
+        
+        # Retry installation
+        print_info "Retrying Continue CLI installation..."
+        set +e
+        install_output=$(npm install -g @continuedev/cli 2>&1)
+        install_exit_code=$?
+        set -e
+        
+        echo "$install_output" | tee -a "$LOG_FILE" >/dev/null 2>&1 || true
+      fi
+    fi
+    
+    if [[ $install_exit_code -eq 0 ]]; then
       print_success "Continue CLI installed"
       log_info "Continue CLI installed successfully"
       return 0
     else
       log_warn "Failed to install Continue CLI"
       print_warn "Continue CLI installation failed, but setup can continue"
+      if [[ -n "$install_output" ]]; then
+        echo "$install_output" | sed 's/^/  /'
+      fi
       return 1
     fi
   else
@@ -2136,10 +2172,46 @@ verify_continue_setup() {
     print_info "Continue CLI (cn) not installed (optional)"
     if prompt_yes_no "Would you like to install Continue CLI (cn) now?" "n"; then
       print_info "Installing @continuedev/cli globally..."
-      if npm install -g @continuedev/cli 2>&1 | tee -a "$LOG_FILE"; then
+      
+      # Try installation first
+      set +e
+      local install_output
+      install_output=$(npm install -g @continuedev/cli 2>&1)
+      local install_exit_code=$?
+      set -e
+      
+      echo "$install_output" | tee -a "$LOG_FILE" >/dev/null 2>&1 || true
+      
+      # Check for certificate errors
+      if [[ $install_exit_code -ne 0 ]] && echo "$install_output" | grep -qiE "(self.?signed|certificate|cert|tls|ssl|UNABLE_TO_VERIFY_LEAF_SIGNATURE)"; then
+        log_warn "Certificate error detected during Continue CLI installation"
+        print_warn "Certificate validation error detected"
+        echo ""
+        
+        if prompt_yes_no "Would you like to disable strict SSL checking for npm (npm config set strict-ssl false)?" "y"; then
+          print_info "Configuring npm to disable strict SSL checking..."
+          npm config set strict-ssl false
+          log_info "npm configured: strict-ssl = false"
+          print_success "npm configured to disable strict SSL"
+          
+          # Retry installation
+          print_info "Retrying Continue CLI installation..."
+          set +e
+          install_output=$(npm install -g @continuedev/cli 2>&1)
+          install_exit_code=$?
+          set -e
+          
+          echo "$install_output" | tee -a "$LOG_FILE" >/dev/null 2>&1 || true
+        fi
+      fi
+      
+      if [[ $install_exit_code -eq 0 ]]; then
         print_success "Continue CLI installed successfully"
       else
         print_warn "Continue CLI installation failed, but setup can continue"
+        if [[ -n "$install_output" ]]; then
+          echo "$install_output" | sed 's/^/  /'
+        fi
       fi
     else
       print_info "You can install it later with: npm i -g @continuedev/cli"
