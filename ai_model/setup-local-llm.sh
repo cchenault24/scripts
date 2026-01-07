@@ -1412,92 +1412,194 @@ generate_continue_config() {
     log_info "Backed up existing config to: $backup_file"
   fi
   
-  # Determine model assignments by role (using base names)
-  local coding_model_base="${SELECTED_MODELS[0]}"
-  local autocomplete_model_base=""
+  # Helper function to generate friendly model names
+  get_friendly_model_name() {
+    local model="$1"
+    case "$model" in
+      "qwen2.5-coder:14b") echo "Qwen2.5-Coder 14B" ;;
+      "qwen2.5-coder:7b") echo "Qwen2.5-Coder 7B" ;;
+      "llama3.1:8b") echo "Llama 3.1 8B" ;;
+      "llama3.1:70b") echo "Llama 3.1 70B" ;;
+      "codestral:22b") echo "Codestral 22B" ;;
+      *) echo "${model%%:*}" | sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g' | sed 's/-/ /g' ;;
+    esac
+  }
   
-  # Assign models to roles (optimized for coding tasks)
-  for model in "${SELECTED_MODELS[@]}"; do
-    # Autocomplete: prefer smallest/fastest (7b > 8b > others)
-    if [[ "$model" == "qwen2.5-coder:7b" ]]; then
-      autocomplete_model_base="$model"
-    elif [[ -z "$autocomplete_model_base" && "$model" == "llama3.1:8b" ]]; then
-      autocomplete_model_base="$model"
-    elif [[ -z "$autocomplete_model_base" ]]; then
-      autocomplete_model_base="$model"
+  # Separate coding models from embedding models
+  local coding_models=()
+  local embed_model=""
+  
+  # Process all selected models (guard against empty array for set -u compatibility)
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    for model_base in "${SELECTED_MODELS[@]}"; do
+      # Resolve actual installed model name (may be optimized variants)
+      local model=$(resolve_installed_model "$model_base")
+      
+      # Check if it's an embedding model
+      if [[ "$model" == *"embed"* ]] || [[ "$model" == *"nomic-embed"* ]]; then
+        embed_model="$model"
+      else
+        # Add to coding models array (avoid duplicates)
+        local found=0
+        # Guard against empty array access (fixes unbound variable error with set -u)
+        if [[ ${#coding_models[@]} -gt 0 ]]; then
+          for existing in "${coding_models[@]}"; do
+            if [[ "$existing" == "$model" ]]; then
+              found=1
+              break
+            fi
+          done
+        fi
+        if [[ $found -eq 0 ]]; then
+          coding_models+=("$model")
+        fi
+      fi
+    done
+  fi
+  
+  # If no coding models found, log warning and return
+  if [[ ${#coding_models[@]} -eq 0 ]]; then
+    print_warn "No coding models found in selected models"
+    log_warn "No coding models to add to Continue.dev config"
+    return 1
+  fi
+  
+  # Determine default model (first/largest for chat) and autocomplete model
+  local default_model="${coding_models[0]}"
+  local default_model_name=$(get_friendly_model_name "$default_model")
+  
+  # Find best autocomplete model (prefer smallest/fastest)
+  local autocomplete_model=""
+  local autocomplete_model_name=""
+  # Prefer 7b models for autocomplete (faster responses)
+  for model in "${coding_models[@]}"; do
+    if [[ "$model" == *"7b"* ]] || [[ "$model" == *":7b"* ]]; then
+      autocomplete_model="$model"
+      autocomplete_model_name=$(get_friendly_model_name "$model")
+      break
     fi
   done
+  # Fallback to 8b if no 7b found
+  if [[ -z "$autocomplete_model" ]]; then
+    for model in "${coding_models[@]}"; do
+      if [[ "$model" == *"8b"* ]] || [[ "$model" == *":8b"* ]]; then
+        autocomplete_model="$model"
+        autocomplete_model_name=$(get_friendly_model_name "$model")
+        break
+      fi
+    done
+  fi
+  # Use first model as fallback if no small model found
+  if [[ -z "$autocomplete_model" && ${#coding_models[@]} -gt 0 ]]; then
+    autocomplete_model="${coding_models[0]}"
+    autocomplete_model_name="$default_model_name"
+  fi
   
-  # Resolve actual installed model names (may be optimized variants)
-  local coding_model=$(resolve_installed_model "$coding_model_base")
-  local autocomplete_model=$(resolve_installed_model "${autocomplete_model_base:-$coding_model_base}")
-  
-  # Defaults
-  autocomplete_model="${autocomplete_model:-$coding_model}"
-  
-  # Generate friendly model names
-  local coding_model_name
-  case "$coding_model" in
-    "qwen2.5-coder:14b") coding_model_name="Qwen2.5-Coder 14B" ;;
-    "qwen2.5-coder:7b") coding_model_name="Qwen2.5-Coder 7B" ;;
-    "llama3.1:8b") coding_model_name="Llama 3.1 8B" ;;
-    "llama3.1:70b") coding_model_name="Llama 3.1 70B" ;;
-    "codestral:22b") coding_model_name="Codestral 22B" ;;
-    *) coding_model_name="${coding_model%%:*}" ;;
-  esac
-  
-  local autocomplete_model_name
-  case "$autocomplete_model" in
-    "qwen2.5-coder:7b") autocomplete_model_name="Qwen2.5-Coder 7B" ;;
-    "qwen2.5-coder:14b") autocomplete_model_name="Qwen2.5-Coder 14B" ;;
-    "llama3.1:8b") autocomplete_model_name="Llama 3.1 8B" ;;
-    *) autocomplete_model_name="${autocomplete_model%%:*}" ;;
-  esac
-  
-  # Generate config YAML
+  # Start building config YAML
   local config_yaml=$(cat <<EOF
 name: Local Config
 version: 1.0.0
 schema: v1
+
+# Default model for chat (uses first/largest model)
+defaultModel: $default_model_name
+
+# Default completion options (optimized for coding tasks)
+defaultCompletionOptions:
+  temperature: 0.7
+  maxTokens: 2048
+
+# Privacy: Disable telemetry for local-only setup
+allowAnonymousTelemetry: false
+
 models:
-  - name: $coding_model_name
-    provider: ollama
-    model: $coding_model
-    roles:
-      - chat
-      - edit
-      - apply
 EOF
   )
   
-  # Add autocomplete model if it's different from the main model
-  if [[ "$autocomplete_model" != "$coding_model" ]]; then
+  # Add all coding models with chat, edit, apply roles
+  for model in "${coding_models[@]}"; do
+    local friendly_name=$(get_friendly_model_name "$model")
+    
+    # Build roles list
+    local roles_yaml="      - chat
+      - edit
+      - apply"
+    
+    # Add autocomplete role if this is the autocomplete model
+    if [[ "$model" == "$autocomplete_model" ]]; then
+      roles_yaml="$roles_yaml
+      - autocomplete"
+    fi
+    
     config_yaml+=$(cat <<EOF
 
-  - name: $autocomplete_model_name
+  - name: $friendly_name
     provider: ollama
-    model: $autocomplete_model
+    model: $model
+    apiBase: http://localhost:11434
+    contextLength: 16384
     roles:
-      - autocomplete
+$roles_yaml
 EOF
     )
-  fi
+  done
   
-  # Add embeddings model (use coding model for embeddings)
+  # Add embeddings model (use found embedding model or default)
+  local embed_model_to_use="${embed_model:-nomic-embed-text:latest}"
   config_yaml+=$(cat <<EOF
 
   - name: Nomic Embed
     provider: ollama
-    model: nomic-embed-text:latest
+    model: $embed_model_to_use
+    apiBase: http://localhost:11434
     roles:
       - embed
+    embedOptions:
+      maxChunkSize: 512
+      maxBatchSize: 10
+EOF
+  )
+  
+  # Add autocomplete model reference (if different from default)
+  if [[ "$autocomplete_model" != "$default_model" && -n "$autocomplete_model" ]]; then
+    config_yaml+=$(cat <<EOF
+
+# Autocomplete model (optimized for fast suggestions)
+tabAutocompleteModel: $autocomplete_model_name
+EOF
+    )
+  fi
+  
+  # Add embeddings provider
+  config_yaml+=$(cat <<EOF
+
+# Embeddings provider for codebase search
+embeddingsProvider:
+  provider: ollama
+  model: $embed_model_to_use
+  apiBase: http://localhost:11434
+EOF
+  )
+  
+  # Add context providers for better code understanding
+  config_yaml+=$(cat <<EOF
+
+# Context providers for enhanced code understanding
+contextProviders:
+  - name: codebase
+  - name: code
+  - name: docs
+  - name: diff
+  - name: terminal
+  - name: problems
+  - name: folder
 EOF
   )
   
   # Write config
   echo "$config_yaml" > "$config_file"
   print_success "Continue.dev config generated: $config_file"
-  log_info "Continue.dev config written to $config_file"
+  log_info "Continue.dev config written to $config_file with ${#coding_models[@]} coding model(s)"
   
   CONTINUE_PROFILES=("chat" "edit" "apply" "autocomplete")
 }
