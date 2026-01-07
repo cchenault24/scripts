@@ -1700,7 +1700,32 @@ setup_vscode_extensions() {
       # Log output to file, but don't echo to stdout to avoid duplicates
       echo "$install_output" >> "$LOG_FILE" 2>/dev/null || true
       
-      if [ $install_exit_code -eq 0 ]; then
+      # Check for certificate errors
+      if [[ $install_exit_code -ne 0 ]] && echo "$install_output" | grep -qiE "(self.?signed|certificate|cert|tls|ssl)"; then
+        log_warn "Certificate error detected for $ext"
+        print_warn "Certificate validation error (likely corporate proxy/firewall)"
+        print_info "Attempting to install with certificate validation disabled..."
+        
+        # Retry with NODE_TLS_REJECT_UNAUTHORIZED=0 (temporary, only for this command)
+        set +e
+        install_output=$(NODE_TLS_REJECT_UNAUTHORIZED=0 code --install-extension "$ext" 2>&1)
+        install_exit_code=$?
+        set -e
+        
+        echo "$install_output" >> "$LOG_FILE" 2>/dev/null || true
+        
+        if [ $install_exit_code -eq 0 ]; then
+          print_success "$ext installed (certificate validation bypassed)"
+          print_warn "⚠️  Certificate validation was disabled for this installation"
+          print_info "To fix properly, add your corporate CA certificate to the system keychain"
+          ((installed++))
+        else
+          log_error "Failed to install $ext even with certificate validation disabled"
+          if [[ -n "$install_output" ]]; then
+            echo "$install_output" | sed 's/^/  /'
+          fi
+        fi
+      elif [ $install_exit_code -eq 0 ]; then
         print_success "$ext installed"
         ((installed++))
       else
