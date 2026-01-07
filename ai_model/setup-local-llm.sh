@@ -1318,7 +1318,45 @@ benchmark_model_performance() {
   return 1
 }
 
-# Validate model
+# Validate model (simple validation without benchmarking)
+validate_model_simple() {
+  local model="$1"
+  
+  print_info "Validating $model..."
+  log_info "Validating model: $model"
+  
+  local test_prompt="Write a simple TypeScript function that adds two numbers."
+  local start_time=$(date +%s)
+  local response
+  
+  # Test with timeout
+  if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    if [[ -n "$response" && ${#response} -gt 10 ]]; then
+      print_success "$model validated (response time: ${duration}s)"
+      log_info "Model $model validation successful (${duration}s)"
+      return 0
+    fi
+  fi
+  
+  # Retry once
+  log_warn "Validation failed for $model, retrying..."
+  sleep 2
+  
+  if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
+    if [[ -n "$response" && ${#response} -gt 10 ]]; then
+      print_success "$model validated (retry successful)"
+      return 0
+    fi
+  fi
+  
+  log_error "Validation failed for $model after retry"
+  return 1
+}
+
+# Validate model (includes benchmarking for backward compatibility)
 validate_model() {
   local model="$1"
   
@@ -2378,35 +2416,43 @@ main() {
   
   # Install models (only if models were selected)
   local failed_models=()
-  local validate_models=false
   if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
     print_header "📥 Installing Models"
     print_info "This may take 10-30 minutes depending on your connection..."
-    echo ""
-    
-    # Ask if user wants to validate and benchmark models after installation
-    if prompt_yes_no "Would you like to validate and benchmark models after installation? (adds ~2-5 minutes per model)" "y"; then
-      validate_models=true
-      print_info "Validation and benchmarking will be performed after each model installation"
-    else
-      validate_models=false
-      print_info "Skipping validation and benchmarking"
-    fi
     echo ""
     
     for model in "${SELECTED_MODELS[@]}"; do
       if install_model "$model"; then
         # Get the actual installed model name (may be optimized variant)
         local installed_model=$(resolve_installed_model "$model")
-        if [[ "$validate_models" == "true" ]]; then
-          if validate_model "$installed_model"; then
-            print_success "$installed_model ready"
+        print_success "$installed_model downloaded"
+        echo ""
+        
+        # Prompt for validation
+        if prompt_yes_no "Would you like to validate $installed_model?" "y"; then
+          if validate_model_simple "$installed_model"; then
+            print_success "$installed_model validated"
           else
-            log_warn "$installed_model installed but validation failed"
+            log_warn "$installed_model validation failed"
             failed_models+=("$model")
           fi
+          echo ""
         else
-          print_success "$installed_model installed (validation skipped)"
+          print_info "Validation skipped for $installed_model"
+          echo ""
+        fi
+        
+        # Prompt for benchmarking
+        if prompt_yes_no "Would you like to benchmark $installed_model?" "y"; then
+          if benchmark_model_performance "$installed_model"; then
+            print_success "$installed_model benchmarked"
+          else
+            log_warn "$installed_model benchmarking had issues"
+          fi
+          echo ""
+        else
+          print_info "Benchmarking skipped for $installed_model"
+          echo ""
         fi
       else
         failed_models+=("$model")
