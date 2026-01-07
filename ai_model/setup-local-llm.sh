@@ -2378,20 +2378,35 @@ main() {
   
   # Install models (only if models were selected)
   local failed_models=()
+  local validate_models=false
   if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
     print_header "📥 Installing Models"
     print_info "This may take 10-30 minutes depending on your connection..."
+    echo ""
+    
+    # Ask if user wants to validate and benchmark models after installation
+    if prompt_yes_no "Would you like to validate and benchmark models after installation? (adds ~2-5 minutes per model)" "y"; then
+      validate_models=true
+      print_info "Validation and benchmarking will be performed after each model installation"
+    else
+      validate_models=false
+      print_info "Skipping validation and benchmarking"
+    fi
     echo ""
     
     for model in "${SELECTED_MODELS[@]}"; do
       if install_model "$model"; then
         # Get the actual installed model name (may be optimized variant)
         local installed_model=$(resolve_installed_model "$model")
-        if validate_model "$installed_model"; then
-          print_success "$installed_model ready"
+        if [[ "$validate_models" == "true" ]]; then
+          if validate_model "$installed_model"; then
+            print_success "$installed_model ready"
+          else
+            log_warn "$installed_model installed but validation failed"
+            failed_models+=("$model")
+          fi
         else
-          log_warn "$installed_model installed but validation failed"
-          failed_models+=("$model")
+          print_success "$installed_model installed (validation skipped)"
         fi
       else
         failed_models+=("$model")
