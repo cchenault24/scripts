@@ -24,6 +24,7 @@ zsh_setup::core::progress::spinner_start() {
     touch "$flag_file"
     
     # Start spinner in background
+    # Disown the process and redirect all FDs so command substitution doesn't wait for it
     (
         while [[ -f "$flag_file" ]]; do
             local spinner="${spinner_chars[$spinner_idx]}"
@@ -34,9 +35,12 @@ zsh_setup::core::progress::spinner_start() {
         
         # Clean up flag file
         rm -f "$flag_file" 2>/dev/null
-    ) &
+    ) < /dev/null > /dev/null 2>&1 &
     
     local spinner_pid=$!
+    # Disown the process so command substitution doesn't wait for it
+    disown $spinner_pid 2>/dev/null || true
+    
     # Store flag file path for cleanup
     export ZSH_SETUP_SPINNER_FLAG_${spinner_pid}="$flag_file"
     
