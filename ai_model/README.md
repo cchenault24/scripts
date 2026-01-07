@@ -59,15 +59,17 @@ The setup automatically detects your hardware and classifies it into tiers:
 
 ### Tier S (≥48GB RAM)
 - **All models available**
+- **Recommended**: qwen2.5-coder:14b + codestral:22b (or llama3.1:70b for maximum quality)
 - Aggressive keep-alive (24h)
 - High context window (32K tokens)
-- Best for: Complex refactoring, architecture work
+- Best for: Complex refactoring, architecture work, multi-model workflows
 
 ### Tier A (32-47GB RAM)
 - **Excludes**: llama3.1:70b
+- **Recommended**: qwen2.5-coder:14b + codestral:22b
 - Moderate keep-alive (12h)
 - Medium context window (16K tokens)
-- Best for: General development, code review
+- Best for: General development, code review, complex coding tasks
 
 ### Tier B (16-31GB RAM)
 - **Excludes**: llama3.1:70b, codestral:22b
@@ -83,30 +85,35 @@ The setup automatically detects your hardware and classifies it into tiers:
 
 ### Approved Models
 
-1. **qwen2.5-coder:14b** (Recommended)
-   - Best balance of quality and speed
-   - ~9GB RAM
-   - Excellent for React/TypeScript development
+All models are automatically optimized by Ollama with optimal quantization (Q4_K_M/Q5_K_M) for Apple Silicon when downloaded. Ollama selects the best quantization automatically, reducing RAM usage by 15-25% while maintaining quality.
 
-2. **llama3.1:8b**
-   - Fast, general-purpose
-   - ~5GB RAM
+1. **qwen2.5-coder:14b** (Recommended Primary)
+   - Best balance of quality and speed for React/TypeScript development
+   - ~7.5GB RAM (Q4_K_M quantized)
+   - Excellent TypeScript, React, and Redux-Saga understanding
+   - Optimized for coding tasks
+
+2. **codestral:22b** (Recommended Secondary for Tier A/S)
+   - Excellent code generation and explanation capabilities
+   - ~11.5GB RAM (Q4_K_M quantized)
+   - Best for complex coding tasks and code review
+   - Superior to general-purpose models for development work
+
+3. **llama3.1:8b** (Fast Alternative)
+   - Fast, general-purpose coding assistant
+   - ~4.2GB RAM (Q5_K_M quantized)
    - Good TypeScript support
+   - Best for autocomplete and quick edits
 
-3. **llama3.1:70b** (Tier S only)
-   - Highest quality
-   - ~40GB RAM
-   - Best for complex refactoring
+4. **llama3.1:70b** (Tier S only)
+   - Highest quality for complex refactoring and architecture
+   - ~35GB RAM (Q4_K_M quantized)
+   - Best for multi-file refactoring and deep analysis
 
-4. **codestral:22b**
-   - Excellent code generation
-   - ~14GB RAM
-   - Great for explanations
-
-5. **qwen2.5-coder:7b**
-   - Lightweight, fast
-   - ~4.5GB RAM
-   - Perfect for autocomplete
+5. **qwen2.5-coder:7b** (Lightweight)
+   - Lightweight, fast autocomplete and simple edits
+   - ~3.5GB RAM (Q5_K_M quantized)
+   - Perfect for quick suggestions and small changes
 
 ## Continue.dev Setup and Usage
 
@@ -242,6 +249,40 @@ Options:
 
 ## Tuning and Optimization
 
+### Apple Silicon Optimizations
+
+The setup script automatically optimizes models for Apple Silicon MacBook Pros:
+
+#### Metal GPU Acceleration
+
+- **Automatic Detection**: Metal GPU acceleration is automatically configured and verified
+- **Environment Variables**: Optimal settings are configured in `~/.ollama/ollama.env`:
+  - `OLLAMA_NUM_GPU=1` - Enables Metal GPU acceleration
+  - `OLLAMA_NUM_THREAD` - Optimized CPU thread count (cores - 2)
+  - `OLLAMA_KEEP_ALIVE` - Model keep-alive based on hardware tier
+  - `OLLAMA_MAX_LOADED_MODELS` - Maximum concurrent models based on RAM
+
+#### Automatic Quantization
+
+Ollama automatically selects optimal quantization (Q4_K_M/Q5_K_M) for Apple Silicon when downloading models. You don't need to specify quantization - Ollama handles it automatically based on:
+- Your hardware (Apple Silicon)
+- Model size
+- Available memory
+
+Quantization benefits:
+- **Q4_K_M**: 4-bit quantization, ~25% faster, minimal quality loss (used for larger models)
+- **Q5_K_M**: 5-bit quantization, ~15% faster, excellent quality retention (used for smaller models)
+
+The script uses standard model names (e.g., `qwen2.5-coder:14b`) and Ollama automatically downloads the best quantized variant for your system.
+
+#### Performance Verification
+
+During installation, the script:
+- Verifies Metal GPU acceleration is active
+- Benchmarks model performance (tokens/second)
+- Validates model responses
+- Logs performance metrics
+
 ### Auto-Tuning
 
 Models are automatically tuned based on your hardware tier. Parameters include:
@@ -250,6 +291,8 @@ Models are automatically tuned based on your hardware tier. Parameters include:
 - Temperature (role-specific)
 - Top-p
 - Keep-alive duration
+- GPU acceleration (Metal)
+- CPU thread optimization
 
 ### Manual Tuning
 
@@ -270,10 +313,13 @@ To adjust tuning, edit `~/.continue/config.json`:
 
 ### Performance Tips
 
-1. **Use keep-alive** for frequently used models (pre-loads in memory)
-2. **Smaller context** for faster responses
-3. **Multiple models** - use smaller for autocomplete, larger for complex tasks
-4. **Monitor memory** - use `ollama ps` to see loaded models
+1. **Metal GPU Acceleration**: Automatically enabled on Apple Silicon - verify with `curl http://localhost:11434/api/ps`
+2. **Quantized Models**: Use Q4_K_M or Q5_K_M variants for best performance (automatically selected)
+3. **Use keep-alive** for frequently used models (pre-loads in memory)
+4. **Smaller context** for faster responses
+5. **Multiple models** - use smaller for autocomplete, larger for complex tasks
+6. **Monitor memory** - use `ollama ps` to see loaded models
+7. **Environment Variables**: Check `~/.ollama/ollama.env` for optimization settings
 
 ### Re-running Tuning
 
@@ -369,6 +415,39 @@ ollama serve
 2. **Use smaller models** for your tier
 3. **Reduce keep-alive** duration
 4. **Close other applications**
+5. **Use quantized variants** - Q4_K_M uses less memory than base models
+
+### Metal GPU Not Working
+
+1. **Verify Metal is available:**
+   ```bash
+   system_profiler SPDisplaysDataType | grep -i metal
+   ```
+
+2. **Check environment variables:**
+   ```bash
+   cat ~/.ollama/ollama.env
+   # Should show OLLAMA_NUM_GPU=1
+   ```
+
+3. **Restart Ollama with environment:**
+   ```bash
+   source ~/.ollama/ollama.env
+   brew services restart ollama
+   ```
+
+4. **Verify GPU usage:**
+   ```bash
+   curl http://localhost:11434/api/ps
+   # Should show GPU-related information
+   ```
+
+5. **Check Ollama version** - ensure you have the latest version:
+   ```bash
+   brew upgrade ollama
+   ```
+
+6. **Manual verification** - run a model and check Activity Monitor for GPU usage
 
 ### TypeScript/React Issues
 

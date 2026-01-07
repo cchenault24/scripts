@@ -97,15 +97,31 @@ remove_models() {
   local removed=0
   local failed=0
   
+  # Ensure log directory exists
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  
   while IFS= read -r model; do
     if [[ -n "$model" ]]; then
       print_info "Removing $model..."
       
-      if ollama rm "$model" 2>&1 | tee -a "$LOG_FILE"; then
+      # Capture remove output and exit code separately
+      # This prevents tee failures from masking successful removals
+      local remove_output remove_exit_code
+      remove_output=$(ollama rm "$model" 2>&1)
+      remove_exit_code=$?
+      
+      # Log output to file, but don't echo to stdout to avoid duplicates
+      echo "$remove_output" >> "$LOG_FILE" 2>/dev/null || true
+      
+      if [ $remove_exit_code -eq 0 ]; then
         print_success "$model removed"
         ((removed++))
       else
         print_error "Failed to remove $model"
+        # Show error output for failed removals
+        if [[ -n "$remove_output" ]]; then
+          echo "$remove_output" | sed 's/^/  /'
+        fi
         ((failed++))
       fi
     fi
@@ -324,12 +340,29 @@ remove_ollama() {
     print_info "Stopping Ollama service..."
     brew services stop ollama 2>/dev/null || true
     
+    # Ensure log directory exists
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
+    
     # Uninstall
     print_info "Uninstalling Ollama..."
-    if brew uninstall ollama 2>&1 | tee -a "$LOG_FILE"; then
+    
+    # Capture uninstall output and exit code separately
+    # This prevents tee failures from masking successful uninstalls
+    local uninstall_output uninstall_exit_code
+    uninstall_output=$(brew uninstall ollama 2>&1)
+    uninstall_exit_code=$?
+    
+    # Log output to file, but don't echo to stdout to avoid duplicates
+    echo "$uninstall_output" >> "$LOG_FILE" 2>/dev/null || true
+    
+    if [ $uninstall_exit_code -eq 0 ]; then
       print_success "Ollama uninstalled"
     else
       print_error "Failed to uninstall Ollama"
+      # Show error output for failed uninstalls
+      if [[ -n "$uninstall_output" ]]; then
+        echo "$uninstall_output" | sed 's/^/  /'
+      fi
     fi
   else
     print_info "Keeping Ollama installed"
