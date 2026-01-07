@@ -21,6 +21,7 @@ temp/
 *.tmp
 
 # IDE
+.cursor/
 .vscode/
 .idea/
 *.swp
