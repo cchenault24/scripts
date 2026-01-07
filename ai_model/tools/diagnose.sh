@@ -206,6 +206,51 @@ check_resources() {
   print_info "CPU cores: $cpu_cores"
 }
 
+# Cross-platform timeout function
+run_with_timeout() {
+  local timeout_seconds=$1
+  shift
+  local cmd=("$@")
+  
+  # Check for gtimeout (Homebrew coreutils) or timeout (Linux)
+  if command -v gtimeout &>/dev/null; then
+    gtimeout "$timeout_seconds" "${cmd[@]}"
+  elif command -v timeout &>/dev/null; then
+    timeout "$timeout_seconds" "${cmd[@]}"
+  else
+    # macOS fallback: use background process with kill
+    local tmpfile
+    tmpfile=$(mktemp)
+    local pid
+    
+    # Run command in background, capture output
+    ("${cmd[@]}" > "$tmpfile" 2>&1) &
+    pid=$!
+    
+    # Wait for process or timeout
+    local count=0
+    while kill -0 "$pid" 2>/dev/null && [[ $count -lt $timeout_seconds ]]; do
+      sleep 1
+      ((count++))
+    done
+    
+    # Kill if still running
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      cat "$tmpfile" 2>/dev/null || true
+      rm -f "$tmpfile"
+      return 124  # Timeout exit code
+    else
+      wait "$pid" 2>/dev/null
+      local exit_code=$?
+      cat "$tmpfile" 2>/dev/null || true
+      rm -f "$tmpfile"
+      return $exit_code
+    fi
+  fi
+}
+
 # Test model response
 test_model_response() {
   print_header "🧪 Model Response Test"
@@ -223,7 +268,7 @@ test_model_response() {
   echo ""
   
   local start_time=$(date +%s)
-  local response=$(timeout 15 ollama run "$test_model" "Write hello in TypeScript" 2>&1 | head -n 3 || echo "")
+  local response=$(run_with_timeout 15 ollama run "$test_model" "Write hello in TypeScript" 2>&1 | head -n 3 || echo "")
   local end_time=$(date +%s)
   local duration=$((end_time - start_time))
   

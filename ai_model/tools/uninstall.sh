@@ -198,73 +198,81 @@ remove_vscode_extensions() {
     return 0
   fi
   
-  # Count extensions
+  # Filter to only installed extensions
+  local installed_extensions=""
+  while IFS= read -r ext; do
+    if [[ -n "$ext" ]]; then
+      # Check if extension is installed
+      if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
+        if [[ -z "$installed_extensions" ]]; then
+          installed_extensions="$ext"
+        else
+          installed_extensions="$installed_extensions"$'\n'"$ext"
+        fi
+      fi
+    fi
+  done <<< "$extensions"
+  
+  if [[ -z "$installed_extensions" ]]; then
+    print_info "No installed extensions found from recommendations"
+    return 0
+  fi
+  
+  # Count installed extensions
   local ext_count
-  ext_count=$(echo "$extensions" | wc -l | xargs)
-  print_info "Found $ext_count recommended extension(s)"
+  ext_count=$(echo "$installed_extensions" | wc -l | xargs)
+  print_info "Found $ext_count installed extension(s)"
   echo ""
   
-  echo "Recommended extensions:"
-  echo "$extensions" | while read -r ext; do
+  echo "Installed extensions:"
+  echo "$installed_extensions" | while read -r ext; do
     if [[ -n "$ext" ]]; then
       echo "  • $ext"
     fi
   done
   echo ""
   
-  if ! prompt_yes_no "Uninstall all recommended extensions?" "n"; then
+  if ! prompt_yes_no "Uninstall all installed extensions?" "n"; then
     print_info "Skipping extension removal"
     return 0
   fi
   
   local removed=0
   local failed=0
-  local not_installed=0
   
   while IFS= read -r ext; do
     if [[ -n "$ext" ]]; then
-      print_info "Checking $ext..."
+      print_info "Uninstalling $ext..."
       
-      # Check if extension is installed
-      if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
-        print_info "Uninstalling $ext..."
-        
-        # Ensure log directory exists
-        mkdir -p "$STATE_DIR" 2>/dev/null || true
-        
-        # Capture uninstall output and exit code separately
-        # This prevents tee failures from masking successful uninstalls
-        local uninstall_output uninstall_exit_code
-        uninstall_output=$(code --uninstall-extension "$ext" 2>&1)
-        uninstall_exit_code=$?
-        
-        # Log output to file, but don't echo to stdout to avoid duplicates
-        echo "$uninstall_output" >> "$LOG_FILE" 2>/dev/null || true
-        
-        if [ $uninstall_exit_code -eq 0 ]; then
-          print_success "$ext uninstalled"
-          ((removed++))
-        else
-          print_error "Failed to uninstall $ext"
-          # Show error output for failed uninstalls
-          if [[ -n "$uninstall_output" ]]; then
-            echo "$uninstall_output" | sed 's/^/  /'
-          fi
-          ((failed++))
-        fi
+      # Ensure log directory exists
+      mkdir -p "$STATE_DIR" 2>/dev/null || true
+      
+      # Capture uninstall output and exit code separately
+      # This prevents tee failures from masking successful uninstalls
+      local uninstall_output uninstall_exit_code
+      uninstall_output=$(code --uninstall-extension "$ext" 2>&1)
+      uninstall_exit_code=$?
+      
+      # Log output to file, but don't echo to stdout to avoid duplicates
+      echo "$uninstall_output" >> "$LOG_FILE" 2>/dev/null || true
+      
+      if [ $uninstall_exit_code -eq 0 ]; then
+        print_success "$ext uninstalled"
+        ((removed++))
       else
-        print_info "$ext is not installed"
-        ((not_installed++))
+        print_error "Failed to uninstall $ext"
+        # Show error output for failed uninstalls
+        if [[ -n "$uninstall_output" ]]; then
+          echo "$uninstall_output" | sed 's/^/  /'
+        fi
+        ((failed++))
       fi
     fi
-  done <<< "$extensions"
+  done <<< "$installed_extensions"
   
   echo ""
   if [[ $removed -gt 0 ]]; then
     print_success "Uninstalled $removed extension(s)"
-  fi
-  if [[ $not_installed -gt 0 ]]; then
-    print_info "$not_installed extension(s) were not installed"
   fi
   if [[ $failed -gt 0 ]]; then
     print_warn "Failed to uninstall $failed extension(s)"

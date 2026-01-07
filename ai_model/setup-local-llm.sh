@@ -35,6 +35,12 @@ readonly CYAN='\033[0;36m'
 readonly BOLD='\033[1m'
 readonly NC='\033[0m'
 
+# Initialize global arrays (set -u compatibility)
+SELECTED_MODELS=()
+INSTALLED_MODELS=()
+CONTINUE_PROFILES=()
+SELECTED_EXTENSIONS=()
+
 # Approved models (no DeepSeek)
 readonly APPROVED_MODELS=(
   "qwen2.5-coder:14b"
@@ -62,11 +68,11 @@ get_model_ram() {
 get_model_desc() {
   local model="$1"
   case "$model" in
-    "qwen2.5-coder:14b") echo "Best balance of quality and speed for React/TypeScript development (optimized Q4_K_M)" ;;
-    "llama3.1:8b") echo "Fast, general-purpose coding assistant with good TypeScript support (optimized Q5_K_M)" ;;
-    "llama3.1:70b") echo "Highest quality for complex refactoring and architecture (Tier S only, optimized Q4_K_M)" ;;
-    "codestral:22b") echo "Excellent code generation and explanation - best for complex coding tasks (optimized Q4_K_M)" ;;
-    "qwen2.5-coder:7b") echo "Lightweight, fast autocomplete and simple edits (optimized Q5_K_M)" ;;
+    "qwen2.5-coder:14b") echo "Best balance: quality + speed for React/TS" ;;
+    "llama3.1:8b") echo "Fast general-purpose TypeScript assistant" ;;
+    "llama3.1:70b") echo "Highest quality for complex refactoring (Tier S)" ;;
+    "codestral:22b") echo "Excellent code generation for complex tasks" ;;
+    "qwen2.5-coder:7b") echo "Lightweight, fast autocomplete & simple edits" ;;
     *) echo "No description" ;;
   esac
 }
@@ -153,15 +159,103 @@ prompt_choice() {
   echo "${choice:-$default}"
 }
 
+# Check and install gum if missing (better terminal UI than fzf)
+check_gum() {
+  if ! command -v gum &>/dev/null; then
+    log_error "gum not found. gum is required for interactive selection."
+    echo ""
+    if prompt_yes_no "Would you like the script to install gum now?" "y"; then
+      print_info "Installing gum..."
+      if brew install gum; then
+        print_success "gum installed"
+      else
+        log_error "Failed to install gum"
+        log_error "gum is required for this setup. Please install it manually and run this script again."
+        echo ""
+        echo "To install gum manually, run:"
+        echo "  brew install gum"
+        exit 1
+      fi
+    else
+      log_error "gum is required. Please install it manually and run this script again."
+      echo ""
+      echo "To install gum manually, run:"
+      echo "  brew install gum"
+      exit 1
+    fi
+  else
+    print_success "gum found"
+  fi
+}
+
+# Format model info for gum display with fixed-width columns
+format_model_for_gum() {
+  local model="$1"
+  local tier="$2"
+  local is_recommended="${3:-false}"
+  local model_width="${4:-25}"  # Width for model name (including checkmark space)
+  local ram_width="${5:-8}"      # Width for RAM column
+  
+  local ram=$(get_model_ram "$model")
+  local desc=$(get_model_desc "$model")
+  local eligible=false
+  
+  if is_model_eligible "$model" "$tier"; then
+    eligible=true
+  fi
+  
+  local suffix=""
+  local tier_label=""
+  
+  # Get tier label
+  case "$tier" in
+    S) tier_label="Tier S (≥48GB RAM)" ;;
+    A) tier_label="Tier A (32-47GB RAM)" ;;
+    B) tier_label="Tier B (16-31GB RAM)" ;;
+    C) tier_label="Tier C (<16GB RAM)" ;;
+  esac
+  
+  if [[ "$eligible" == "false" ]]; then
+    suffix=" ⚠ Not recommended"
+  fi
+  
+  # Format with fixed-width columns for perfect alignment
+  # No checkmark in the list - just align the separators
+  printf "%-${model_width}s | %-${ram_width}s | %s%s\n" "$model" "${ram}GB" "$desc" "$suffix"
+}
+
+# Format extension info for gum display with fixed-width columns
+format_extension_for_gum() {
+  local ext_id="$1"
+  local friendly_name="$2"
+  local is_installed="${3:-false}"
+  local name_width="${4:-30}"  # Default width for name column
+  
+  local suffix=""
+  
+  local suffix=""
+  if [[ "$is_installed" == "true" ]]; then
+    suffix=" (installed)"
+  fi
+  
+  # Format with fixed-width column for alignment
+  # No checkmark in the list - just align the separators
+  printf "%-${name_width}s | %s%s\n" "$friendly_name" "$ext_id" "$suffix"
+}
+
 # State management
 save_state() {
   mkdir -p "$STATE_DIR"
+  # Guard against unset arrays (set -u compatibility)
+  local selected_models=("${SELECTED_MODELS[@]:-}")
+  local installed_models=("${INSTALLED_MODELS[@]:-}")
+  local continue_profiles=("${CONTINUE_PROFILES[@]:-}")
   local state_json=$(cat <<EOF
 {
   "hardware_tier": "${HARDWARE_TIER:-}",
-  "selected_models": $(printf '%s\n' "${SELECTED_MODELS[@]}" | jq -R . | jq -s .),
-  "installed_models": $(printf '%s\n' "${INSTALLED_MODELS[@]}" | jq -R . | jq -s .),
-  "continue_profiles": $(printf '%s\n' "${CONTINUE_PROFILES[@]}" | jq -R . | jq -s .),
+  "selected_models": $(printf '%s\n' "${selected_models[@]}" | jq -R . | jq -s .),
+  "installed_models": $(printf '%s\n' "${installed_models[@]}" | jq -R . | jq -s .),
+  "continue_profiles": $(printf '%s\n' "${continue_profiles[@]}" | jq -R . | jq -s .),
   "vscode_extensions_installed": ${VSCODE_EXTENSIONS_INSTALLED:-false},
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -488,6 +582,9 @@ check_prerequisites() {
   else
     print_success "jq found"
   fi
+  
+  # gum check (for interactive selection)
+  check_gum
 }
 
 # Configure Ollama service with environment variables
@@ -600,40 +697,10 @@ is_approved_model() {
 select_models() {
   print_header "🤖 Model Selection"
   
-  echo -e "${CYAN}Select models from the recommended list, or choose a custom model. Models are auto-tuned based on your hardware tier.${NC}"
+  echo -e "${CYAN}Select models to install. Models are auto-tuned based on your hardware tier.${NC}"
   echo ""
   
   SELECTED_MODELS=()
-  local eligible_models=()
-  local model_index=1
-  
-  # Build eligible models list
-  for model in "${APPROVED_MODELS[@]}"; do
-    if is_model_eligible "$model" "$HARDWARE_TIER"; then
-      eligible_models+=("$model")
-    fi
-  done
-  
-  # Display models with eligibility
-  echo "Available models for $TIER_LABEL:"
-  echo ""
-  
-  for model in "${APPROVED_MODELS[@]}"; do
-    # Get model info using functions (bash 3.2 compatible)
-    local ram=$(get_model_ram "$model")
-    local desc=$(get_model_desc "$model")
-    local eligible=false
-    
-    if is_model_eligible "$model" "$HARDWARE_TIER"; then
-      eligible=true
-      echo -e "  ${GREEN}✓${NC} $model"
-    else
-      echo -e "  ${RED}✗${NC} $model ${YELLOW}(not eligible for $TIER_LABEL)${NC}"
-    fi
-    
-    echo "     RAM: ~${ram}GB | $desc"
-    echo ""
-  done
   
   # Default selection - optimized for coding tasks on Apple Silicon
   # Primary: Best coding model for the tier
@@ -670,115 +737,141 @@ select_models() {
     default_secondary="qwen2.5-coder:7b"
   fi
   
-  echo -e "${CYAN}Recommended defaults for $TIER_LABEL:${NC}"
-  echo "  Primary: $default_primary"
-  echo "  Secondary: $default_secondary"
+  echo -e "${CYAN}Recommended for $TIER_LABEL:${NC}"
+  echo -e "  ${GREEN}✓${NC} Primary: ${BOLD}$default_primary${NC}"
+  echo -e "  ${GREEN}✓${NC} Secondary: ${BOLD}$default_secondary${NC}"
   echo ""
   
-  # Interactive selection
-  if prompt_yes_no "Use recommended models?" "y"; then
-    SELECTED_MODELS=("$default_primary" "$default_secondary")
-    # Remove duplicates (bash 3.2 compatible)
-    local unique_models=()
-    for model in "${SELECTED_MODELS[@]}"; do
-      local found=0
-      # Guard against empty array access (fixes unbound variable error with set -u)
-      if [[ ${#unique_models[@]} -gt 0 ]]; then
-        for existing in "${unique_models[@]}"; do
-          if [[ "$model" == "$existing" ]]; then
-            found=1
-            break
-          fi
-        done
-      fi
-      [[ $found -eq 0 ]] && unique_models+=("$model")
-    done
-    SELECTED_MODELS=("${unique_models[@]}")
-  else
-    echo ""
-    echo "Select models (enter numbers, comma-separated, 'all' for all eligible, or 'c' for custom):"
-    # bash 3.2 compatible: use counter instead of array indices
-    local i=0
-    for model in "${eligible_models[@]}"; do
-      echo "  $((i+1))) $model"
-      ((i++))
-    done
-    echo -e "  ${CYAN}c) Enter custom model name${NC}"
-    echo ""
-    
-    local choice
-    read -p "Your selection: " choice
-    
-    if [[ "$choice" == "all" ]]; then
-      SELECTED_MODELS=("${eligible_models[@]}")
-    elif [[ "$choice" == "c" || "$choice" == "C" ]]; then
-      # Handle custom model selection
-      while true; do
-        echo ""
-        read -p "Enter custom model name (e.g., codellama:13b): " custom_model
-        custom_model=$(echo "$custom_model" | xargs) # trim whitespace
-        
-        if [[ -z "$custom_model" ]]; then
-          print_warning "Model name cannot be empty. Try again or press Ctrl+C to cancel."
-          continue
-        fi
-        
-        # Validate the custom model
-        if validate_model_exists "$custom_model"; then
-          SELECTED_MODELS+=("$custom_model")
-          print_success "Custom model $custom_model added to selection"
-          
-          # Ask if user wants to add more custom models
-          if prompt_yes_no "Add another custom model?" "n"; then
-            continue
-          else
-            break
-          fi
-        else
-          # Validation failed - ask if user wants to retry
-          if prompt_yes_no "Would you like to try a different model name?" "y"; then
-            continue
-          else
-            print_info "Skipping custom model selection"
-            break
-          fi
-        fi
-      done
-      
-      # Also allow selecting from approved list in addition to custom
-      if prompt_yes_no "Also select from recommended models?" "y"; then
-        echo ""
-        echo "Select additional models (enter numbers, comma-separated):"
-        local i=0
-        for model in "${eligible_models[@]}"; do
-          echo "  $((i+1))) $model"
-          ((i++))
-        done
-        echo ""
-        
-        local additional_choice
-        read -p "Your selection: " additional_choice
-        
-        IFS=',' read -ra additional_choices <<< "$additional_choice"
-        for c in "${additional_choices[@]}"; do
-          c=$(echo "$c" | xargs) # trim
-          if [[ "$c" =~ ^[0-9]+$ ]] && [[ $c -ge 1 && $c -le ${#eligible_models[@]} ]]; then
-            SELECTED_MODELS+=("${eligible_models[$((c-1))]}")
-          fi
-        done
-      fi
-    else
-      IFS=',' read -ra choices <<< "$choice"
-      for c in "${choices[@]}"; do
-        c=$(echo "$c" | xargs) # trim
-        if [[ "$c" =~ ^[0-9]+$ ]] && [[ $c -ge 1 && $c -le ${#eligible_models[@]} ]]; then
-          SELECTED_MODELS+=("${eligible_models[$((c-1))]}")
-        fi
-      done
+  # Build gum input with all models, sorted by name
+  local gum_items=()
+  local model_map=()
+  local temp_items=()
+  
+  # Calculate maximum widths for alignment
+  local max_model_width=0
+  local max_ram_width=0
+  
+  for model in "${APPROVED_MODELS[@]}"; do
+    local is_recommended=false
+    if [[ "$model" == "$default_primary" || "$model" == "$default_secondary" ]]; then
+      is_recommended=true
     fi
     
-    # Remove duplicates (bash 3.2 compatible)
-    local unique_models=()
+    # Calculate model name width
+    local model_len=${#model}
+    if [[ $model_len -gt $max_model_width ]]; then
+      max_model_width=$model_len
+    fi
+    
+    # Calculate RAM width
+    local ram=$(get_model_ram "$model")
+    local ram_display="${ram}GB"
+    local ram_len=${#ram_display}
+    if [[ $ram_len -gt $max_ram_width ]]; then
+      max_ram_width=$ram_len
+    fi
+  done
+  
+  # Add padding
+  max_model_width=$((max_model_width + 2))
+  max_ram_width=$((max_ram_width + 1))
+  
+  # Build temporary array with model name and formatted string
+  for model in "${APPROVED_MODELS[@]}"; do
+    local is_recommended=false
+    if [[ "$model" == "$default_primary" || "$model" == "$default_secondary" ]]; then
+      is_recommended=true
+    fi
+    local formatted=$(format_model_for_gum "$model" "$HARDWARE_TIER" "$is_recommended" "$max_model_width" "$max_ram_width")
+    # Store as "model_name|formatted_string" for sorting
+    temp_items+=("${model}|${formatted}")
+  done
+  
+  # Sort by model name using natural sort (handles numbers correctly)
+  IFS=$'\n' sorted_items=($(printf '%s\n' "${temp_items[@]}" | sort -t'|' -k1 -V))
+  unset IFS
+  
+  # Extract sorted formatted strings and model names
+  for item in "${sorted_items[@]}"; do
+    local model_name="${item%%|*}"
+    local formatted="${item#*|}"
+    gum_items+=("$formatted")
+    model_map+=("$model_name")
+  done
+  
+  # Add custom model option at the end
+  gum_items+=("➕ Enter custom model name")
+  model_map+=("CUSTOM")
+  
+  # Use gum choose for multi-select
+  echo ""
+  echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to toggle selection, ${BOLD}Enter${NC} to confirm"
+  echo ""
+  
+  local selected_lines
+  # Minimal UI: Color-based selection, no prefix symbols, compact layout
+  selected_lines=$(printf '%s\n' "${gum_items[@]}" | gum choose \
+    --limit=100 \
+    --height=15 \
+    --cursor="→ " \
+    --selected-prefix="" \
+    --unselected-prefix="" \
+    --selected.foreground="2" \
+    --selected.background="0" \
+    --cursor.foreground="6" \
+    --header="🤖 Select Models for $TIER_LABEL" \
+    --header.foreground="6")
+  
+  if [[ -z "$selected_lines" ]]; then
+    log_error "No models selected"
+    exit 1
+  fi
+  
+  # Parse gum output - first pass: identify selections and mark if custom input needed
+  local needs_custom_input=false
+  while IFS= read -r line; do
+    if [[ -z "$line" ]]; then
+      continue
+    fi
+    
+    # Check if custom model option was selected - mark flag but let it fall through to model matching
+    if [[ "$line" == *"Enter custom model name"* ]] || [[ "$line" == *"➕"* ]]; then
+      needs_custom_input=true
+      # Don't continue - let it fall through to model matching where fallback will handle it
+    fi
+    
+    # Extract model name from formatted line
+    # With minimal UI (no prefixes), gum outputs the formatted string directly
+    # Strip any leading whitespace or cursor symbols that might be present
+    local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
+    line_clean="${line_clean#→ }"  # Remove cursor if present
+    
+    # Find matching model from the map
+    local model_name=""
+    local i=0
+    for item in "${gum_items[@]}"; do
+      # Direct match (gum outputs selected items as-is with no prefix)
+      if [[ "$item" == "$line_clean" ]]; then
+        model_name="${model_map[$i]}"
+        break
+      fi
+      ((i++))
+    done
+    
+    # Handle CUSTOM model option - just set flag, don't read here (stdin is invalid after gum)
+    if [[ -n "$model_name" ]] && [[ "$model_name" == "CUSTOM" ]]; then
+      needs_custom_input=true
+      continue
+    elif [[ -n "$model_name" ]] && [[ "$model_name" != "CUSTOM" ]] && is_approved_model "$model_name"; then
+      SELECTED_MODELS+=("$model_name")
+    fi
+  done <<< "$selected_lines"
+  
+  # Remove duplicates (bash 3.2 compatible)
+  # Initialize unique_models as empty array (set -u compatibility)
+  local unique_models=()
+  # Guard against unset array (set -u compatibility)
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
     for model in "${SELECTED_MODELS[@]}"; do
       local found=0
       # Guard against empty array access (fixes unbound variable error with set -u)
@@ -792,7 +885,55 @@ select_models() {
       fi
       [[ $found -eq 0 ]] && unique_models+=("$model")
     done
-    SELECTED_MODELS=("${unique_models[@]}")
+  fi
+  # Assign unique_models to SELECTED_MODELS
+  # unique_models is always initialized as empty array above, so safe to use
+  # Use a safe copy pattern that works with set -u
+  SELECTED_MODELS=()
+  # Copy elements one by one to avoid any set -u issues with array expansion
+  local i
+  for ((i=0; i<${#unique_models[@]}; i++)); do
+    SELECTED_MODELS+=("${unique_models[$i]}")
+  done
+  
+  # Handle custom model input AFTER parsing all selections (stdin is now in good state)
+  # Prompt for custom model if the flag was set, regardless of whether other models were selected
+  if [[ "$needs_custom_input" == "true" ]]; then
+    while true; do
+      echo ""
+      echo -e "${YELLOW}Enter custom model name (e.g., codellama:13b):${NC} "
+      read -r custom_model || {
+        print_info "Custom model input cancelled"
+        break
+      }
+      custom_model=$(echo "$custom_model" | xargs) # trim whitespace
+      
+      if [[ -z "$custom_model" ]]; then
+        print_warn "Model name cannot be empty. Try again or press Ctrl+C to cancel."
+        continue
+      fi
+      
+      # Validate the custom model
+      if validate_model_exists "$custom_model"; then
+        SELECTED_MODELS+=("$custom_model")
+        print_success "Custom model $custom_model added to selection"
+        
+        # Ask if user wants to add more custom models
+        if prompt_yes_no "Add another custom model?" "n"; then
+          continue
+        else
+          break
+        fi
+      else
+        # Validation failed - ask if user wants to retry
+        if prompt_yes_no "Would you like to try a different model name?" "y"; then
+          continue
+        else
+          print_info "Skipping custom model selection"
+          break
+        fi
+      fi
+    done
   fi
   
   # Validate selection
@@ -801,12 +942,22 @@ select_models() {
     exit 1
   fi
   
+  # Warn about ineligible models
+  for model in "${SELECTED_MODELS[@]}"; do
+    if ! is_model_eligible "$model" "$HARDWARE_TIER"; then
+      print_warn "Model $model is not recommended for $TIER_LABEL hardware"
+      if ! prompt_yes_no "Continue with this model anyway?" "n"; then
+        SELECTED_MODELS=($(printf '%s\n' "${SELECTED_MODELS[@]}" | grep -v "^${model}$"))
+      fi
+    fi
+  done
+  
   # Warn about large models
   for model in "${SELECTED_MODELS[@]}"; do
     # Check if this is a custom model (not in approved list)
     if ! is_approved_model "$model"; then
       # Custom model - show generic warning
-      print_warning "Custom model $model selected - RAM requirements unknown"
+      print_warn "Custom model $model selected - RAM requirements unknown"
       if ! prompt_yes_no "Ensure you have sufficient RAM for this model. Continue?" "y"; then
         SELECTED_MODELS=($(printf '%s\n' "${SELECTED_MODELS[@]}" | grep -v "^${model}$"))
       fi
@@ -1389,9 +1540,8 @@ EOF
 }
 
 # VS Code extensions
+# Accepts array of extension IDs to install (passed as arguments)
 setup_vscode_extensions() {
-  local should_install="${1:-false}"
-  
   print_header "🔌 VS Code Extensions"
   
   if [[ "$VSCODE_AVAILABLE" != "true" ]]; then
@@ -1399,8 +1549,11 @@ setup_vscode_extensions() {
     return 0
   fi
   
-  # Recommended extensions
-  local extensions=(
+  # Get selected extensions from arguments or use empty array
+  local selected_extensions=("$@")
+  
+  # Recommended extensions (for generating recommendations file)
+  local all_extensions=(
     "Continue.continue"
     "dbaeumer.vscode-eslint"
     "esbenp.prettier-vscode"
@@ -1409,14 +1562,13 @@ setup_vscode_extensions() {
     "dsznajder.es7-react-js-snippets"
     "formulahendry.auto-rename-tag"
     "christian-kohler.path-intellisense"
-    "ms-vscode.vscode-json"
     "esc5221.clipboard-diff-patch"
   )
   
-  if [[ "$should_install" == "true" ]]; then
+  if [[ ${#selected_extensions[@]} -gt 0 ]]; then
     local installed=0
     local skipped=0
-    for ext in "${extensions[@]}"; do
+    for ext in "${selected_extensions[@]}"; do
       # Check if extension is already installed
       if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
         print_info "$ext already installed, skipping"
@@ -1454,7 +1606,7 @@ setup_vscode_extensions() {
     fi
     VSCODE_EXTENSIONS_INSTALLED=true
   else
-    print_info "Skipping extension installation"
+    print_info "No extensions selected for installation"
     VSCODE_EXTENSIONS_INSTALLED=false
   fi
   
@@ -1465,7 +1617,7 @@ setup_vscode_extensions() {
   local extensions_json=$(cat <<EOF
 {
   "recommendations": [
-$(printf '    "%s",\n' "${extensions[@]}" | sed '$s/,$//')
+$(printf '    "%s",\n' "${all_extensions[@]}" | sed '$s/,$//')
   ]
 }
 EOF
@@ -1590,14 +1742,16 @@ get_extension_name() {
     "dsznajder.es7-react-js-snippets") echo "ES7+ React/Redux/React-Native snippets" ;;
     "formulahendry.auto-rename-tag") echo "Auto Rename Tag" ;;
     "christian-kohler.path-intellisense") echo "Path IntelliSense" ;;
-    "ms-vscode.vscode-json") echo "JSON" ;;
     "esc5221.clipboard-diff-patch") echo "Clipboard Diff Patch" ;;
     *) echo "$ext_id" ;;
   esac
 }
 
 # Prompt for VS Code extensions (separated from installation)
+# Returns selected extension IDs via SELECTED_EXTENSIONS array
 prompt_vscode_extensions() {
+  SELECTED_EXTENSIONS=()
+  
   if [[ "$VSCODE_AVAILABLE" != "true" ]]; then
     return 1
   fi
@@ -1612,28 +1766,122 @@ prompt_vscode_extensions() {
     "dsznajder.es7-react-js-snippets"
     "formulahendry.auto-rename-tag"
     "christian-kohler.path-intellisense"
-    "ms-vscode.vscode-json"
     "esc5221.clipboard-diff-patch"
   )
   
-  echo "Recommended VS Code extensions for React+TypeScript+Redux-Saga stack:"
-  echo ""
-  for ext in "${extensions[@]}"; do
-    local friendly_name=$(get_extension_name "$ext")
-    local status=""
-    # Check if extension is already installed
-    if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
-      status=" - Installed"
-    fi
-    echo "  • $friendly_name ($ext)$status"
-  done
+  echo "Select VS Code extensions for React+TypeScript+Redux-Saga stack:"
   echo ""
   
-  if prompt_yes_no "Install recommended extensions?" "y"; then
-    return 0
-  else
+  # Build gum input with all extensions
+  local gum_items=()
+  local ext_map=()
+  
+  # Calculate maximum width for extension names
+  local max_name_width=0
+  for ext in "${extensions[@]}"; do
+    local friendly_name=$(get_extension_name "$ext")
+    local is_installed=false
+    # Check if extension is already installed
+    if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
+      is_installed=true
+    fi
+    
+    # Calculate name width
+    local name_len=${#friendly_name}
+    if [[ $name_len -gt $max_name_width ]]; then
+      max_name_width=$name_len
+    fi
+  done
+  
+  # Add padding
+  max_name_width=$((max_name_width + 2))
+  
+  for ext in "${extensions[@]}"; do
+    local friendly_name=$(get_extension_name "$ext")
+    local is_installed=false
+    # Check if extension is already installed
+    if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
+      is_installed=true
+    fi
+    local formatted=$(format_extension_for_gum "$ext" "$friendly_name" "$is_installed" "$max_name_width")
+    gum_items+=("$formatted")
+    ext_map+=("$ext")
+  done
+  
+  # Use gum choose for multi-select
+  echo ""
+  echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to select, ${BOLD}Enter${NC} to confirm"
+  echo ""
+  
+  local selected_lines
+  # Minimal UI: Color-based selection, no prefix symbols, compact layout
+  selected_lines=$(printf '%s\n' "${gum_items[@]}" | gum choose \
+    --limit=100 \
+    --height=15 \
+    --cursor="→ " \
+    --selected-prefix="" \
+    --unselected-prefix="" \
+    --selected.foreground="2" \
+    --selected.background="0" \
+    --cursor.foreground="6" \
+    --header="🔌 VS Code Extensions" \
+    --header.foreground="6")
+  
+  if [[ -z "$selected_lines" ]]; then
+    print_info "No extensions selected"
     return 1
   fi
+  
+  # Parse gum output
+  while IFS= read -r line; do
+    if [[ -z "$line" ]]; then
+      continue
+    fi
+    
+    # Find matching extension from the map
+    # With minimal UI (no prefixes), gum outputs the formatted string directly
+    # Strip any leading whitespace or cursor symbols that might be present
+    local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
+    line_clean="${line_clean#→ }"  # Remove cursor if present
+    
+    local ext_id=""
+    local i=0
+    for item in "${gum_items[@]}"; do
+      # Direct match (gum outputs selected items as-is with no prefix)
+      if [[ "$item" == "$line_clean" ]]; then
+        ext_id="${ext_map[$i]}"
+        break
+      fi
+      ((i++))
+    done
+    
+    # If we found an extension ID, add it
+    if [[ -n "$ext_id" ]]; then
+      SELECTED_EXTENSIONS+=("$ext_id")
+    fi
+  done <<< "$selected_lines"
+  
+  # Remove duplicates (bash 3.2 compatible)
+  local unique_extensions=()
+  for ext in "${SELECTED_EXTENSIONS[@]}"; do
+    local found=0
+    if [[ ${#unique_extensions[@]} -gt 0 ]]; then
+      for existing in "${unique_extensions[@]}"; do
+        if [[ "$ext" == "$existing" ]]; then
+          found=1
+          break
+        fi
+      done
+    fi
+    [[ $found -eq 0 ]] && unique_extensions+=("$ext")
+  done
+  SELECTED_EXTENSIONS=("${unique_extensions[@]}")
+  
+  if [[ ${#SELECTED_EXTENSIONS[@]} -eq 0 ]]; then
+    return 1
+  fi
+  
+  return 0
 }
 
 # Main installation flow
@@ -1673,10 +1921,8 @@ main() {
   fi
   
   # Prompt for VS Code extensions
-  local install_vscode_extensions=false
-  if prompt_vscode_extensions; then
-    install_vscode_extensions=true
-  fi
+  SELECTED_EXTENSIONS=()
+  prompt_vscode_extensions
   
   # ============================================
   # PHASE 2: Begin all installations/setup
@@ -1708,7 +1954,7 @@ main() {
   
   # Generate configurations
   generate_continue_config
-  setup_vscode_extensions "$install_vscode_extensions"
+  setup_vscode_extensions "${SELECTED_EXTENSIONS[@]}"
   generate_vscode_settings
   copy_vscode_settings
   

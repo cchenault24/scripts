@@ -9,17 +9,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$HOME/.local-llm-setup"
 LOG_FILE="$STATE_DIR/benchmark.log"
-DEBUG_LOG="/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log"
-
-# Debug logging helper
-debug_log() {
-  local hypothesis_id="$1"
-  local location="$2"
-  local message="$3"
-  local data="$4"
-  local timestamp=$(date +%s)000
-  echo "{\"id\":\"log_${timestamp}_$$\",\"timestamp\":$timestamp,\"location\":\"$location\",\"message\":\"$message\",\"data\":$data,\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"$hypothesis_id\"}" >> "$DEBUG_LOG" 2>/dev/null || true
-}
 
 # Colors
 readonly GREEN='\033[0;32m'
@@ -132,7 +121,8 @@ benchmark_model() {
   local prompt="$2"
   local prompt_name="$3"
   
-  print_info "Testing $model with $prompt_name prompt..."
+  # Output info message to stderr so it doesn't get captured
+  echo -e "${BLUE}ℹ Testing $model with $prompt_name prompt...${NC}" >&2
   
   # Measure time-to-first-token
   local first_token_time=0
@@ -237,18 +227,20 @@ benchmark_model() {
     fi
   fi
   
-  # Output results
-  echo ""
-  echo -e "${CYAN}Results for $model ($prompt_name):${NC}"
-  echo "  Time to first token: ~${first_token_time}s"
-  echo "  Estimated tokens: ~${token_count}"
-  echo "  Tokens per second: ~${tokens_per_sec}"
-  if [[ $memory_mb -gt 0 ]]; then
-    echo "  Memory usage: ~${memory_mb}MB"
-  fi
-  echo ""
+  # Output formatted results to stderr (so they display but aren't captured)
+  {
+    echo ""
+    echo -e "${CYAN}Results for $model ($prompt_name):${NC}"
+    echo "  Time to first token: ~${first_token_time}s"
+    echo "  Estimated tokens: ~${token_count}"
+    echo "  Tokens per second: ~${tokens_per_sec}"
+    if [[ $memory_mb -gt 0 ]]; then
+      echo "  Memory usage: ~${memory_mb}MB"
+    fi
+    echo ""
+  } >&2
   
-  # Return structured data (for report generation)
+  # Return structured data to stdout (for report generation)
   echo "$model|$prompt_name|$first_token_time|$token_count|$tokens_per_sec|$memory_mb"
 }
 
@@ -300,24 +292,11 @@ generate_benchmark_report() {
   shift
   local results=("$@")
   
-  # #region agent log
-  local results_preview=""
-  for i in "${!results[@]}"; do
-    results_preview="${results_preview}result_${i}:${results[$i]};"
-  done
-  local state_dir_exists="no"
-  [[ -d "$STATE_DIR" ]] && state_dir_exists="yes"
-  debug_log "A" "benchmark.sh:257" "generate_benchmark_report entry" "{\"model\":\"$model\",\"results_count\":${#results[@]},\"results_preview\":\"$results_preview\",\"state_dir\":\"$STATE_DIR\",\"state_dir_exists\":\"$state_dir_exists\"}"
-  # #endregion
-  
   # Sanitize model name: replace invalid filename characters
   local model_sanitized="${model//\//-}"
   model_sanitized="${model_sanitized//:/-}"
   model_sanitized="${model_sanitized// /_}"
   model_sanitized="${model_sanitized//[^a-zA-Z0-9._-]/}"
-  # #region agent log
-  debug_log "B" "benchmark.sh:262" "model name sanitization" "{\"model\":\"$model\",\"model_sanitized\":\"$model_sanitized\"}"
-  # #endregion
   
   # Ensure STATE_DIR exists
   if [[ ! -d "$STATE_DIR" ]]; then
@@ -328,16 +307,6 @@ generate_benchmark_report() {
   fi
   
   local report_file="$STATE_DIR/benchmark-${model_sanitized}-$(date +%Y%m%d-%H%M%S).txt"
-  # #region agent log
-  debug_log "A" "benchmark.sh:265" "report_file path constructed" "{\"report_file\":\"$report_file\",\"report_file_escaped\":\"$(printf '%q' \"$report_file\")\"}"
-  # #endregion
-  
-  # #region agent log
-  local parent_dir=$(dirname "$report_file")
-  local parent_dir_exists="no"
-  [[ -d "$parent_dir" ]] && parent_dir_exists="yes"
-  debug_log "C" "benchmark.sh:268" "before file redirection" "{\"report_file\":\"$report_file\",\"parent_dir\":\"$parent_dir\",\"parent_dir_exists\":\"$parent_dir_exists\"}"
-  # #endregion
   
   {
     echo "Model Benchmark Report: $model"
@@ -351,17 +320,8 @@ generate_benchmark_report() {
       echo ""
     else
       for result in "${results[@]}"; do
-        # #region agent log
-        local result_first_line=$(echo "$result" | head -n1)
-        local result_last_line=$(echo "$result" | tail -n1)
-        local result_line_count=$(echo "$result" | wc -l | tr -d ' ')
-        debug_log "D" "benchmark.sh:312" "parsing result" "{\"result_line_count\":$result_line_count,\"result_first_line\":\"$result_first_line\",\"result_last_line\":\"$result_last_line\",\"result_contains_pipe\":\"$(echo \"$result\" | grep -q '|' && echo 'yes' || echo 'no')\"}"
-        # #endregion
         # Parse 6 fields: model|prompt_name|first_token_time|token_count|tokens_per_sec|memory_mb
         IFS='|' read -r m pn ft tc tps mem <<< "$result"
-        # #region agent log
-        debug_log "D" "benchmark.sh:320" "after parsing result" "{\"m\":\"$m\",\"pn\":\"$pn\",\"ft\":\"$ft\",\"tc\":\"$tc\",\"tps\":\"$tps\",\"mem\":\"$mem\"}"
-        # #endregion
         echo "Prompt: $pn"
         echo "  Time to first token: ${ft}s"
         echo "  Estimated tokens: ${tc}"
@@ -437,16 +397,6 @@ generate_benchmark_report() {
     fi
     
   } > "$report_file"
-  
-  # #region agent log
-  local file_exists="no"
-  local file_size=0
-  if [[ -f "$report_file" ]]; then
-    file_exists="yes"
-    file_size=$(stat -f%z "$report_file" 2>/dev/null || stat -c%s "$report_file" 2>/dev/null || echo "0")
-  fi
-  debug_log "A" "benchmark.sh:310" "after file redirection" "{\"report_file\":\"$report_file\",\"file_exists\":\"$file_exists\",\"file_size\":$file_size,\"redirection_exit_code\":$?}"
-  # #endregion
   
   print_success "Report generated: $report_file"
   print_info "View with: cat $report_file"
