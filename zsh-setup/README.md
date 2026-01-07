@@ -20,7 +20,7 @@ This project uses a modern, modular architecture with namespaced functions. See 
 
 ### Main Entry Point
 
-- `bin/zsh-setup`: Unified CLI entry point for all commands
+- `zsh-setup`: Unified CLI entry point for all commands
 
 ### Key Components
 
@@ -31,9 +31,6 @@ This project uses a modern, modular architecture with namespaced functions. See 
 - **Configuration**: Config management in `lib/config/` (validator, backup, generator)
 - **System Operations**: System utilities in `lib/system/` (package manager, validation, shell)
 
-### Legacy Support
-
-The old `setup_zsh.sh` script is preserved for backward compatibility and routes to the new system.
 
 ## Supported Plugins
 
@@ -64,20 +61,20 @@ The scripts can install and configure many popular Zsh plugins including:
 2. Make the CLI executable:
 
    ```bash
-   chmod +x bin/zsh-setup
+   chmod +x zsh-setup
    ```
 
 3. (Optional) Add to PATH for global access:
 
    ```bash
    # Add to ~/.zshrc or ~/.bashrc
-   export PATH="$PATH:$(pwd)/bin"
+   export PATH="$PATH:$(pwd)"
    ```
 
 4. Run the setup:
 
    ```bash
-   ./bin/zsh-setup install
+   ./zsh-setup install
    ```
 
    Or if added to PATH:

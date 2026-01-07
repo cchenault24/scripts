@@ -12,6 +12,11 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]] && [[ -f "$ZSH_SETUP_ROOT/lib/core/config.sh" 
     zsh_setup::core::config::load
 fi
 
+# Load progress module if available
+if [[ -n "${ZSH_SETUP_ROOT:-}" ]] && [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
+    source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
+fi
+
 # Get log file path
 zsh_setup::core::logger::_get_log_file() {
     if zsh_setup::core::config::has log_file; then
@@ -55,23 +60,29 @@ zsh_setup::core::logger::log() {
     echo "[$timestamp] [$level] $message" >>"$log_file"
     
     # Print to console based on level and verbose setting
+    # Use status_line to ensure we're on a new line (not overwriting progress)
     case "$level" in
         ERROR)
+            zsh_setup::core::progress::clear_line 2>/dev/null || true
             echo "❌ ERROR: $message" >&2
             ;;
         WARN)
+            zsh_setup::core::progress::clear_line 2>/dev/null || true
             echo "⚠️  $message" >&2
             ;;
         SUCCESS)
+            zsh_setup::core::progress::clear_line 2>/dev/null || true
             echo "✅ $message"
             ;;
         DEBUG)
             if [[ "${DEBUG:-false}" == "true" ]]; then
+                zsh_setup::core::progress::clear_line 2>/dev/null || true
                 echo "🔍 DEBUG: $message" >&2
             fi
             ;;
         *)
             if zsh_setup::core::logger::_is_verbose; then
+                zsh_setup::core::progress::clear_line 2>/dev/null || true
                 echo "$message"
             fi
             ;;
@@ -143,37 +154,4 @@ zsh_setup::core::logger::init() {
     } >"$log_file"
     
     zsh_setup::core::logger::info "Log file initialized at $log_file"
-}
-
-# Backward compatibility functions (for migration)
-log_message() {
-    zsh_setup::core::logger::info "$1"
-}
-
-log_info() {
-    zsh_setup::core::logger::info "$1"
-}
-
-log_warn() {
-    zsh_setup::core::logger::warn "$1"
-}
-
-log_error() {
-    zsh_setup::core::logger::error "$1"
-}
-
-log_debug() {
-    zsh_setup::core::logger::debug "$1"
-}
-
-log_success() {
-    zsh_setup::core::logger::success "$1"
-}
-
-log_section() {
-    zsh_setup::core::logger::section "$1"
-}
-
-init_log_file() {
-    zsh_setup::core::logger::init "$@"
 }

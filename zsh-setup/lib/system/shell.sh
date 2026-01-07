@@ -11,6 +11,10 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
     source "$ZSH_SETUP_ROOT/lib/core/config.sh"
     source "$ZSH_SETUP_ROOT/lib/core/logger.sh"
     source "$ZSH_SETUP_ROOT/lib/core/errors.sh"
+    # Load progress module if available
+    if [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
+        source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
+    fi
 fi
 
 #------------------------------------------------------------------------------
@@ -19,7 +23,12 @@ fi
 
 # Change the user's default shell to Zsh
 zsh_setup::system::shell::change_default() {
-    zsh_setup::core::logger::info "Changing default shell to Zsh..."
+    local spinner_pid=""
+    if declare -f zsh_setup::core::progress::spinner_start &>/dev/null; then
+        spinner_pid=$(zsh_setup::core::progress::spinner_start "Changing default shell to Zsh")
+    else
+        zsh_setup::core::logger::info "Changing default shell to Zsh..."
+    fi
     
     local zsh_path=""
     for path in "/bin/zsh" "/usr/bin/zsh" "/usr/local/bin/zsh" "$(which zsh 2>/dev/null)"; do
@@ -30,11 +39,23 @@ zsh_setup::system::shell::change_default() {
     done
     
     zsh_path="${zsh_path:-$(which zsh 2>/dev/null)}"
-    zsh_setup::core::logger::info "Using Zsh path: $zsh_path"
     
     # Check if Zsh is already the default shell
     if [[ "$SHELL" == "$zsh_path" ]]; then
-        zsh_setup::core::logger::info "Zsh is already the default shell. No changes needed."
+        if [[ -n "$spinner_pid" ]]; then
+            zsh_setup::core::progress::spinner_stop "$spinner_pid" "Zsh is already the default shell. No changes needed." "" 0
+        else
+            zsh_setup::core::logger::info "Zsh is already the default shell. No changes needed."
+        fi
+        return 0
+    fi
+    
+    # Check for privileges before attempting shell change
+    zsh_setup::core::bootstrap::load_module "system::validation"
+    if ! zsh_setup::system::validation::has_privileges; then
+        zsh_setup::core::logger::warn "No sudo/admin privileges detected. Skipping shell change."
+        zsh_setup::core::logger::info "You can manually change your shell later with: chsh -s $zsh_path"
+        zsh_setup::system::shell::_show_manual_instructions "$zsh_path"
         return 0
     fi
     
@@ -60,13 +81,27 @@ zsh_setup::system::shell::change_default() {
     fi
     
     # Change the shell
-    zsh_setup::core::logger::info "Changing shell to $zsh_path..."
-    if chsh -s "$zsh_path"; then
-        zsh_setup::core::logger::success "Default shell changed to Zsh successfully."
+    if [[ -n "$spinner_pid" ]]; then
+        zsh_setup::core::progress::spinner_stop "$spinner_pid" "" "" 0
+        spinner_pid=$(zsh_setup::core::progress::spinner_start "Changing shell to $zsh_path")
+    else
+        zsh_setup::core::logger::info "Changing shell to $zsh_path..."
+    fi
+    
+    if chsh -s "$zsh_path" >/dev/null 2>&1; then
+        if [[ -n "$spinner_pid" ]]; then
+            zsh_setup::core::progress::spinner_stop "$spinner_pid" "✅ Default shell changed to Zsh successfully." "" 0
+        else
+            zsh_setup::core::logger::success "Default shell changed to Zsh successfully."
+        fi
         export SHELL="$zsh_path"
         return 0
     else
-        zsh_setup::core::logger::error "Failed to change the default shell to Zsh."
+        if [[ -n "$spinner_pid" ]]; then
+            zsh_setup::core::progress::spinner_stop "$spinner_pid" "" "❌ Failed to change the default shell to Zsh." 1
+        else
+            zsh_setup::core::logger::error "Failed to change the default shell to Zsh."
+        fi
         zsh_setup::system::shell::_show_manual_instructions "$zsh_path"
         return 1
     fi
@@ -112,7 +147,3 @@ zsh_setup::system::shell::_show_manual_instructions() {
     echo ""
 }
 
-# Backward compatibility
-change_default_shell() {
-    zsh_setup::system::shell::change_default
-}

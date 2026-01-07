@@ -12,23 +12,63 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
     source "$ZSH_SETUP_ROOT/lib/core/logger.sh"
 fi
 
-# Plugin registry storage
-declare -A ZSH_SETUP_PLUGIN_REGISTRY=()
-declare -A ZSH_SETUP_PLUGIN_DEPS=()
+# Plugin registry storage (bash 3.2 compatible - using prefix-based variables)
+# Keys are stored as ZSH_SETUP_PLUGIN_REGISTRY_key variables
+ZSH_SETUP_PLUGIN_REGISTRY_KEYS=""
+ZSH_SETUP_PLUGIN_DEPS_KEYS=""
+
+# Helper function to sanitize key names for variable names
+zsh_setup::plugins::registry::_sanitize_key() {
+    local key="$1"
+    echo "$key" | sed 's/[^a-zA-Z0-9_]/_/g'
+}
+
+# Helper function to get variable name for a registry key
+zsh_setup::plugins::registry::_get_registry_var_name() {
+    local key="$1"
+    local sanitized=$(zsh_setup::plugins::registry::_sanitize_key "$key")
+    echo "ZSH_SETUP_PLUGIN_REGISTRY_${sanitized}"
+}
+
+# Helper function to get variable name for a deps key
+zsh_setup::plugins::registry::_get_deps_var_name() {
+    local key="$1"
+    local sanitized=$(zsh_setup::plugins::registry::_sanitize_key "$key")
+    echo "ZSH_SETUP_PLUGIN_DEPS_${sanitized}"
+}
+
+# Cache tracking
+ZSH_SETUP_REGISTRY_LOADED=false
+ZSH_SETUP_REGISTRY_CACHE_ROOT=""
 
 #------------------------------------------------------------------------------
 # Plugin Loading
 #------------------------------------------------------------------------------
 
-# Load plugin configurations
+# Load plugin configurations (with caching)
 zsh_setup::plugins::registry::load() {
     local root="${ZSH_SETUP_ROOT:-}"
     local plugins_file="${root}/plugins.conf"
     local deps_file="${root}/plugin_dependencies.conf"
     
+    # Check if already loaded for this root
+    if [[ "$ZSH_SETUP_REGISTRY_LOADED" == "true" && "$ZSH_SETUP_REGISTRY_CACHE_ROOT" == "$root" ]]; then
+        zsh_setup::core::logger::debug "Using cached plugin registry"
+        return 0
+    fi
+    
     # Clear existing registry
-    ZSH_SETUP_PLUGIN_REGISTRY=()
-    ZSH_SETUP_PLUGIN_DEPS=()
+    # Unset all registry variables
+    for key in $(echo "$ZSH_SETUP_PLUGIN_REGISTRY_KEYS" | tr ':' '\n' | grep -v '^$'); do
+        local var_name=$(zsh_setup::plugins::registry::_get_registry_var_name "$key")
+        unset "$var_name"
+    done
+    for key in $(echo "$ZSH_SETUP_PLUGIN_DEPS_KEYS" | tr ':' '\n' | grep -v '^$'); do
+        local var_name=$(zsh_setup::plugins::registry::_get_deps_var_name "$key")
+        unset "$var_name"
+    done
+    ZSH_SETUP_PLUGIN_REGISTRY_KEYS=""
+    ZSH_SETUP_PLUGIN_DEPS_KEYS=""
     
     # Load plugins
     if [[ -f "$plugins_file" ]]; then
@@ -40,7 +80,13 @@ zsh_setup::plugins::registry::load() {
             url=$(echo "$url" | xargs)
             description=$(echo "$description" | xargs)
             
-            ZSH_SETUP_PLUGIN_REGISTRY[$name]="$type|$url|$description"
+            local var_name=$(zsh_setup::plugins::registry::_get_registry_var_name "$name")
+            local value="${type}|${url}|${description}"
+            local escaped_value=$(printf '%q' "$value")
+            eval "${var_name}=${escaped_value}"
+            if [[ "$ZSH_SETUP_PLUGIN_REGISTRY_KEYS" != *":$name:"* ]]; then
+                ZSH_SETUP_PLUGIN_REGISTRY_KEYS="${ZSH_SETUP_PLUGIN_REGISTRY_KEYS}:$name:"
+            fi
         done < "$plugins_file"
     else
         zsh_setup::core::logger::warn "Plugin configuration file not found: $plugins_file"
@@ -53,9 +99,36 @@ zsh_setup::plugins::registry::load() {
             [[ -z "$plugin_name" || "$plugin_name" =~ ^# ]] && continue
             plugin_name=$(echo "$plugin_name" | xargs)
             deps=$(echo "$deps" | xargs)
-            ZSH_SETUP_PLUGIN_DEPS[$plugin_name]="$deps"
+            local var_name=$(zsh_setup::plugins::registry::_get_deps_var_name "$plugin_name")
+            local escaped_value=$(printf '%q' "$deps")
+            eval "${var_name}=${escaped_value}"
+            if [[ "$ZSH_SETUP_PLUGIN_DEPS_KEYS" != *":$plugin_name:"* ]]; then
+                ZSH_SETUP_PLUGIN_DEPS_KEYS="${ZSH_SETUP_PLUGIN_DEPS_KEYS}:$plugin_name:"
+            fi
         done < "$deps_file"
     fi
+    
+    # Mark as loaded
+    ZSH_SETUP_REGISTRY_LOADED=true
+    ZSH_SETUP_REGISTRY_CACHE_ROOT="$root"
+    zsh_setup::core::logger::debug "Plugin registry loaded and cached"
+}
+
+# Clear registry cache (useful for testing or reloading)
+zsh_setup::plugins::registry::clear_cache() {
+    # Unset all registry variables
+    for key in $(echo "$ZSH_SETUP_PLUGIN_REGISTRY_KEYS" | tr ':' '\n' | grep -v '^$'); do
+        local var_name=$(zsh_setup::plugins::registry::_get_registry_var_name "$key")
+        unset "$var_name"
+    done
+    for key in $(echo "$ZSH_SETUP_PLUGIN_DEPS_KEYS" | tr ':' '\n' | grep -v '^$'); do
+        local var_name=$(zsh_setup::plugins::registry::_get_deps_var_name "$key")
+        unset "$var_name"
+    done
+    ZSH_SETUP_PLUGIN_REGISTRY_KEYS=""
+    ZSH_SETUP_PLUGIN_DEPS_KEYS=""
+    ZSH_SETUP_REGISTRY_LOADED=false
+    ZSH_SETUP_REGISTRY_CACHE_ROOT=""
 }
 
 # Get plugin info
@@ -63,11 +136,14 @@ zsh_setup::plugins::registry::get() {
     local plugin_name="$1"
     local field="${2:-all}"  # all, type, url, description
     
-    if [[ -z "${ZSH_SETUP_PLUGIN_REGISTRY[$plugin_name]:-}" ]]; then
+    local var_name=$(zsh_setup::plugins::registry::_get_registry_var_name "$plugin_name")
+    local value=$(eval "echo \${${var_name}:-}")
+    
+    if [[ -z "$value" ]]; then
         return 1
     fi
     
-    IFS='|' read -r type url description <<<"${ZSH_SETUP_PLUGIN_REGISTRY[$plugin_name]}"
+    IFS='|' read -r type url description <<<"$value"
     
     case "$field" in
         type) echo "$type" ;;
@@ -80,16 +156,20 @@ zsh_setup::plugins::registry::get() {
 # Get plugin dependencies
 zsh_setup::plugins::registry::get_dependencies() {
     local plugin_name="$1"
-    echo "${ZSH_SETUP_PLUGIN_DEPS[$plugin_name]:-}"
+    local var_name=$(zsh_setup::plugins::registry::_get_deps_var_name "$plugin_name")
+    local value=$(eval "echo \${${var_name}:-}")
+    echo "$value"
 }
 
 # List all available plugins
 zsh_setup::plugins::registry::list() {
-    printf '%s\n' "${!ZSH_SETUP_PLUGIN_REGISTRY[@]}" | sort
+    echo "$ZSH_SETUP_PLUGIN_REGISTRY_KEYS" | tr ':' '\n' | grep -v '^$' | sort
 }
 
 # Check if plugin exists
 zsh_setup::plugins::registry::exists() {
     local plugin_name="$1"
-    [[ -n "${ZSH_SETUP_PLUGIN_REGISTRY[$plugin_name]:-}" ]]
+    local var_name=$(zsh_setup::plugins::registry::_get_registry_var_name "$plugin_name")
+    local value=$(eval "echo \${${var_name}:-}")
+    [[ -n "$value" ]]
 }

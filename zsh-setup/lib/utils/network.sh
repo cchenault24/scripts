@@ -47,11 +47,3 @@ zsh_setup::utils::network::git_clone_with_retry() {
         git clone --depth=1 "$repo_url" "$destination"
 }
 
-# Backward compatibility
-curl_download_with_retry() {
-    zsh_setup::utils::network::download_with_retry "$@"
-}
-
-git_clone_with_retry() {
-    zsh_setup::utils::network::git_clone_with_retry "$@"
-}

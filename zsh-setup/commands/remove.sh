@@ -17,9 +17,9 @@ zsh_setup::commands::remove::execute() {
     local plugin_name="$1"
     
     if [[ -z "$plugin_name" ]]; then
-        zsh_setup::core::logger::error "Plugin name required"
-        echo "Usage: zsh-setup remove <plugin-name>"
-        exit 1
+        zsh_setup::core::errors::handle 1 "Plugin removal" \
+            "Plugin name is required. Usage: zsh-setup remove <plugin-name>"
+        return 1
     fi
     
     zsh_setup::core::logger::section "Removing Plugin: $plugin_name"

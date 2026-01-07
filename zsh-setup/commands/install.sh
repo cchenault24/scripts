@@ -16,7 +16,7 @@ zsh_setup::core::bootstrap::load_modules \
     system::shell \
     system::package_manager || exit 1
 
-# Export config for backward compatibility
+# Export config as environment variables
 zsh_setup::core::config::export
 
 #------------------------------------------------------------------------------
@@ -30,6 +30,7 @@ zsh_setup::commands::install::execute() {
     local install_plugins=true
     local change_shell=true
     local dry_run=false
+    local no_privileges=false
     
     # Parse options
     for opt in "${options[@]}"; do
@@ -45,6 +46,11 @@ zsh_setup::commands::install::execute() {
                 ;;
             --no-shell-change)
                 change_shell=false
+                ;;
+            --no-privileges)
+                no_privileges=true
+                zsh_setup::core::config::set has_privileges "false"
+                export ZSH_SETUP_HAS_PRIVILEGES="false"
                 ;;
             --dry-run)
                 dry_run=true
@@ -66,14 +72,29 @@ zsh_setup::commands::install::execute() {
     # Validate configuration
     zsh_setup::core::bootstrap::load_module config::validator
     if ! zsh_setup::config::validator::validate_all "$ZSH_SETUP_ROOT"; then
-        zsh_setup::core::logger::error "Configuration validation failed. Please fix errors before proceeding."
+        zsh_setup::core::errors::handle 1 "Configuration validation" \
+            "Please fix configuration errors in plugins.conf or plugin_dependencies.conf before proceeding."
         if [[ "$dry_run" != "true" ]]; then
-            exit 1
+            return 1
         fi
     fi
     
     # Check system requirements
-    zsh_setup::system::validation::check_requirements || exit 1
+    if ! zsh_setup::system::validation::check_requirements; then
+        zsh_setup::core::errors::handle 1 "System requirements check" \
+            "Please install missing system requirements (zsh, git) before proceeding."
+        return 1
+    fi
+    
+    # Check for privileges (unless explicitly disabled)
+    if [[ "$no_privileges" != "true" ]]; then
+        zsh_setup::system::validation::check_privileges true || {
+            zsh_setup::core::logger::info "Continuing installation without sudo/admin privileges..."
+            zsh_setup::core::logger::info "Some operations (shell change, system packages) will be skipped."
+        }
+    else
+        zsh_setup::core::logger::info "Running in no-privileges mode. Privilege-requiring operations will be skipped."
+    fi
     
     # Initialize state
     local state_file=$(zsh_setup::state::store::_get_state_file)
@@ -144,20 +165,30 @@ zsh_setup::commands::install::_backup_config() {
 # Install Oh My Zsh
 zsh_setup::commands::install::_install_ohmyzsh() {
     zsh_setup::core::bootstrap::load_module utils::network
-    zsh_setup::core::logger::info "Installing Oh My Zsh..."
+    zsh_setup::core::bootstrap::load_module core::progress 2>/dev/null || true
     
     local ohmyzsh_dir=$(zsh_setup::core::config::get oh_my_zsh_dir)
     
     if [[ -d "$ohmyzsh_dir" ]]; then
-        zsh_setup::core::logger::info "Oh My Zsh is already installed. Skipping installation."
+        if declare -f zsh_setup::core::progress::status_line &>/dev/null; then
+            zsh_setup::core::progress::status_line "Oh My Zsh is already installed. Skipping installation."
+        else
+            zsh_setup::core::logger::info "Oh My Zsh is already installed. Skipping installation."
+        fi
         return 0
     fi
     
     local install_script="/tmp/install_ohmyzsh.sh"
     local install_url=$(zsh_setup::core::config::get oh_my_zsh_install_url "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh")
     
-    zsh_setup::core::logger::info "Downloading Oh My Zsh installer..."
-    if zsh_setup::utils::network::download_with_retry "$install_url" "$install_script" "Downloading Oh My Zsh installer"; then
+    local spinner_pid=""
+    if declare -f zsh_setup::core::progress::spinner_start &>/dev/null; then
+        spinner_pid=$(zsh_setup::core::progress::spinner_start "Downloading Oh My Zsh installer")
+    else
+        zsh_setup::core::logger::info "Downloading Oh My Zsh installer..."
+    fi
+    
+    if zsh_setup::utils::network::download_with_retry "$install_url" "$install_script" "Downloading Oh My Zsh installer" >/dev/null 2>&1; then
         # Modify installer
         if [[ "$OSTYPE" == "darwin"* ]]; then
             sed -i '' 's/exec zsh -l/exit 0/g' "$install_script"
@@ -165,18 +196,33 @@ zsh_setup::commands::install::_install_ohmyzsh() {
             sed -i 's/exec zsh -l/exit 0/g' "$install_script"
         fi
         
-        # Run installer
-        zsh_setup::core::logger::info "Running Oh My Zsh installer..."
-        if zsh_setup::core::errors::execute_with_retry "Installing Oh My Zsh" sh "$install_script" --unattended; then
+        # Update spinner message
+        if [[ -n "$spinner_pid" ]]; then
+            zsh_setup::core::progress::spinner_stop "$spinner_pid" "" "" 0
+            spinner_pid=$(zsh_setup::core::progress::spinner_start "Installing Oh My Zsh")
+        else
+            zsh_setup::core::logger::info "Running Oh My Zsh installer..."
+        fi
+        
+        if zsh_setup::core::errors::execute_with_retry "Installing Oh My Zsh" sh "$install_script" --unattended >/dev/null 2>&1; then
             if [[ -d "$ohmyzsh_dir" ]]; then
-                zsh_setup::core::logger::success "Oh My Zsh installed successfully."
+                if [[ -n "$spinner_pid" ]]; then
+                    zsh_setup::core::progress::spinner_stop "$spinner_pid" "✅ Oh My Zsh installed successfully." "" 0
+                else
+                    zsh_setup::core::logger::success "Oh My Zsh installed successfully."
+                fi
                 rm -f "$install_script" "${install_script}.bak"
                 return 0
             fi
         fi
     fi
     
-    zsh_setup::core::logger::error "Oh My Zsh installation failed."
+    if [[ -n "$spinner_pid" ]]; then
+        zsh_setup::core::progress::spinner_stop "$spinner_pid" "" "❌ Failed to install Oh My Zsh" 1
+    fi
+    
+    zsh_setup::core::errors::handle 1 "Oh My Zsh installation" \
+        "Failed to install Oh My Zsh. Check network connectivity and try again."
     rm -f "$install_script" "${install_script}.bak"
     return 1
 }

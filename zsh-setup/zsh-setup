@@ -7,7 +7,7 @@
 #==============================================================================
 
 # Determine root directory
-ZSH_SETUP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ZSH_SETUP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export ZSH_SETUP_ROOT
 
 # Load bootstrap
@@ -15,6 +15,18 @@ source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh"
 
 # Initialize
 zsh_setup::core::bootstrap::init || exit 1
+
+# Validate configuration early (for commands that need it)
+# Skip validation for help command
+if [[ "${1:-help}" != "help" && "${1:-help}" != "--help" && "${1:-help}" != "-h" ]]; then
+    zsh_setup::core::bootstrap::load_module "config::validator" 2>/dev/null || true
+    if declare -f zsh_setup::config::validator::validate_all &>/dev/null; then
+        if ! zsh_setup::config::validator::validate_all "$ZSH_SETUP_ROOT" 2>/dev/null; then
+            zsh_setup::core::logger::warn "Configuration validation found issues. Some features may not work correctly."
+            zsh_setup::core::logger::info "Run 'zsh-setup help' for more information or fix configuration files."
+        fi
+    fi
+fi
 
 #------------------------------------------------------------------------------
 # Command Router
@@ -42,6 +54,7 @@ Options:
   --skip-ohmyzsh      Skip Oh My Zsh installation
   --skip-plugins      Skip plugin installation
   --no-shell-change   Do not change the default shell to Zsh
+  --no-privileges     Explicitly disable privilege-requiring operations
   --quiet             Suppress verbose output
   --dry-run           Preview changes without executing
 

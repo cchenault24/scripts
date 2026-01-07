@@ -2,14 +2,13 @@
 
 ## Overview
 
-The zsh-setup project has been re-architected into a modular, namespaced system that improves maintainability, testability, and extensibility while maintaining full backward compatibility.
+The zsh-setup project uses a modern, modular architecture with namespaced functions that improves maintainability, testability, and extensibility.
 
 ## Directory Structure
 
 ```
 zsh-setup/
-├── bin/
-│   └── zsh-setup              # Main CLI entry point
+├── zsh-setup                   # Main CLI entry point
 ├── lib/
 │   ├── core/                  # Core infrastructure
 │   │   ├── bootstrap.sh       # Module loader
@@ -104,9 +103,6 @@ zsh-setup heal
 zsh-setup uninstall
 ```
 
-### Backward Compatibility
-
-The old `setup_zsh.sh` script is preserved as `setup_zsh.sh.legacy` and routes to the new system. Existing scripts and workflows continue to work.
 
 ## Module Dependencies
 
@@ -129,9 +125,6 @@ config::generator
 
 ## Migration Guide
 
-### For Users
-No changes required. The new architecture is fully backward compatible.
-
 ### For Developers
 1. Use namespaced functions instead of global ones
 2. Load modules via bootstrap instead of direct sourcing
@@ -145,7 +138,6 @@ No changes required. The new architecture is fully backward compatible.
 3. **Maintainability**: Organized codebase with clear dependencies
 4. **Extensibility**: Easy to add new commands and modules
 5. **Namespace Safety**: No function name conflicts
-6. **Backward Compatible**: Existing workflows continue to work
 
 ## Future Enhancements
 

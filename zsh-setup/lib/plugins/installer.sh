@@ -60,6 +60,31 @@ zsh_setup::plugins::installer::install_git() {
     # Create directory structure
     mkdir -p "$(dirname "$plugin_path")"
     
+    # Check if plugin already exists
+    if [[ -d "$plugin_path" ]]; then
+        if [[ -d "$plugin_path/.git" ]]; then
+            # Already a git repository - update it instead
+            zsh_setup::core::logger::info "${plugin_type} $plugin_name already installed. Updating..."
+            if cd "$plugin_path" && git pull --quiet 2>/dev/null; then
+                local version=$(cd "$plugin_path" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+                zsh_setup::state::store::add_plugin "$plugin_name" "git" "$version"
+                zsh_setup::core::logger::success "${plugin_type} $plugin_name updated successfully"
+                return 0
+            else
+                zsh_setup::core::logger::warn "Failed to update ${plugin_type} $plugin_name, but it's already installed"
+                # Still consider it successful since it's installed
+                local version=$(cd "$plugin_path" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+                zsh_setup::state::store::add_plugin "$plugin_name" "git" "$version"
+                return 0
+            fi
+        else
+            # Directory exists but is not a git repo - backup and remove
+            zsh_setup::core::logger::warn "Directory $plugin_path exists but is not a git repository. Backing up and removing..."
+            local backup_path="${plugin_path}.backup.$(date +%s)"
+            mv "$plugin_path" "$backup_path" 2>/dev/null || rm -rf "$plugin_path"
+        fi
+    fi
+    
     # Clone repository
     if zsh_setup::utils::network::git_clone_with_retry "$plugin_url" "$plugin_path" "Installing ${plugin_type}: $plugin_name"; then
         # Get version
@@ -190,23 +215,3 @@ zsh_setup::plugins::installer::is_installed() {
     [[ -d "$ohmyzsh_dir/plugins/$plugin_name" ]]
 }
 
-# Backward compatibility
-install_git_plugin() {
-    zsh_setup::plugins::installer::install_git "$@"
-}
-
-install_brew_plugin() {
-    zsh_setup::plugins::installer::install_brew "$@"
-}
-
-install_omz_plugin() {
-    zsh_setup::plugins::installer::install_omz "$@"
-}
-
-install_npm_plugin() {
-    zsh_setup::plugins::installer::install_npm "$@"
-}
-
-plugin_already_installed() {
-    zsh_setup::plugins::installer::is_installed "$@"
-}

@@ -11,6 +11,10 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
     source "$ZSH_SETUP_ROOT/lib/core/config.sh"
     source "$ZSH_SETUP_ROOT/lib/core/logger.sh"
     source "$ZSH_SETUP_ROOT/lib/state/store.sh"
+    # Load progress module if available
+    if [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
+        source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
+    fi
 fi
 
 #------------------------------------------------------------------------------
@@ -22,7 +26,12 @@ zsh_setup::config::generator::generate() {
     local zshrc_path=$(zsh_setup::core::config::get zshrc_path "$HOME/.zshrc")
     local temp_zshrc=$(mktemp)
     
-    zsh_setup::core::logger::info "Generating Zsh configuration..."
+    local spinner_pid=""
+    if declare -f zsh_setup::core::progress::spinner_start &>/dev/null; then
+        spinner_pid=$(zsh_setup::core::progress::spinner_start "Generating Zsh configuration")
+    else
+        zsh_setup::core::logger::info "Generating Zsh configuration..."
+    fi
     
     # Build configuration
     zsh_setup::config::generator::_generate_header "$temp_zshrc"
@@ -34,7 +43,12 @@ zsh_setup::config::generator::generate() {
     
     # Move to final location
     mv "$temp_zshrc" "$zshrc_path"
-    zsh_setup::core::logger::success "Zsh configuration generated at $zshrc_path"
+    
+    if [[ -n "$spinner_pid" ]]; then
+        zsh_setup::core::progress::spinner_stop "$spinner_pid" "✅ Zsh configuration generated at $zshrc_path" "" 0
+    else
+        zsh_setup::core::logger::success "Zsh configuration generated at $zshrc_path"
+    fi
 }
 
 # Generate header
@@ -180,8 +194,11 @@ export EDITOR="${EDITOR:-vim}"
 # Java (macOS)
 if [[ "$OSTYPE" == "darwin"* ]] && [[ -z "$JAVA_HOME" ]]; then
     if [ -f "/usr/libexec/java_home" ]; then
-        export JAVA_HOME=$(/usr/libexec/java_home)
-        export PATH="$JAVA_HOME/bin:$PATH"
+        local java_home=$(/usr/libexec/java_home 2>/dev/null)
+        if [[ -n "$java_home" ]] && [[ -d "$java_home" ]]; then
+            export JAVA_HOME="$java_home"
+            export PATH="$JAVA_HOME/bin:$PATH"
+        fi
     fi
 fi
 
@@ -241,11 +258,3 @@ source $ZSH/oh-my-zsh.sh
 EOF
 }
 
-# Backward compatibility
-generate_zsh_config() {
-    zsh_setup::config::generator::generate
-}
-
-generate_zshrc() {
-    zsh_setup::config::generator::generate
-}

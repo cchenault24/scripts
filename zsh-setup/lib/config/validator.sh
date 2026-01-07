@@ -157,15 +157,3 @@ zsh_setup::config::validator::validate_all() {
     fi
 }
 
-# Backward compatibility
-validate_plugins_config() {
-    zsh_setup::config::validator::validate_plugins "$@"
-}
-
-validate_dependencies_config() {
-    zsh_setup::config::validator::validate_dependencies "$@"
-}
-
-validate_all_configs() {
-    zsh_setup::config::validator::validate_all "$@"
-}

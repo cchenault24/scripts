@@ -128,52 +128,123 @@ zsh_setup::core::errors::handle() {
     local suggestion="${3:-}"
     
     if [[ $exit_code -ne 0 ]]; then
-        zsh_setup::core::logger::error "Error in $context (exit code: $exit_code)"
+        echo ""
+        zsh_setup::core::logger::error "❌ Error in $context (exit code: $exit_code)"
         
         if [[ -n "$suggestion" ]]; then
-            zsh_setup::core::logger::info "Suggestion: $suggestion"
+            echo ""
+            zsh_setup::core::logger::info "💡 Suggestion: $suggestion"
         fi
         
-        # Provide common troubleshooting tips
+        # Provide common troubleshooting tips with more context
         case "$context" in
-            *"git clone"*)
+            *"git clone"*|*"git"*)
                 zsh_setup::core::errors::_show_git_troubleshooting
                 ;;
-            *"curl"*|*"download"*)
+            *"curl"*|*"download"*|*"network"*)
                 zsh_setup::core::errors::_show_network_troubleshooting
                 ;;
-            *"brew"*)
+            *"brew"*|*"Homebrew"*)
                 zsh_setup::core::errors::_show_brew_troubleshooting
+                ;;
+            *"Configuration validation"*|*"config"*)
+                zsh_setup::core::errors::_show_config_troubleshooting
+                ;;
+            *"shell"*|*"chsh"*)
+                zsh_setup::core::errors::_show_shell_troubleshooting
                 ;;
             *)
                 local log_file=$(zsh_setup::core::config::get log_file "/tmp/zsh_setup.log")
-                zsh_setup::core::logger::info "Check the log file for more details: $log_file"
+                echo ""
+                zsh_setup::core::logger::info "📋 For more details, check the log file:"
+                zsh_setup::core::logger::info "   $log_file"
+                zsh_setup::core::logger::info ""
+                zsh_setup::core::logger::info "📖 For help, run: zsh-setup help"
                 ;;
         esac
+        echo ""
     fi
     
     return $exit_code
 }
 
 zsh_setup::core::errors::_show_git_troubleshooting() {
-    zsh_setup::core::logger::info "Troubleshooting tips:"
-    zsh_setup::core::logger::info "  - Check your internet connection"
-    zsh_setup::core::logger::info "  - Verify the repository URL is correct"
-    zsh_setup::core::logger::info "  - Ensure you have git installed: git --version"
+    echo ""
+    zsh_setup::core::logger::info "🔧 Troubleshooting Git issues:"
+    zsh_setup::core::logger::info "   1. Check your internet connection:"
+    zsh_setup::core::logger::info "      ping -c 3 github.com"
+    zsh_setup::core::logger::info "   2. Verify Git is installed:"
+    zsh_setup::core::logger::info "      git --version"
+    zsh_setup::core::logger::info "   3. Test repository access:"
+    zsh_setup::core::logger::info "      git ls-remote <repository-url>"
+    zsh_setup::core::logger::info "   4. Check Git configuration:"
+    zsh_setup::core::logger::info "      git config --list"
+    zsh_setup::core::logger::info ""
+    zsh_setup::core::logger::info "   If the issue persists, try installing the plugin manually:"
+    zsh_setup::core::logger::info "   git clone <repository-url> ~/.oh-my-zsh/custom/plugins/<plugin-name>"
 }
 
 zsh_setup::core::errors::_show_network_troubleshooting() {
-    zsh_setup::core::logger::info "Troubleshooting tips:"
-    zsh_setup::core::logger::info "  - Check your internet connection"
-    zsh_setup::core::logger::info "  - Verify the URL is accessible"
-    zsh_setup::core::logger::info "  - Check firewall/proxy settings"
+    echo ""
+    zsh_setup::core::logger::info "🔧 Troubleshooting Network issues:"
+    zsh_setup::core::logger::info "   1. Check internet connectivity:"
+    zsh_setup::core::logger::info "      curl -I https://github.com"
+    zsh_setup::core::logger::info "   2. Verify DNS resolution:"
+    zsh_setup::core::logger::info "      nslookup github.com"
+    zsh_setup::core::logger::info "   3. Check firewall/proxy settings"
+    zsh_setup::core::logger::info "   4. Try accessing the URL in a browser"
+    zsh_setup::core::logger::info ""
+    zsh_setup::core::logger::info "   If behind a corporate firewall, you may need to configure:"
+    zsh_setup::core::logger::info "   - HTTP_PROXY and HTTPS_PROXY environment variables"
+    zsh_setup::core::logger::info "   - Git proxy settings: git config --global http.proxy <proxy-url>"
 }
 
 zsh_setup::core::errors::_show_brew_troubleshooting() {
-    zsh_setup::core::logger::info "Troubleshooting tips:"
-    zsh_setup::core::logger::info "  - Ensure Homebrew is installed: brew --version"
-    zsh_setup::core::logger::info "  - Update Homebrew: brew update"
-    zsh_setup::core::logger::info "  - Check Homebrew status: brew doctor"
+    echo ""
+    zsh_setup::core::logger::info "🔧 Troubleshooting Homebrew issues:"
+    zsh_setup::core::logger::info "   1. Verify Homebrew installation:"
+    zsh_setup::core::logger::info "      brew --version"
+    zsh_setup::core::logger::info "   2. Update Homebrew:"
+    zsh_setup::core::logger::info "      brew update"
+    zsh_setup::core::logger::info "   3. Check Homebrew status:"
+    zsh_setup::core::logger::info "      brew doctor"
+    zsh_setup::core::logger::info "   4. Check if you have write permissions:"
+    zsh_setup::core::logger::info "      ls -ld $(brew --prefix)"
+    zsh_setup::core::logger::info ""
+    zsh_setup::core::logger::info "   If you don't have sudo privileges, Homebrew may be limited."
+    zsh_setup::core::logger::info "   Run with --no-privileges to skip system package installations."
+}
+
+zsh_setup::core::errors::_show_config_troubleshooting() {
+    echo ""
+    zsh_setup::core::logger::info "🔧 Troubleshooting Configuration issues:"
+    zsh_setup::core::logger::info "   1. Validate configuration files:"
+    zsh_setup::core::logger::info "      zsh-setup help"
+    zsh_setup::core::logger::info "   2. Check plugins.conf format:"
+    zsh_setup::core::logger::info "      Each line should be: plugin_name|type|url|description"
+    zsh_setup::core::logger::info "   3. Check plugin_dependencies.conf format:"
+    zsh_setup::core::logger::info "      Each line should be: plugin_name=dependency1,dependency2"
+    zsh_setup::core::logger::info "   4. Review the configuration files:"
+    zsh_setup::core::logger::info "      cat $ZSH_SETUP_ROOT/plugins.conf"
+    zsh_setup::core::logger::info "      cat $ZSH_SETUP_ROOT/plugin_dependencies.conf"
+}
+
+zsh_setup::core::errors::_show_shell_troubleshooting() {
+    echo ""
+    zsh_setup::core::logger::info "🔧 Troubleshooting Shell change issues:"
+    zsh_setup::core::logger::info "   1. Verify Zsh is installed:"
+    zsh_setup::core::logger::info "      which zsh"
+    zsh_setup::core::logger::info "   2. Check if Zsh is in /etc/shells:"
+    zsh_setup::core::logger::info "      grep zsh /etc/shells"
+    zsh_setup::core::logger::info "   3. If not, add it (requires sudo):"
+    zsh_setup::core::logger::info "      sudo sh -c 'echo $(which zsh) >> /etc/shells'"
+    zsh_setup::core::logger::info "   4. Change shell manually:"
+    zsh_setup::core::logger::info "      chsh -s $(which zsh)"
+    zsh_setup::core::logger::info ""
+    zsh_setup::core::logger::info "   If you don't have sudo privileges, you can:"
+    zsh_setup::core::logger::info "   - Use Zsh manually: type 'zsh' in your terminal"
+    zsh_setup::core::logger::info "   - Add 'exec zsh' to your .bashrc or .profile"
+    zsh_setup::core::logger::info "   - Run with --no-shell-change flag"
 }
 
 # Set up error trap
@@ -182,23 +253,3 @@ zsh_setup::core::errors::setup_trap() {
     trap "zsh_setup::core::errors::handle \$? '$context' 'Check the log file for details: $(zsh_setup::core::config::get log_file)'" ERR
 }
 
-# Backward compatibility functions
-execute_with_retry() {
-    zsh_setup::core::errors::execute_with_retry "$@"
-}
-
-execute_network_with_retry() {
-    zsh_setup::core::errors::execute_network_with_retry "$@"
-}
-
-check_network_connectivity() {
-    zsh_setup::core::errors::check_network_connectivity "$@"
-}
-
-validate_url() {
-    zsh_setup::core::errors::validate_url "$@"
-}
-
-setup_error_trap() {
-    zsh_setup::core::errors::setup_trap "$@"
-}
