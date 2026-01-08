@@ -158,19 +158,14 @@ check_system_resources() {
       fi
       
       if [[ $should_warn -eq 1 ]]; then
-        print_warn "Low available memory detected (~${free_gb}GB free)"
-        echo -e "${YELLOW}  → Large models may fail with Error 500 if memory is insufficient${NC}" >&2
-        echo -e "${YELLOW}  → Consider closing other applications or using a smaller model${NC}" >&2
-        echo "" >&2
+        print_warn "Low memory: ~${free_gb}GB free (may cause errors)"
       fi
     fi
   fi
   
   # Check if model is already loaded (to avoid double-loading)
   if ollama ps 2>/dev/null | grep -q "^${model}"; then
-    echo -e "${GREEN}  ✓ Model is already loaded in memory${NC}" >&2
-  else
-    echo -e "${YELLOW}  → Model will be loaded on first use (may take time and memory)${NC}" >&2
+    echo -e "Model loaded in memory" >&2
   fi
 }
 
@@ -181,8 +176,8 @@ benchmark_model() {
   local prompt_name="$3"
   
   # Output info message to stderr so it doesn't get captured
-  echo -e "${BLUE}ℹ Testing $model with $prompt_name prompt...${NC}" >&2
-  echo -e "${YELLOW}  → Starting benchmark...${NC}" >&2
+  echo -e "Prompt: $prompt" >&2
+  echo "" >&2
   
   # Measure time-to-first-token
   local first_token_time=0
@@ -193,7 +188,7 @@ benchmark_model() {
   local total_time=0
   
   # Run model and capture output with timing
-  echo -e "${YELLOW}  → Running model (this may take a moment)...${NC}" >&2
+  echo -e "Running..." >&2
   test_start=$(date +%s.%N 2>/dev/null || date +%s)
   
   # Use macOS-compatible timeout wrapper
@@ -248,8 +243,16 @@ benchmark_model() {
         "$HOME/.ollama/logs/server.log"
         "$HOME/Library/Logs/ollama/server.log"
         "/var/log/ollama/server.log"
-        "$(brew --prefix)/var/log/ollama/server.log" 2>/dev/null
       )
+      
+      # Add brew prefix location if available
+      if command -v brew &>/dev/null; then
+        local brew_prefix
+        brew_prefix=$(brew --prefix 2>/dev/null || echo "")
+        if [[ -n "$brew_prefix" ]]; then
+          possible_locations+=("$brew_prefix/var/log/ollama/server.log")
+        fi
+      fi
       
       for loc in "${possible_locations[@]}"; do
         if [[ -f "$loc" ]]; then
@@ -314,12 +317,9 @@ benchmark_model() {
     return 1
   fi
   
-  echo -e "${GREEN}  ✓ Response received${NC}" >&2
-  
   # Validate we got a response (check for empty or whitespace-only)
   if [[ -z "${response// }" ]]; then
     print_error "Benchmark failed for $model - no response received (empty or whitespace-only)"
-    echo -e "${YELLOW}  → The model may not have generated any output${NC}" >&2
     return 1
   fi
   
@@ -328,14 +328,11 @@ benchmark_model() {
   first_line=$(echo "$response" | head -n 1 | tr '[:upper:]' '[:lower:]')
   if [[ "$first_line" =~ ^(error|failed|cannot|unable|model.*not.*found|pull.*model) ]]; then
     print_error "Benchmark failed for $model - received error message"
-    echo -e "${YELLOW}  → Error: $(echo "$response" | head -n 1)${NC}" >&2
+    echo -e "Error: $(echo "$response" | head -n 1)" >&2
     return 1
   fi
   
-  echo -e "${YELLOW}  → Analyzing response...${NC}" >&2
-  
-  # Calculate total time
-  echo -e "${YELLOW}  → Calculating timing metrics...${NC}" >&2
+  echo -e "Analyzing..." >&2
   if command -v bc &>/dev/null && [[ "$test_start" =~ \. ]] && [[ "$test_end" =~ \. ]]; then
     # Both have decimal precision
     total_time=$(echo "scale=3; $test_end - $test_start" | bc 2>/dev/null || echo "0")
@@ -368,7 +365,6 @@ benchmark_model() {
   fi
   
   # Estimate token count (rough: ~4 chars per token)
-  echo -e "${YELLOW}  → Estimating token count...${NC}" >&2
   local response_length=${#response}
   if [[ $response_length -gt 0 ]]; then
     token_count=$(( response_length / 4 ))
@@ -381,7 +377,6 @@ benchmark_model() {
   fi
   
   # Calculate tokens per second
-  echo -e "${YELLOW}  → Calculating tokens per second...${NC}" >&2
   local tokens_per_sec=0
   if [[ -n "$response" ]] && [[ $token_count -gt 0 ]] && [[ $(echo "$total_time" | awk '{if ($1 > 0) print 1; else print 0}') -eq 1 ]]; then
     if command -v bc &>/dev/null; then
@@ -392,7 +387,6 @@ benchmark_model() {
   fi
   
   # Memory usage (check ollama ps)
-  echo -e "${YELLOW}  → Checking memory usage...${NC}" >&2
   local memory_mb=0
   # Use exact model name match to avoid partial matches
   local ps_output=$(ollama ps 2>/dev/null | awk -v model="$model" '$1 == model {print}' || echo "")
@@ -421,11 +415,8 @@ benchmark_model() {
   
   # Output formatted results to stderr (so they display but aren't captured)
   {
-    echo -e "${GREEN}  ✓ Analysis complete${NC}"
-    echo ""
-    echo -e "${CYAN}Results for $model ($prompt_name):${NC}"
+    echo "Results:"
     echo "  Time to first token: ~${first_token_time}s"
-    echo "  Estimated tokens: ~${token_count}"
     echo "  Tokens per second: ~${tokens_per_sec}"
     if [[ $memory_mb -gt 0 ]]; then
       echo "  Memory usage: ~${memory_mb}MB"
@@ -451,24 +442,19 @@ run_benchmark() {
   fi
   
   # Quick connectivity test - verify ollama can respond
-  echo -e "${YELLOW}  → Verifying Ollama connectivity...${NC}" >&2
   if ! curl -s --max-time 5 http://localhost:11434/api/tags &>/dev/null; then
     print_error "Cannot connect to Ollama service"
     print_info "Ensure Ollama is running: brew services start ollama"
     return 1
   fi
-  echo -e "${GREEN}  ✓ Ollama service is accessible${NC}" >&2
   
   # Check system resources
-  echo -e "${YELLOW}  → Checking system resources...${NC}" >&2
   check_system_resources "$model"
   
   # Warn about very large models before starting
   if echo "$model" | grep -qiE "70|65|80|90|100"; then
-    print_warn "Warning: This is a very large model (70B+ parameters)"
-    echo -e "${YELLOW}  → Large models like this typically require 40-50GB+ RAM${NC}" >&2
-    echo -e "${YELLOW}  → If you encounter Error 500, try a smaller quantized model instead${NC}" >&2
-    if ! prompt_yes_no "Continue with benchmark anyway?" "y"; then
+    print_warn "Large model (70B+) - requires 40-50GB+ RAM"
+    if ! prompt_yes_no "Continue?" "y"; then
       print_info "Benchmark cancelled"
       return 0
     fi
@@ -484,33 +470,27 @@ run_benchmark() {
   
   # Short prompt
   ((test_count++))
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
-  echo -e "${BOLD}Test $test_count of $total_tests: Short Prompt${NC}" >&2
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "Test $test_count of $total_tests: Short Prompt" >&2
+  echo "" >&2
   if result=$(benchmark_model "$model" "$PROMPT_SHORT" "short"); then
     results+=("$result")
-    echo -e "${GREEN}✓ Short prompt test completed${NC}" >&2
   else
-    echo -e "${RED}✗ Short prompt test failed${NC}" >&2
+    echo -e "Test failed" >&2
   fi
   
-  echo -e "${YELLOW}Pausing 2 seconds before next test...${NC}" >&2
   sleep 2
   echo "" >&2
   
   # Medium prompt
   ((test_count++))
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
-  echo -e "${BOLD}Test $test_count of $total_tests: Medium Prompt${NC}" >&2
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "Test $test_count of $total_tests: Medium Prompt" >&2
+  echo "" >&2
   if result=$(benchmark_model "$model" "$PROMPT_MEDIUM" "medium"); then
     results+=("$result")
-    echo -e "${GREEN}✓ Medium prompt test completed${NC}" >&2
   else
-    echo -e "${RED}✗ Medium prompt test failed${NC}" >&2
+    echo -e "Test failed" >&2
   fi
   
-  echo -e "${YELLOW}Pausing 2 seconds before next test...${NC}" >&2
   sleep 2
   echo "" >&2
   
@@ -518,25 +498,22 @@ run_benchmark() {
   if prompt_yes_no "Run long prompt test? (may take several minutes)" "n"; then
     ((total_tests++))
     ((test_count++))
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
-    echo -e "${BOLD}Test $test_count of $total_tests: Long Prompt${NC}" >&2
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "Test $test_count of $total_tests: Long Prompt" >&2
+    echo "" >&2
     if result=$(benchmark_model "$model" "$PROMPT_LONG" "long"); then
       results+=("$result")
-      echo -e "${GREEN}✓ Long prompt test completed${NC}" >&2
     else
-      echo -e "${RED}✗ Long prompt test failed${NC}" >&2
+      echo -e "Test failed" >&2
     fi
     echo "" >&2
   fi
   
   # Summary
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
-  echo -e "${BOLD}Benchmark Summary${NC}" >&2
-  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
-  echo -e "${GREEN}✓ Completed $test_count test(s)${NC}" >&2
-  echo -e "${GREEN}✓ Collected ${#results[@]} result(s)${NC}" >&2
-  echo -e "${YELLOW}→ Generating report...${NC}" >&2
+  echo "" >&2
+  echo -e "Benchmark Summary:" >&2
+  echo -e "  Completed $test_count test(s)" >&2
+  echo -e "  Collected ${#results[@]} result(s)" >&2
+  echo -e "  Generating report..." >&2
   echo "" >&2
   
   # Generate report (safely handle empty array with set -u)
