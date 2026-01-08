@@ -54,7 +54,11 @@ run_with_timeout() {
   local timeout_seconds="$1"
   shift
   local cmd=("$@")
-  local response_file=$(mktemp)
+  local response_file
+  response_file=$(mktemp) || {
+    echo "Error: Failed to create temporary file" >&2
+    return 1
+  }
   local pid
   local exit_code=0
   
@@ -84,7 +88,12 @@ run_with_timeout() {
     fi
   # Fallback: background process with kill
   else
-    local stderr_file=$(mktemp)
+    local stderr_file
+    stderr_file=$(mktemp) || {
+      rm -f "$response_file"
+      echo "Error: Failed to create temporary file" >&2
+      return 1
+    }
     "${cmd[@]}" > "$response_file" 2> "$stderr_file" &
     pid=$!
     local waited=0
@@ -123,6 +132,7 @@ benchmark_model() {
   
   # Output info message to stderr so it doesn't get captured
   echo -e "${BLUE}ℹ Testing $model with $prompt_name prompt...${NC}" >&2
+  echo -e "${YELLOW}  → Starting benchmark...${NC}" >&2
   
   # Measure time-to-first-token
   local first_token_time=0
@@ -133,6 +143,7 @@ benchmark_model() {
   local total_time=0
   
   # Run model and capture output with timing
+  echo -e "${YELLOW}  → Running model (this may take a moment)...${NC}" >&2
   test_start=$(date +%s.%N 2>/dev/null || date +%s)
   
   # Use macOS-compatible timeout wrapper
@@ -142,14 +153,18 @@ benchmark_model() {
   fi
   
   test_end=$(date +%s.%N 2>/dev/null || date +%s)
+  echo -e "${GREEN}  ✓ Response received${NC}" >&2
   
-  # Validate we got a response
-  if [[ -z "$response" ]]; then
+  # Validate we got a response (check for empty or whitespace-only)
+  if [[ -z "${response// }" ]]; then
     print_error "Benchmark failed for $model - no response received"
     return 1
   fi
   
+  echo -e "${YELLOW}  → Analyzing response...${NC}" >&2
+  
   # Calculate total time
+  echo -e "${YELLOW}  → Calculating timing metrics...${NC}" >&2
   if command -v bc &>/dev/null && [[ "$test_start" =~ \. ]] && [[ "$test_end" =~ \. ]]; then
     # Both have decimal precision
     total_time=$(echo "scale=3; $test_end - $test_start" | bc 2>/dev/null || echo "0")
@@ -182,6 +197,7 @@ benchmark_model() {
   fi
   
   # Estimate token count (rough: ~4 chars per token)
+  echo -e "${YELLOW}  → Estimating token count...${NC}" >&2
   local response_length=${#response}
   if [[ $response_length -gt 0 ]]; then
     token_count=$(( response_length / 4 ))
@@ -194,6 +210,7 @@ benchmark_model() {
   fi
   
   # Calculate tokens per second
+  echo -e "${YELLOW}  → Calculating tokens per second...${NC}" >&2
   local tokens_per_sec=0
   if [[ -n "$response" ]] && [[ $token_count -gt 0 ]] && [[ $(echo "$total_time" | awk '{if ($1 > 0) print 1; else print 0}') -eq 1 ]]; then
     if command -v bc &>/dev/null; then
@@ -204,6 +221,7 @@ benchmark_model() {
   fi
   
   # Memory usage (check ollama ps)
+  echo -e "${YELLOW}  → Checking memory usage...${NC}" >&2
   local memory_mb=0
   # Use exact model name match to avoid partial matches
   local ps_output=$(ollama ps 2>/dev/null | awk -v model="$model" '$1 == model {print}' || echo "")
@@ -212,23 +230,27 @@ benchmark_model() {
     local mem_field=$(echo "$ps_output" | awk '{for(i=1;i<=NF;i++) if($i ~ /[0-9]+(\.[0-9]+)?(GB|MB)/) {print $i; exit}}')
     if [[ -n "$mem_field" ]]; then
       local mem_value=$(echo "$mem_field" | sed -E 's/(GB|MB)//' | tr -d ' ')
-      if [[ "$mem_field" =~ GB ]]; then
-        if command -v bc &>/dev/null; then
-          local memory_mb_decimal=$(echo "scale=0; $mem_value * 1024" | bc 2>/dev/null || echo "0")
-          memory_mb=${memory_mb_decimal%%.*}
-        else
-          # Integer fallback
-          local mem_int=${mem_value%%.*}
-          memory_mb=$(( mem_int * 1024 ))
+      # Validate mem_value is numeric before arithmetic
+      if [[ -n "$mem_value" ]] && [[ "$mem_value" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+        if [[ "$mem_field" =~ GB ]]; then
+          if command -v bc &>/dev/null; then
+            local memory_mb_decimal=$(echo "scale=0; $mem_value * 1024" | bc 2>/dev/null || echo "0")
+            memory_mb=${memory_mb_decimal%%.*}
+          else
+            # Integer fallback
+            local mem_int=${mem_value%%.*}
+            memory_mb=$(( mem_int * 1024 ))
+          fi
+        elif [[ "$mem_field" =~ MB ]]; then
+          memory_mb=${mem_value%%.*}
         fi
-      elif [[ "$mem_field" =~ MB ]]; then
-        memory_mb=${mem_value%%.*}
       fi
     fi
   fi
   
   # Output formatted results to stderr (so they display but aren't captured)
   {
+    echo -e "${GREEN}  ✓ Analysis complete${NC}"
     echo ""
     echo -e "${CYAN}Results for $model ($prompt_name):${NC}"
     echo "  Time to first token: ~${first_token_time}s"
@@ -250,9 +272,10 @@ run_benchmark() {
   
   print_header "📊 Benchmarking: $model"
   
-  # Check if model exists by checking first column of ollama list output
-  if ! ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -q "^${model}$"; then
-    print_error "Model $model not found"
+  # Verify model is actually installed and ready
+  if ! ollama show "$model" &>/dev/null; then
+    print_error "Model $model is not installed or not ready"
+    print_info "Install with: ollama pull $model"
     return 1
   fi
   
@@ -260,30 +283,72 @@ run_benchmark() {
   echo ""
   
   local results=()
+  local test_count=0
+  local total_tests=2
   
   # Short prompt
+  ((test_count++))
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "${BOLD}Test $test_count of $total_tests: Short Prompt${NC}" >&2
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
   if result=$(benchmark_model "$model" "$PROMPT_SHORT" "short"); then
     results+=("$result")
+    echo -e "${GREEN}✓ Short prompt test completed${NC}" >&2
+  else
+    echo -e "${RED}✗ Short prompt test failed${NC}" >&2
   fi
   
+  echo -e "${YELLOW}Pausing 2 seconds before next test...${NC}" >&2
   sleep 2
+  echo "" >&2
   
   # Medium prompt
+  ((test_count++))
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "${BOLD}Test $test_count of $total_tests: Medium Prompt${NC}" >&2
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
   if result=$(benchmark_model "$model" "$PROMPT_MEDIUM" "medium"); then
     results+=("$result")
+    echo -e "${GREEN}✓ Medium prompt test completed${NC}" >&2
+  else
+    echo -e "${RED}✗ Medium prompt test failed${NC}" >&2
   fi
   
+  echo -e "${YELLOW}Pausing 2 seconds before next test...${NC}" >&2
   sleep 2
+  echo "" >&2
   
   # Long prompt (optional, skip if model is slow)
   if prompt_yes_no "Run long prompt test? (may take several minutes)" "n"; then
+    ((total_tests++))
+    ((test_count++))
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "${BOLD}Test $test_count of $total_tests: Long Prompt${NC}" >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
     if result=$(benchmark_model "$model" "$PROMPT_LONG" "long"); then
       results+=("$result")
+      echo -e "${GREEN}✓ Long prompt test completed${NC}" >&2
+    else
+      echo -e "${RED}✗ Long prompt test failed${NC}" >&2
     fi
+    echo "" >&2
   fi
   
-  # Generate report
-  generate_benchmark_report "$model" "${results[@]}"
+  # Summary
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "${BOLD}Benchmark Summary${NC}" >&2
+  echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+  echo -e "${GREEN}✓ Completed $test_count test(s)${NC}" >&2
+  echo -e "${GREEN}✓ Collected ${#results[@]} result(s)${NC}" >&2
+  echo -e "${YELLOW}→ Generating report...${NC}" >&2
+  echo "" >&2
+  
+  # Generate report (safely handle empty array with set -u)
+  if [[ ${#results[@]} -gt 0 ]]; then
+    generate_benchmark_report "$model" "${results[@]}"
+  else
+    generate_benchmark_report "$model"
+  fi
 }
 
 # Generate benchmark report
@@ -298,6 +363,11 @@ generate_benchmark_report() {
   model_sanitized="${model_sanitized// /_}"
   model_sanitized="${model_sanitized//[^a-zA-Z0-9._-]/}"
   
+  # Ensure model_sanitized is not empty (fallback to "unknown-model")
+  if [[ -z "$model_sanitized" ]]; then
+    model_sanitized="unknown-model"
+  fi
+  
   # Ensure STATE_DIR exists
   if [[ ! -d "$STATE_DIR" ]]; then
     mkdir -p "$STATE_DIR" || {
@@ -306,7 +376,11 @@ generate_benchmark_report() {
     }
   fi
   
-  local report_file="$STATE_DIR/benchmark-${model_sanitized}-$(date +%Y%m%d-%H%M%S).txt"
+  # Generate timestamp safely
+  local timestamp
+  timestamp=$(date +%Y%m%d-%H%M%S 2>/dev/null || echo "$(date +%s)")
+  
+  local report_file="$STATE_DIR/benchmark-${model_sanitized}-${timestamp}.txt"
   
   {
     echo "Model Benchmark Report: $model"
@@ -321,6 +395,8 @@ generate_benchmark_report() {
     else
       for result in "${results[@]}"; do
         # Parse 6 fields: model|prompt_name|first_token_time|token_count|tokens_per_sec|memory_mb
+        # Initialize variables to prevent unbound variable errors with set -u
+        local m="" pn="" ft="" tc="" tps="" mem=""
         IFS='|' read -r m pn ft tc tps mem <<< "$result"
         echo "Prompt: $pn"
         echo "  Time to first token: ${ft}s"
@@ -345,6 +421,8 @@ generate_benchmark_report() {
       local tps_sum=0
       for result in "${results[@]}"; do
         # Parse 6 fields: model|prompt_name|first_token_time|token_count|tokens_per_sec|memory_mb
+        # Initialize variables to prevent unbound variable errors with set -u
+        local m="" pn="" ft="" tc="" tps="" mem=""
         IFS='|' read -r m pn ft tc tps mem <<< "$result"
         # Extract numeric value from tps (handle decimal strings)
         local tps_num=$(echo "$tps" | awk '{print $1}' 2>/dev/null || echo "0")
@@ -396,7 +474,10 @@ generate_benchmark_report() {
       fi
     fi
     
-  } > "$report_file"
+  } > "$report_file" || {
+    print_error "Failed to write report file: $report_file"
+    return 1
+  }
   
   print_success "Report generated: $report_file"
   print_info "View with: cat $report_file"
@@ -405,9 +486,9 @@ generate_benchmark_report() {
 prompt_yes_no() {
   local prompt="$1"
   local default="${2:-n}"
-  local choice
+  local choice=""
   echo -e "${YELLOW}$prompt${NC} [y/n] (default: $default): "
-  read -r choice
+  read -r choice || true
   choice=${choice:-$default}
   case "$choice" in
     [Yy]|[Yy][Ee][Ss]) return 0 ;;
@@ -432,32 +513,47 @@ main() {
     exit 1
   fi
   
-  # List available models
-  local models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  # List available models and verify they're actually installed
+  local all_models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
   
-  if [[ -z "$models" ]]; then
+  if [[ -z "$all_models" ]]; then
     print_error "No models installed"
+    exit 1
+  fi
+  
+  # Filter to only models that are actually installed and ready
+  print_info "Verifying installed models..."
+  local model_list=()
+  while IFS= read -r model; do
+    if [[ -n "$model" ]]; then
+      # Verify model is actually installed by checking if we can get its info
+      if ollama show "$model" &>/dev/null; then
+        model_list+=("$model")
+      fi
+    fi
+  done <<< "$all_models"
+  
+  if [[ ${#model_list[@]} -eq 0 ]]; then
+    print_error "No fully installed models found"
+    print_info "Install models with: ollama pull <model-name>"
     exit 1
   fi
   
   # Select model
   echo "Available models:"
   echo ""
-  local model_list=()
   local index=1
-  while IFS= read -r model; do
-    if [[ -n "$model" ]]; then
-      echo "  $index) $model"
-      model_list+=("$model")
-      ((index++))
-    fi
-  done <<< "$models"
+  for model in "${model_list[@]}"; do
+    echo "  $index) $model"
+    ((index++))
+  done
   echo ""
   
-  local choice
-  read -p "Select model (1-${#model_list[@]}): " choice
+  local choice=""
+  read -p "Select model (1-${#model_list[@]}): " choice || true
   
-  if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 || $choice -gt ${#model_list[@]} ]]; then
+  # Validate choice is not empty and is a valid number
+  if [[ -z "$choice" ]] || [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 || $choice -gt ${#model_list[@]} ]]; then
     print_error "Invalid selection"
     exit 1
   fi
