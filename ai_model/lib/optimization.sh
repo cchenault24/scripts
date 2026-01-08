@@ -609,9 +609,11 @@ route_task_to_model() {
   case "$task_type" in
     autocomplete|simple|quick)
       # Use smallest, fastest model for autocomplete
-      # Priority: qwen2.5-coder:7b > llama3.1:8b > others
-      if echo "$installed_models" | grep -q "^qwen2.5-coder:7b$"; then
-        selected_model="qwen2.5-coder:7b"
+      # Priority: codestral > gemma2:9b > llama3.1:8b > others
+      if echo "$installed_models" | grep -q "^codestral$"; then
+        selected_model="codestral"
+      elif echo "$installed_models" | grep -q "^gemma2:9b$"; then
+        selected_model="gemma2:9b"
       elif echo "$installed_models" | grep -q "^llama3.1:8b$"; then
         selected_model="llama3.1:8b"
       else
@@ -621,26 +623,28 @@ route_task_to_model() {
       ;;
     coding|generation|moderate)
       # Use balanced model for coding tasks
-      # Priority: qwen2.5-coder:14b > codestral:22b > llama3.1:8b
-      if echo "$installed_models" | grep -q "^qwen2.5-coder:14b$"; then
-        selected_model="qwen2.5-coder:14b"
-      elif echo "$installed_models" | grep -q "^codestral:22b$"; then
-        selected_model="codestral:22b"
+      # Priority: codestral > llama3.1:8b > gemma2:9b
+      if echo "$installed_models" | grep -q "^codestral$"; then
+        selected_model="codestral"
       elif echo "$installed_models" | grep -q "^llama3.1:8b$"; then
         selected_model="llama3.1:8b"
+      elif echo "$installed_models" | grep -q "^gemma2:9b$"; then
+        selected_model="gemma2:9b"
       else
         selected_model=$(echo "$installed_models" | head -n 1)
       fi
       ;;
     refactoring|complex|multi-file|analysis)
       # Use largest available model for complex tasks
-      # Priority: llama3.1:70b > codestral:22b > qwen2.5-coder:14b
+      # Priority: llama3.1:70b > devstral:27b > gpt-oss:20b > codestral
       if echo "$installed_models" | grep -q "^llama3.1:70b$" && [[ "$tier" == "S" ]]; then
         selected_model="llama3.1:70b"
-      elif echo "$installed_models" | grep -q "^codestral:22b$"; then
-        selected_model="codestral:22b"
-      elif echo "$installed_models" | grep -q "^qwen2.5-coder:14b$"; then
-        selected_model="qwen2.5-coder:14b"
+      elif echo "$installed_models" | grep -q "^devstral:27b$"; then
+        selected_model="devstral:27b"
+      elif echo "$installed_models" | grep -q "^gpt-oss:20b$"; then
+        selected_model="gpt-oss:20b"
+      elif echo "$installed_models" | grep -q "^codestral$"; then
+        selected_model="codestral"
       else
         # Fallback: largest available model
         selected_model=$(echo "$installed_models" | tail -n 1)
@@ -648,13 +652,13 @@ route_task_to_model() {
       ;;
     code-review|testing|debugging)
       # Use balanced model with good reasoning
-      # Priority: codestral:22b > qwen2.5-coder:14b > llama3.1:8b
-      if echo "$installed_models" | grep -q "^codestral:22b$"; then
-        selected_model="codestral:22b"
-      elif echo "$installed_models" | grep -q "^qwen2.5-coder:14b$"; then
-        selected_model="qwen2.5-coder:14b"
+      # Priority: codestral > llama3.1:8b > gemma2:9b
+      if echo "$installed_models" | grep -q "^codestral$"; then
+        selected_model="codestral"
       elif echo "$installed_models" | grep -q "^llama3.1:8b$"; then
         selected_model="llama3.1:8b"
+      elif echo "$installed_models" | grep -q "^gemma2:9b$"; then
+        selected_model="gemma2:9b"
       else
         selected_model=$(echo "$installed_models" | head -n 1)
       fi
@@ -1858,6 +1862,81 @@ track_prompt_performance() {
     
     echo "$updated_data" > "$PROMPT_OPTIMIZATION_FILE"
     log_info "Tracked prompt performance: hash=$prompt_hash, success=$success"
+  fi
+}
+
+# ============================================================================
+# Auto-Start Control (Disable/Enable)
+# ============================================================================
+
+# Disable flag file path
+AUTO_START_DISABLED_FLAG="$STATE_DIR/optimizations.disabled"
+
+# Check if auto-start is disabled
+is_auto_start_disabled() {
+  if [[ -f "$AUTO_START_DISABLED_FLAG" ]]; then
+    return 0  # Disabled
+  else
+    return 1  # Enabled
+  fi
+}
+
+# Disable auto-start (create flag file)
+disable_auto_start() {
+  mkdir -p "$STATE_DIR"
+  touch "$AUTO_START_DISABLED_FLAG"
+  log_info "Auto-start disabled (flag file created)"
+}
+
+# Enable auto-start (remove flag file)
+enable_auto_start() {
+  if [[ -f "$AUTO_START_DISABLED_FLAG" ]]; then
+    rm -f "$AUTO_START_DISABLED_FLAG"
+    log_info "Auto-start enabled (flag file removed)"
+  fi
+}
+
+# Check if all optimization services are running
+are_optimizations_running() {
+  local pid_dir="$HOME/.local-llm-setup/pids"
+  local all_running=0
+  
+  # Check proxy
+  if [[ -f "$pid_dir/ollama_proxy.pid" ]]; then
+    local proxy_pid
+    proxy_pid=$(cat "$pid_dir/ollama_proxy.pid" 2>/dev/null || echo "")
+    if [[ -n "$proxy_pid" ]] && kill -0 "$proxy_pid" 2>/dev/null; then
+      # Also check if port is listening
+      if lsof -i ":11435" &>/dev/null 2>&1 || \
+         netstat -an 2>/dev/null | grep -q ":11435.*LISTEN"; then
+        all_running=$((all_running + 1))
+      fi
+    fi
+  fi
+  
+  # Check memory monitor
+  if [[ -f "$pid_dir/memory_monitor.pid" ]]; then
+    local monitor_pid
+    monitor_pid=$(cat "$pid_dir/memory_monitor.pid" 2>/dev/null || echo "")
+    if [[ -n "$monitor_pid" ]] && kill -0 "$monitor_pid" 2>/dev/null; then
+      all_running=$((all_running + 1))
+    fi
+  fi
+  
+  # Check queue processor
+  if [[ -f "$pid_dir/queue_processor.pid" ]]; then
+    local queue_pid
+    queue_pid=$(cat "$pid_dir/queue_processor.pid" 2>/dev/null || echo "")
+    if [[ -n "$queue_pid" ]] && kill -0 "$queue_pid" 2>/dev/null; then
+      all_running=$((all_running + 1))
+    fi
+  fi
+  
+  # Return 0 if all 3 services are running
+  if [[ $all_running -eq 3 ]]; then
+    return 0
+  else
+    return 1
   fi
 }
 

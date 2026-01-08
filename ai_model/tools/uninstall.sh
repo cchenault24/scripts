@@ -102,35 +102,124 @@ remove_models() {
   print_info "Found $model_count installed model(s)"
   echo ""
   
-  echo "Installed models:"
-  echo "$models" | grep -v '^$' | while read -r model; do
-    if [[ -n "$model" ]]; then
-      echo "  • $model"
+  # Check if gum is available for interactive selection
+  if ! command -v gum &>/dev/null; then
+    print_warn "gum not found. Falling back to remove-all prompt."
+    echo ""
+    echo "Installed models:"
+    echo "$models" | grep -v '^$' | while read -r model; do
+      if [[ -n "$model" ]]; then
+        echo "  • $model"
+      fi
+    done
+    echo ""
+    
+    if ! prompt_yes_no "Remove all installed models?" "n"; then
+      print_info "Skipping model removal"
+      return 0
     fi
-  done
-  echo ""
-  
-  if ! prompt_yes_no "Remove all installed models?" "n"; then
-    print_info "Skipping model removal"
-    return 0
-  fi
-  
-  # Confirm again
-  if ! prompt_yes_no "This will delete all models. Are you sure?" "n"; then
-    print_info "Model removal cancelled"
-    return 0
+    
+    # Confirm again
+    if ! prompt_yes_no "This will delete all models. Are you sure?" "n"; then
+      print_info "Model removal cancelled"
+      return 0
+    fi
+    
+    # Build model array for removal
+    local model_array=()
+    while IFS= read -r model; do
+      if [[ -n "$model" ]] && [[ "$model" != "" ]]; then
+        model_array+=("$model")
+      fi
+    done <<< "$models"
+  else
+    # Use gum for interactive model selection
+    local model_array=()
+    local gum_items=()
+    local model_map=()
+    
+    # Build arrays for gum selection
+    while IFS= read -r model; do
+      if [[ -n "$model" ]] && [[ "$model" != "" ]]; then
+        model_array+=("$model")
+        gum_items+=("$model")
+        model_map+=("$model")
+      fi
+    done <<< "$models"
+    
+    if [[ ${#gum_items[@]} -eq 0 ]]; then
+      print_info "No models to remove"
+      return 0
+    fi
+    
+    echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to toggle selection, ${BOLD}Enter${NC} to confirm"
+    echo ""
+    
+    local selected_lines
+    # Use gum choose for multi-select
+    selected_lines=$(printf '%s\n' "${gum_items[@]}" | gum choose \
+      --limit=100 \
+      --height=15 \
+      --cursor="→ " \
+      --selected-prefix="" \
+      --unselected-prefix="" \
+      --selected.foreground="2" \
+      --selected.background="0" \
+      --cursor.foreground="6" \
+      --header="🗑️  Select Models to Remove" \
+      --header.foreground="6")
+    
+    if [[ -z "$selected_lines" ]]; then
+      print_info "No models selected. Skipping model removal."
+      return 0
+    fi
+    
+    # Parse selected models from gum output
+    local selected_models=()
+    while IFS= read -r line; do
+      if [[ -z "$line" ]]; then
+        continue
+      fi
+      
+      # Strip any leading whitespace or cursor symbols
+      local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
+      line_clean="${line_clean#→ }"  # Remove cursor if present
+      
+      # Find matching model from the map
+      local i=0
+      for item in "${gum_items[@]}"; do
+        if [[ "$item" == "$line_clean" ]]; then
+          selected_models+=("${model_map[$i]}")
+          break
+        fi
+        ((i++))
+      done
+    done <<< "$selected_lines"
+    
+    if [[ ${#selected_models[@]} -eq 0 ]]; then
+      print_info "No models selected. Skipping model removal."
+      return 0
+    fi
+    
+    # Confirm removal of selected models
+    echo ""
+    echo "Selected models for removal:"
+    for model in "${selected_models[@]}"; do
+      echo "  • $model"
+    done
+    echo ""
+    
+    if ! prompt_yes_no "Remove the selected models?" "n"; then
+      print_info "Model removal cancelled"
+      return 0
+    fi
+    
+    # Use selected models for removal
+    model_array=("${selected_models[@]}")
   fi
   
   # Ensure log directory exists
   mkdir -p "$STATE_DIR" 2>/dev/null || true
-  
-  # Process each model - use array to avoid subshell issues
-  local model_array=()
-  while IFS= read -r model; do
-    if [[ -n "$model" ]] && [[ "$model" != "" ]]; then
-      model_array+=("$model")
-    fi
-  done <<< "$models"
   
   local removed=0
   local failed=0
@@ -188,7 +277,7 @@ remove_models() {
     print_warn "$remaining_models model(s) still remain"
     print_info "You may need to remove them manually with: ollama rm <model-name>"
   elif [[ $removed -gt 0 ]] && [[ $failed -eq 0 ]]; then
-    print_success "All models removed successfully"
+    print_success "All selected models removed successfully"
   fi
 }
 
@@ -256,54 +345,127 @@ remove_vscode_extensions() {
     return 0
   fi
   
-  # Filter to only installed extensions
-  local installed_extensions=""
+  # Filter to only installed extensions and build arrays
+  local installed_extensions_array=()
   while IFS= read -r ext; do
     if [[ -n "$ext" ]]; then
       # Check if extension is installed
       if code --list-extensions 2>/dev/null | grep -q "^${ext}$"; then
-        if [[ -z "$installed_extensions" ]]; then
-          installed_extensions="$ext"
-        else
-          installed_extensions="$installed_extensions"$'\n'"$ext"
-        fi
+        installed_extensions_array+=("$ext")
       fi
     fi
   done <<< "$extensions"
   
-  if [[ -z "$installed_extensions" ]]; then
+  if [[ ${#installed_extensions_array[@]} -eq 0 ]]; then
     print_info "No installed extensions found from recommendations"
     return 0
   fi
   
   # Count installed extensions
-  local ext_count
-  ext_count=$(echo "$installed_extensions" | wc -l | xargs)
+  local ext_count=${#installed_extensions_array[@]}
   print_info "Found $ext_count installed extension(s)"
   echo ""
   
-  echo "Installed extensions:"
-  echo "$installed_extensions" | while read -r ext; do
-    if [[ -n "$ext" ]]; then
+  # Check if gum is available for interactive selection
+  if ! command -v gum &>/dev/null; then
+    print_warn "gum not found. Falling back to uninstall-all prompt."
+    echo ""
+    echo "Installed extensions:"
+    for ext in "${installed_extensions_array[@]}"; do
       echo "  • $ext"
+    done
+    echo ""
+    
+    if ! prompt_yes_no "Uninstall all installed extensions?" "n"; then
+      print_info "Skipping extension removal"
+      return 0
     fi
-  done
-  echo ""
-  
-  if ! prompt_yes_no "Uninstall all installed extensions?" "n"; then
-    print_info "Skipping extension removal"
-    return 0
+  else
+    # Use gum for interactive extension selection
+    local gum_items=()
+    local ext_map=()
+    
+    # Build arrays for gum selection
+    for ext in "${installed_extensions_array[@]}"; do
+      gum_items+=("$ext")
+      ext_map+=("$ext")
+    done
+    
+    echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to toggle selection, ${BOLD}Enter${NC} to confirm"
+    echo ""
+    
+    local selected_lines
+    # Use gum choose for multi-select
+    selected_lines=$(printf '%s\n' "${gum_items[@]}" | gum choose \
+      --limit=100 \
+      --height=15 \
+      --cursor="→ " \
+      --selected-prefix="" \
+      --unselected-prefix="" \
+      --selected.foreground="2" \
+      --selected.background="0" \
+      --cursor.foreground="6" \
+      --header="🗑️  Select Extensions to Remove" \
+      --header.foreground="6")
+    
+    if [[ -z "$selected_lines" ]]; then
+      print_info "No extensions selected. Skipping extension removal."
+      return 0
+    fi
+    
+    # Parse selected extensions from gum output
+    local selected_extensions=()
+    while IFS= read -r line; do
+      if [[ -z "$line" ]]; then
+        continue
+      fi
+      
+      # Strip any leading whitespace or cursor symbols
+      local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
+      line_clean="${line_clean#→ }"  # Remove cursor if present
+      
+      # Find matching extension from the map
+      local i=0
+      for item in "${gum_items[@]}"; do
+        if [[ "$item" == "$line_clean" ]]; then
+          selected_extensions+=("${ext_map[$i]}")
+          break
+        fi
+        ((i++))
+      done
+    done <<< "$selected_lines"
+    
+    if [[ ${#selected_extensions[@]} -eq 0 ]]; then
+      print_info "No extensions selected. Skipping extension removal."
+      return 0
+    fi
+    
+    # Confirm removal of selected extensions
+    echo ""
+    echo "Selected extensions for removal:"
+    for ext in "${selected_extensions[@]}"; do
+      echo "  • $ext"
+    done
+    echo ""
+    
+    if ! prompt_yes_no "Uninstall the selected extensions?" "n"; then
+      print_info "Extension removal cancelled"
+      return 0
+    fi
+    
+    # Use selected extensions for removal
+    installed_extensions_array=("${selected_extensions[@]}")
   fi
   
   local removed=0
   local failed=0
   
-  while IFS= read -r ext; do
+  # Ensure log directory exists
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  
+  for ext in "${installed_extensions_array[@]}"; do
     if [[ -n "$ext" ]]; then
       print_info "Uninstalling $ext..."
-      
-      # Ensure log directory exists
-      mkdir -p "$STATE_DIR" 2>/dev/null || true
       
       # Capture uninstall output and exit code separately
       # This prevents tee failures from masking successful uninstalls
@@ -326,7 +488,7 @@ remove_vscode_extensions() {
         ((failed++))
       fi
     fi
-  done <<< "$installed_extensions"
+  done
   
   echo ""
   if [[ $removed -gt 0 ]]; then

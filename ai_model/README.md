@@ -59,28 +59,28 @@ The setup automatically detects your hardware and classifies it into tiers:
 
 ### Tier S (≥49GB RAM)
 - **All models available**
-- **Recommended**: qwen3-coder:30b (or devstral:27b) + codestral:22b (or llama3.1:70b for maximum quality)
+- **Recommended**: devstral:27b + codestral (or llama3.1:70b for maximum quality)
 - Keep-alive (1h) - models unload after 1 hour of inactivity
 - High context window (32K tokens)
 - Best for: Complex refactoring, architecture work, multi-model workflows, agent planning
 
 ### Tier A (33-48GB RAM)
-- **Excludes**: llama3.1:70b, qwen3-coder:30b
-- **Recommended**: devstral:27b (or gpt-oss:20b) + codestral:22b
+- **Excludes**: llama3.1:70b
+- **Recommended**: devstral:27b (or gpt-oss:20b) + codestral
 - Keep-alive (1h) - models unload after 1 hour of inactivity
 - Medium context window (16K tokens)
 - Best for: General development, code review, complex coding tasks, agent planning
 
 ### Tier B (17-32GB RAM)
-- **Excludes**: llama3.1:70b, qwen3-coder:30b, devstral:27b, codestral:22b, gpt-oss:20b
-- **Recommended**: qwen2.5-coder:14b + llama3.1:8b
+- **Excludes**: llama3.1:70b, devstral:27b, gpt-oss:20b
+- **Recommended**: llama3.1:8b
 - Conservative keep-alive (5m)
 - Smaller context window (8K tokens)
 - Best for: Lightweight development, autocomplete
 
 ### Tier C (<17GB RAM)
-- **Only**: qwen2.5-coder:7b, qwen2.5-coder:1.5b, llama3.1:8b
-- **Recommended**: llama3.1:8b + qwen2.5-coder:7b (or qwen2.5-coder:1.5b for ultra-fast)
+- **Only**: llama3.1:8b
+- **Recommended**: llama3.1:8b
 - Minimal keep-alive (5m)
 - Small context window (4K tokens)
 - Best for: Simple edits, fast autocomplete
@@ -93,52 +93,30 @@ All models are automatically optimized by Ollama with optimal quantization (Q4_K
 
 #### Agent Plan / Chat / Edit Models (Best for coding tasks)
 
-1. **qwen3-coder:30b** (Tier S only - Best open model)
-   - Best open model for agent planning and complex coding tasks
-   - ~15GB RAM (Q4_K_M quantized)
-   - Excellent for complex refactoring and architecture work
-   - Recommended for Tier S hardware
-
-2. **devstral:27b** (Tier A/S - Excellent for agent planning)
+1. **devstral:27b** (Tier A/S - Excellent for agent planning)
    - Excellent for agent planning and reasoning tasks
    - ~14GB RAM (Q4_K_M quantized)
    - Strong coding capabilities with good reasoning
 
-3. **gpt-oss:20b** (Tier A/S - Strong coding)
+2. **gpt-oss:20b** (Tier A/S - Strong coding)
    - Strong coding capabilities with good balance
    - ~10GB RAM (Q4_K_M quantized)
    - Good alternative for coding tasks
 
-4. **qwen2.5-coder:14b** (Recommended Primary for most tiers)
-   - Best balance of quality and speed for React/TypeScript development
-   - ~7.5GB RAM (Q4_K_M quantized)
-   - Excellent TypeScript, React, and Redux-Saga understanding
-   - Optimized for coding tasks
+3. **codestral** (Recommended for Autocomplete and Secondary)
+   - Excellent code generation and autocomplete capabilities
+   - ~5GB RAM (varies by quantization)
+   - Best for autocomplete, complex coding tasks, and code review
+   - Recommended by Continue.dev for autocomplete role
 
-5. **codestral:22b** (Recommended Secondary for Tier A/S)
-   - Excellent code generation and explanation capabilities
-   - ~11.5GB RAM (Q4_K_M quantized)
-   - Best for complex coding tasks and code review
-   - Superior to general-purpose models for development work
-
-6. **llama3.1:70b** (Tier S only - Highest quality)
+4. **llama3.1:70b** (Tier S only - Highest quality)
    - Highest quality for complex refactoring and architecture
    - ~35GB RAM (Q4_K_M quantized)
    - Best for multi-file refactoring and deep analysis
 
 #### Autocomplete Models (Fast, lightweight)
 
-7. **qwen2.5-coder:7b** (Fast autocomplete)
-   - Fast autocomplete and simple edits
-   - ~3.5GB RAM (Q5_K_M quantized)
-   - Perfect for quick suggestions and small changes
-
-8. **qwen2.5-coder:1.5b** (Ultra-fast autocomplete)
-   - Ultra-fast autocomplete (lightweight)
-   - ~0.9GB RAM (Q5_K_M quantized)
-   - Best for real-time suggestions
-
-9. **llama3.1:8b** (Fast general-purpose)
+5. **llama3.1:8b** (Fast general-purpose)
    - Fast, general-purpose coding assistant
    - ~4.2GB RAM (Q5_K_M quantized)
    - Good TypeScript support
@@ -146,28 +124,20 @@ All models are automatically optimized by Ollama with optimal quantization (Q4_K
 
 #### Embedding Models (For code indexing)
 
-10. **nomic-embed-text** (Best open embedding)
-    - Best open embedding model for code indexing
-    - ~0.3GB RAM
-    - Automatically installed for Continue.dev code indexing
-
-11. **qwen3-embedding** (Alternative embedding)
-    - Alternative embedding model for semantic search
-    - ~0.5GB RAM
+6. **nomic-embed-text** (Best open embedding)
+   - Best open embedding model for code indexing
+   - ~0.3GB RAM
+   - Automatically installed for Continue.dev code indexing
 
 #### Rerank Models (For search relevance)
 
-12. **zerank-1** (Best open reranker)
-    - Best open reranker for search relevance
-    - ~0.4GB RAM
+7. **zerank-1** (Best open reranker)
+   - Best open reranker for search relevance
+   - ~0.4GB RAM
 
-13. **zerank-1-small** (Smaller reranker)
-    - Smaller reranker, faster processing
-    - ~0.2GB RAM
-
-14. **qwen3-reranker** (Alternative reranker)
-    - Alternative reranker model
-    - ~0.3GB RAM
+8. **zerank-1-small** (Smaller reranker)
+   - Smaller reranker, faster processing
+   - ~0.2GB RAM
 
 #### Next Edit Model
 
@@ -182,7 +152,7 @@ All models are automatically optimized by Ollama with optimal quantization (Q4_K
 The setup script automatically generates a Continue.dev config at `~/.continue/config.json` with four profiles:
 
 1. **Coding Assistant** (Primary)
-   - Model: qwen2.5-coder:14b (or your selected primary)
+   - Model: devstral:27b or your selected primary
    - Temperature: 0.7
    - Best for: General development, code generation
 
@@ -197,7 +167,7 @@ The setup script automatically generates a Continue.dev config at `~/.continue/c
    - Best for: Generating documentation
 
 4. **Deep Analysis**
-   - Model: qwen2.5-coder:14b or llama3.1:70b
+   - Model: devstral:27b or llama3.1:70b
    - Temperature: 0.6
    - Best for: Complex refactoring, architecture
 
@@ -354,7 +324,7 @@ Quantization benefits:
 - **Q4_K_M**: 4-bit quantization, ~25% faster, minimal quality loss (used for larger models)
 - **Q5_K_M**: 5-bit quantization, ~15% faster, excellent quality retention (used for smaller models)
 
-The script uses standard model names (e.g., `qwen2.5-coder:14b`) and Ollama automatically downloads the best quantized variant for your system.
+The script uses standard model names (e.g., `devstral:27b`) and Ollama automatically downloads the best quantized variant for your system.
 
 #### Performance Verification
 
@@ -423,9 +393,9 @@ The setup includes advanced optimizations for enhanced performance and resource 
 
 Intelligent model routing automatically selects the optimal model for each task type:
 
-- **Autocomplete/Simple tasks**: Routes to smallest, fastest models (qwen2.5-coder:7b, llama3.1:8b)
-- **Coding/Generation**: Routes to balanced models (qwen2.5-coder:14b, codestral:22b)
-- **Refactoring/Complex tasks**: Routes to largest available models (llama3.1:70b, codestral:22b)
+- **Autocomplete/Simple tasks**: Routes to smallest, fastest models (llama3.1:8b)
+- **Coding/Generation**: Routes to balanced models (codestral, llama3.1:8b)
+- **Refactoring/Complex tasks**: Routes to largest available models (llama3.1:70b, devstral:27b, codestral)
 - **Code Review/Testing**: Routes to models with strong reasoning capabilities
 
 **Usage:**
@@ -448,10 +418,10 @@ Automatically tests and optimizes GPU layer allocation for maximum performance:
 **Usage:**
 ```bash
 # Benchmark specific GPU layer configuration
-benchmark_gpu_layers "qwen2.5-coder:14b" "40"
+benchmark_gpu_layers "devstral:27b" "40"
 
 # Find optimal GPU layers for a model
-optimize_gpu_layers "qwen2.5-coder:14b"
+optimize_gpu_layers "devstral:27b"
 ```
 
 #### Smart Request Queuing
@@ -487,10 +457,10 @@ Continuous performance monitoring and metrics tracking:
 **Usage:**
 ```bash
 # Track performance for a request
-track_performance "qwen2.5-coder:14b" "coding" 2.5 500 1
+track_performance "devstral:27b" "coding" 2.5 500 1
 
 # Get performance statistics
-get_performance_stats "qwen2.5-coder:14b" "coding"
+get_performance_stats "devstral:27b" "coding"
 
 # Generate performance report
 generate_performance_report
@@ -838,7 +808,7 @@ For better codebase understanding, you can enable local embeddings in Continue.d
 {
   "embeddingsProvider": {
     "provider": "ollama",
-    "model": "qwen2.5-coder:14b",
+    "model": "nomic-embed-text",
     "apiBase": "http://localhost:11434"
   }
 }

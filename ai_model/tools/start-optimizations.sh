@@ -33,6 +33,12 @@ source "$PROJECT_DIR/lib/ollama.sh"
 source "$PROJECT_DIR/lib/models.sh"
 source "$PROJECT_DIR/lib/optimization.sh"
 
+# Enable auto-start by removing disable flag
+if command -v enable_auto_start &>/dev/null; then
+  enable_auto_start
+  log_info "Auto-start enabled"
+fi
+
 # Parse arguments
 START_PROXY=false
 START_MONITOR=false
@@ -144,7 +150,7 @@ if [[ "$START_QUEUE" == "true" ]]; then
   fi
 fi
 
-# Start Ollama proxy
+# Start Ollama proxy (use wrapper script)
 if [[ "$START_PROXY" == "true" ]]; then
   if [[ -f "$PID_DIR/ollama_proxy.pid" ]]; then
     local old_pid
@@ -159,63 +165,51 @@ if [[ "$START_PROXY" == "true" ]]; then
   if [[ ! -f "$PID_DIR/ollama_proxy.pid" ]]; then
     print_info "Starting Ollama optimization proxy..."
     
-    # Set advanced optimization flags (can be overridden via environment)
-    export PROJECT_DIR="$PROJECT_DIR"
-    export PROXY_PORT="${PROXY_PORT:-11435}"
-    export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
-    export ENABLE_PROMPT_OPTIMIZATION="${ENABLE_PROMPT_OPTIMIZATION:-1}"
-    export ENABLE_CONTEXT_COMPRESSION="${ENABLE_CONTEXT_COMPRESSION:-1}"
-    export ENABLE_ENSEMBLE="${ENABLE_ENSEMBLE:-0}"
-    
-    # Validate port availability
-    if command -v check_port_available &>/dev/null; then
-      if ! check_port_available "$PROXY_PORT"; then
-        print_error "Port $PROXY_PORT is already in use"
-        print_error_with_suggestion "Cannot start proxy on port $PROXY_PORT" "Stop the service using this port or set PROXY_PORT to a different value"
-        return 1
-      fi
-    fi
-    
-    # Check if Python 3 is available
-    if ! command -v python3 &>/dev/null; then
-      print_error "Python 3 is required for the proxy server"
-      print_error_with_suggestion "Python 3 not found" "Install Python 3: brew install python3"
-      return 1
-    fi
-    
-    # Check if proxy script exists
-    if [[ ! -f "$SCRIPT_DIR/ollama_proxy_server.py" ]]; then
-      print_error "Proxy server script not found: $SCRIPT_DIR/ollama_proxy_server.py"
-      return 1
-    fi
-    
-    # Check if Ollama is running (proxy depends on it)
-    if ! curl -s --max-time 5 http://localhost:${OLLAMA_PORT}/api/tags &>/dev/null; then
-      print_warn "Ollama service may not be running on port ${OLLAMA_PORT}"
-      print_info "Proxy will start but may not function until Ollama is running"
-    fi
-    
-    python3 "$SCRIPT_DIR/ollama_proxy_server.py" > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
-    local proxy_pid=$!
-    echo $proxy_pid > "$PID_DIR/ollama_proxy.pid"
-    
-    # Health check: verify process is still running and port is listening
-    sleep 2
-    if kill -0 "$proxy_pid" 2>/dev/null; then
-      # Check if port is listening
-      if lsof -i ":$PROXY_PORT" &>/dev/null || netstat -an 2>/dev/null | grep -q ":$PROXY_PORT.*LISTEN"; then
-        print_success "Ollama proxy started (PID: $proxy_pid, Port: $PROXY_PORT)"
-        print_info "Advanced optimizations: Prompt=${ENABLE_PROMPT_OPTIMIZATION}, Compression=${ENABLE_CONTEXT_COMPRESSION}, Ensemble=${ENABLE_ENSEMBLE}"
-        print_info "Update Continue.dev config to use: apiBase: http://localhost:${PROXY_PORT}"
+    # Use wrapper script to start proxy (it will handle all checks and startup)
+    if [[ -f "$SCRIPT_DIR/ensure-optimizations.sh" ]]; then
+      if "$SCRIPT_DIR/ensure-optimizations.sh" 2>/dev/null; then
+        # Verify proxy started
+        sleep 1
+        if [[ -f "$PID_DIR/ollama_proxy.pid" ]]; then
+          local proxy_pid
+          proxy_pid=$(cat "$PID_DIR/ollama_proxy.pid" 2>/dev/null || echo "")
+          if [[ -n "$proxy_pid" ]] && kill -0 "$proxy_pid" 2>/dev/null; then
+            print_success "Ollama proxy started (PID: $proxy_pid, Port: ${PROXY_PORT:-11435})"
+            print_info "Advanced optimizations: Prompt=${ENABLE_PROMPT_OPTIMIZATION:-1}, Compression=${ENABLE_CONTEXT_COMPRESSION:-1}, Ensemble=${ENABLE_ENSEMBLE:-0}"
+            print_info "Update Continue.dev config to use: apiBase: http://localhost:${PROXY_PORT:-11435}"
+          else
+            print_warn "Proxy may have failed to start. Check logs: $HOME/.local-llm-setup/proxy.log"
+          fi
+        fi
       else
-        print_warn "Proxy process started but port $PROXY_PORT is not listening yet"
-        print_info "Proxy may still be initializing, check logs: $HOME/.local-llm-setup/proxy.log"
+        print_warn "Wrapper script failed to start proxy. Check logs: $HOME/.local-llm-setup/ensure-optimizations.log"
       fi
     else
-      print_error "Ollama proxy failed to start"
-      print_info "Check logs: $HOME/.local-llm-setup/proxy.log"
-      rm -f "$PID_DIR/ollama_proxy.pid"
-      return 1
+      print_error "Wrapper script not found: $SCRIPT_DIR/ensure-optimizations.sh"
+      print_info "Falling back to direct proxy startup..."
+      # Fallback to direct startup if wrapper doesn't exist
+      export PROJECT_DIR="$PROJECT_DIR"
+      export PROXY_PORT="${PROXY_PORT:-11435}"
+      export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+      export ENABLE_PROMPT_OPTIMIZATION="${ENABLE_PROMPT_OPTIMIZATION:-1}"
+      export ENABLE_CONTEXT_COMPRESSION="${ENABLE_CONTEXT_COMPRESSION:-1}"
+      export ENABLE_ENSEMBLE="${ENABLE_ENSEMBLE:-0}"
+      
+      if ! command -v python3 &>/dev/null; then
+        print_error "Python 3 is required for the proxy server"
+        return 1
+      fi
+      
+      python3 "$SCRIPT_DIR/ollama_proxy_server.py" > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
+      echo $! > "$PID_DIR/ollama_proxy.pid"
+      sleep 2
+      if [[ -f "$PID_DIR/ollama_proxy.pid" ]]; then
+        local proxy_pid
+        proxy_pid=$(cat "$PID_DIR/ollama_proxy.pid" 2>/dev/null || echo "")
+        if [[ -n "$proxy_pid" ]] && kill -0 "$proxy_pid" 2>/dev/null; then
+          print_success "Ollama proxy started (PID: $proxy_pid)"
+        fi
+      fi
     fi
   fi
 fi

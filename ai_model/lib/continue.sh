@@ -9,24 +9,18 @@ get_friendly_model_name() {
   local model="$1"
   case "$model" in
     # Agent Plan / Chat / Edit
-    "qwen3-coder:30b") echo "Qwen3 Coder 30B" ;;
     "devstral:27b") echo "Devstral 27B" ;;
     "gpt-oss:20b") echo "GPT-OSS 20B" ;;
-    "qwen2.5-coder:14b") echo "Qwen2.5-Coder 14B" ;;
-    "codestral:22b") echo "Codestral 22B" ;;
-    # Autocomplete
-    "qwen2.5-coder:7b") echo "Qwen2.5-Coder 7B" ;;
-    "qwen2.5-coder:1.5b") echo "Qwen2.5-Coder 1.5B" ;;
-    # General purpose
+    "codestral") echo "Codestral" ;;
+    # General purpose / Autocomplete
     "llama3.1:8b") echo "Llama 3.1 8B" ;;
     "llama3.1:70b") echo "Llama 3.1 70B" ;;
+    "gemma2:9b") echo "Gemma 2 9B" ;;
     # Embedding models
     "nomic-embed-text") echo "Nomic Embed Text" ;;
-    "qwen3-embedding") echo "Qwen3 Embedding" ;;
     # Rerank models
     "zerank-1") echo "Zerank-1" ;;
     "zerank-1-small") echo "Zerank-1 Small" ;;
-    "qwen3-reranker") echo "Qwen3 Reranker" ;;
     # Next Edit
     "instinct") echo "Instinct" ;;
     *) echo "${model%%:*}" | sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g' | sed 's/-/ /g' ;;
@@ -255,13 +249,40 @@ generate_continue_config() {
   
   # Determine api_base (check if proxy is running - optimizations)
   local api_base="http://localhost:11434"
-  if [[ -f "$HOME/.local-llm-setup/pids/ollama_proxy.pid" ]]; then
-    local proxy_pid
-    proxy_pid=$(cat "$HOME/.local-llm-setup/pids/ollama_proxy.pid" 2>/dev/null || echo "")
-    if [[ -n "$proxy_pid" ]] && kill -0 "$proxy_pid" 2>/dev/null; then
-      api_base="http://localhost:11435"
-      log_info "Using optimization proxy for Continue.dev config"
-      print_info "Optimizations enabled: Using proxy at $api_base"
+  local proxy_enabled=false
+  
+  # Check if auto-start is disabled
+  if command -v is_auto_start_disabled &>/dev/null && is_auto_start_disabled 2>/dev/null; then
+    log_info "Auto-start is disabled, using direct Ollama connection"
+    # Don't print info message here to avoid cluttering output during config generation
+  else
+    # Try to ensure optimizations are running (call wrapper)
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    if [[ -f "$script_dir/tools/ensure-optimizations.sh" ]]; then
+      log_info "Ensuring optimization services are running..."
+      if "$script_dir/tools/ensure-optimizations.sh" >/dev/null 2>&1; then
+        log_info "Optimization services ensured"
+      else
+        log_warn "Failed to ensure optimization services, will check proxy status"
+      fi
+    fi
+    
+    # Check if proxy is running
+    if [[ -f "$HOME/.local-llm-setup/pids/ollama_proxy.pid" ]]; then
+      local proxy_pid
+      proxy_pid=$(cat "$HOME/.local-llm-setup/pids/ollama_proxy.pid" 2>/dev/null || echo "")
+      if [[ -n "$proxy_pid" ]] && kill -0 "$proxy_pid" 2>/dev/null; then
+        # Verify proxy is actually responding
+        if curl -s --max-time 2 http://localhost:11435/api/tags &>/dev/null; then
+          api_base="http://localhost:11435"
+          proxy_enabled=true
+          log_info "Using optimization proxy for Continue.dev config"
+          print_info "Optimizations enabled: Using proxy at $api_base"
+        else
+          log_warn "Proxy PID exists but proxy is not responding, using direct Ollama"
+        fi
+      fi
     fi
   fi
   

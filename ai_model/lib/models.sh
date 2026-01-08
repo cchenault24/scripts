@@ -11,24 +11,29 @@ is_model_eligible() {
   
   # Embedding, rerank, and next edit models are always eligible (small)
   case "$model" in
-    "nomic-embed-text"|"qwen3-embedding"|"zerank-1"|"zerank-1-small"|"qwen3-reranker"|"instinct")
+    "nomic-embed-text"|"zerank-1"|"zerank-1-small"|"instinct")
+      return 0 ;;
+  esac
+  
+  # Codestral is eligible for all tiers (moderate size, good for autocomplete)
+  case "$model" in
+    "codestral")
       return 0 ;;
   esac
   
   case "$tier" in
     S) return 0 ;; # All models allowed
     A) 
-      # Exclude very large models (70b, 30b)
-      [[ "$model" != "llama3.1:70b" && "$model" != "qwen3-coder:30b" ]] ;;
+      # Exclude very large models (70b)
+      [[ "$model" != "llama3.1:70b" ]] ;;
     B) 
-      # Exclude large models (70b, 30b, 27b, 22b, 20b)
-      [[ "$model" != "llama3.1:70b" && "$model" != "qwen3-coder:30b" && \
-         "$model" != "devstral:27b" && "$model" != "codestral:22b" && \
+      # Exclude large models (70b, 27b, 20b), but allow codestral and gemma2:9b
+      [[ "$model" != "llama3.1:70b" && \
+         "$model" != "devstral:27b" && \
          "$model" != "gpt-oss:20b" ]] ;;
     C) 
-      # Only small models (7b, 8b, 1.5b)
-      [[ "$model" == "qwen2.5-coder:7b" || "$model" == "llama3.1:8b" || \
-         "$model" == "qwen2.5-coder:1.5b" ]] ;;
+      # Only small models (8b, 9b, codestral)
+      [[ "$model" == "llama3.1:8b" || "$model" == "gemma2:9b" || "$model" == "codestral" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -111,60 +116,62 @@ select_models() {
   # Based on Continue.dev recommendations: https://docs.continue.dev/customize/models#recommended-models
   # Primary: Best coding model for the tier (Agent Plan/Chat/Edit role)
   # Secondary: Fast alternative for autocomplete/quick tasks
-  local default_primary="qwen2.5-coder:14b"
-  local default_secondary="qwen2.5-coder:7b"
+  local default_primary="devstral:27b"
+  local default_secondary="codestral"
   
   # Tier-specific optimizations
   case "$HARDWARE_TIER" in
     S)
-      # Tier S: Can use best models - Qwen3 Coder 30B or Devstral 27B for primary
-      # Prefer qwen3-coder:30b (best open model for agent planning)
-      if is_model_eligible "qwen3-coder:30b" "$HARDWARE_TIER"; then
-        default_primary="qwen3-coder:30b"
+      # Tier S: Can use best models - Devstral 27B for primary
+      if is_model_eligible "devstral:27b" "$HARDWARE_TIER"; then
+        default_primary="devstral:27b"
       fi
-      # Secondary: codestral:22b for better coding quality
-      default_secondary="codestral:22b"
+      # Secondary: codestral for autocomplete (excellent for this role)
+      default_secondary="codestral"
       ;;
     A)
-      # Tier A: Use devstral:27b or gpt-oss:20b if available, otherwise qwen2.5-coder:14b
+      # Tier A: Use devstral:27b or gpt-oss:20b if available
       if is_model_eligible "devstral:27b" "$HARDWARE_TIER"; then
         default_primary="devstral:27b"
       elif is_model_eligible "gpt-oss:20b" "$HARDWARE_TIER"; then
         default_primary="gpt-oss:20b"
       fi
-      # Secondary: codestral:22b is available and better for coding
-      default_secondary="codestral:22b"
+      # Secondary: codestral is excellent for autocomplete
+      default_secondary="codestral"
       ;;
     B)
-      # Tier B: Stick with qwen2.5-coder:14b (larger models not eligible)
-      default_primary="qwen2.5-coder:14b"
-      default_secondary="llama3.1:8b"
+      # Tier B: Use codestral or llama3.1:8b (larger models not eligible)
+      if is_model_eligible "codestral" "$HARDWARE_TIER"; then
+        default_primary="codestral"
+        default_secondary="llama3.1:8b"
+      else
+        default_primary="llama3.1:8b"
+        default_secondary="llama3.1:8b"
+      fi
       ;;
     C)
-      # Tier C: Only small models available
-      default_primary="llama3.1:8b"
-      default_secondary="qwen2.5-coder:7b"
+      # Tier C: Use codestral, gemma2:9b, or llama3.1:8b
+      if is_model_eligible "codestral" "$HARDWARE_TIER"; then
+        default_primary="codestral"
+        default_secondary="llama3.1:8b"
+      elif is_model_eligible "gemma2:9b" "$HARDWARE_TIER"; then
+        default_primary="gemma2:9b"
+        default_secondary="llama3.1:8b"
+      else
+        default_primary="llama3.1:8b"
+        default_secondary="llama3.1:8b"
+      fi
       ;;
   esac
   
   # Check if defaults are eligible (fallback safety)
   if ! is_model_eligible "$default_primary" "$HARDWARE_TIER"; then
-    # Fallback to qwen2.5-coder:14b, then llama3.1:8b
-    if is_model_eligible "qwen2.5-coder:14b" "$HARDWARE_TIER"; then
-      default_primary="qwen2.5-coder:14b"
-    else
-      default_primary="llama3.1:8b"
-    fi
+    # Fallback to llama3.1:8b
+    default_primary="llama3.1:8b"
   fi
   if ! is_model_eligible "$default_secondary" "$HARDWARE_TIER"; then
-    # Fallback to qwen2.5-coder:7b, then qwen2.5-coder:1.5b
-    if is_model_eligible "qwen2.5-coder:7b" "$HARDWARE_TIER"; then
-      default_secondary="qwen2.5-coder:7b"
-    elif is_model_eligible "qwen2.5-coder:1.5b" "$HARDWARE_TIER"; then
-      default_secondary="qwen2.5-coder:1.5b"
-    else
-      default_secondary="llama3.1:8b"
-    fi
+    # Fallback to llama3.1:8b
+    default_secondary="llama3.1:8b"
   fi
   
   echo -e "${CYAN}Recommended for $TIER_LABEL:${NC}"
@@ -206,25 +213,34 @@ select_models() {
   max_model_width=$((max_model_width + 2))
   max_ram_width=$((max_ram_width + 1))
   
-  # Build temporary array with model name and formatted string
+  # Build temporary array with recommended flag, model name and formatted string
   for model in "${APPROVED_MODELS[@]}"; do
     local is_recommended=false
     if [[ "$model" == "$default_primary" || "$model" == "$default_secondary" ]]; then
       is_recommended=true
     fi
     local formatted=$(format_model_for_gum "$model" "$HARDWARE_TIER" "$is_recommended" "$max_model_width" "$max_ram_width")
-    # Store as "model_name|formatted_string" for sorting
-    temp_items+=("${model}|${formatted}")
+    # Store as "recommended_flag|model_name|formatted_string" for sorting
+    # Use "A" for eligible models (no "Not recommended"), "B" for not eligible (has "Not recommended")
+    # This matches the logic in format_model_for_gum which adds "Not recommended" for ineligible models
+    local is_eligible=false
+    if is_model_eligible "$model" "$HARDWARE_TIER"; then
+      is_eligible=true
+    fi
+    local recommended_flag=$([[ "$is_eligible" == "true" ]] && echo "A" || echo "B")
+    temp_items+=("${recommended_flag}|${model}|${formatted}")
   done
   
-  # Sort by model name using natural sort (handles numbers correctly)
-  IFS=$'\n' sorted_items=($(printf '%s\n' "${temp_items[@]}" | sort -t'|' -k1 -V))
+  # Sort by recommended first (A before B), then by model name using natural sort
+  IFS=$'\n' sorted_items=($(printf '%s\n' "${temp_items[@]}" | sort -t'|' -k1,1 -k2,2V))
   unset IFS
   
   # Extract sorted formatted strings and model names
   for item in "${sorted_items[@]}"; do
-    local model_name="${item%%|*}"
-    local formatted="${item#*|}"
+    local recommended_flag="${item%%|*}"
+    local remaining="${item#*|}"
+    local model_name="${remaining%%|*}"
+    local formatted="${remaining#*|}"
     gum_items+=("$formatted")
     model_map+=("$model_name")
   done

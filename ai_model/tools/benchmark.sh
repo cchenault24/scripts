@@ -366,11 +366,10 @@ benchmark_model() {
       if echo "$model" | grep -qiE "70|65|80|90|100"; then
         echo "" >&2
         echo -e "${CYAN}  → Suggested alternatives (smaller models):${NC}" >&2
-        echo -e "${YELLOW}     • qwen2.5-coder:7b-instruct-q4_K_M (7B, quantized)${NC}" >&2
-        echo -e "${YELLOW}     • codestral:22b (22B, smaller than 70B)${NC}" >&2
-        echo -e "${YELLOW}     • deepseek-coder-v2:16b-lite-base-q4_0 (16B, quantized)${NC}" >&2
-        echo -e "${YELLOW}     • codellama:13b-instruct-q4_0 (13B, quantized)${NC}" >&2
-        echo -e "${YELLOW}     • qwen2.5-coder:14b (14B, smaller than 70B)${NC}" >&2
+        echo -e "${YELLOW}     • codestral (excellent for autocomplete)${NC}" >&2
+        echo -e "${YELLOW}     • devstral:27b (27B, smaller than 70B)${NC}" >&2
+        echo -e "${YELLOW}     • gpt-oss:20b (20B, smaller than 70B)${NC}" >&2
+        echo -e "${YELLOW}     • llama3.1:8b (8B, much smaller than 70B)${NC}" >&2
       fi
       
       return 1

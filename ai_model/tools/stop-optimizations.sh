@@ -2,7 +2,7 @@
 #
 # stop-optimizations.sh - Stop optimization services
 #
-# Stops all background optimization services
+# Stops all background optimization services and disables auto-start
 
 set -euo pipefail
 
@@ -13,6 +13,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$PROJECT_DIR/lib/constants.sh" 2>/dev/null || true
 source "$PROJECT_DIR/lib/logger.sh" 2>/dev/null || true
 source "$PROJECT_DIR/lib/ui.sh" 2>/dev/null || true
+source "$PROJECT_DIR/lib/optimization.sh" 2>/dev/null || true
 
 PID_DIR="$HOME/.local-llm-setup/pids"
 
@@ -54,6 +55,19 @@ if [[ -f "$PID_DIR/ollama_proxy.pid" ]]; then
     print_success "Stopped Ollama proxy (PID: $pid)"
   fi
   rm -f "$PID_DIR/ollama_proxy.pid"
+fi
+
+# Disable auto-start to prevent services from restarting automatically
+if command -v disable_auto_start &>/dev/null; then
+  disable_auto_start
+  print_info "Auto-start disabled. Services will not restart automatically."
+  print_info "To re-enable: ./tools/start-optimizations.sh or ./tools/enable-optimizations.sh"
+else
+  # Fallback: create flag file directly
+  mkdir -p "$HOME/.local-llm-setup"
+  touch "$HOME/.local-llm-setup/optimizations.disabled"
+  print_info "Auto-start disabled. Services will not restart automatically."
+  print_info "To re-enable: ./tools/start-optimizations.sh or ./tools/enable-optimizations.sh"
 fi
 
 print_success "All optimization services stopped"

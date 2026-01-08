@@ -365,80 +365,51 @@ main() {
   if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
     print_header "🚀 Advanced Optimizations"
     
-    # Ask user if they want to enable optimizations
-    if prompt_yes_no "Enable advanced optimizations (model routing, request queuing, performance tracking)?" "y"; then
-      print_info "Starting optimization services..."
-      
-      # Use the start-optimizations.sh script to start services
-      if [[ -f "$SCRIPT_DIR/tools/start-optimizations.sh" ]]; then
-        # Source the script's logic without running it as a separate process
-        # This ensures services start in the same shell context
-        local pid_dir="$HOME/.local-llm-setup/pids"
-        mkdir -p "$pid_dir"
+    # Check if auto-start is disabled
+    local auto_start_was_disabled=false
+    if is_auto_start_disabled 2>/dev/null; then
+      auto_start_was_disabled=true
+      print_info "Auto-start is currently disabled."
+      if prompt_yes_no "Re-enable auto-start and start optimization services?" "y"; then
+        enable_auto_start
+        print_info "Auto-start re-enabled"
+        auto_start_was_disabled=false
+      else
+        print_info "Auto-start remains disabled. Config will use direct Ollama connection."
+        echo ""
+      fi
+    fi
+    
+    # Ask user if they want to enable optimizations (unless already disabled and user chose not to re-enable)
+    if ! is_auto_start_disabled 2>/dev/null && ! [[ "$auto_start_was_disabled" == "true" ]]; then
+      if prompt_yes_no "Enable advanced optimizations (model routing, request queuing, performance tracking)?" "y"; then
+        print_info "Starting optimization services..."
         
-        # Start proxy if not running
-        if [[ ! -f "$pid_dir/ollama_proxy.pid" ]] || ! kill -0 "$(cat "$pid_dir/ollama_proxy.pid" 2>/dev/null)" 2>/dev/null; then
-          print_info "Starting Ollama optimization proxy..."
-          
-          # Set optimization flags (can be overridden via environment)
-          export PROJECT_DIR="$SCRIPT_DIR"
-          export PROXY_PORT="${PROXY_PORT:-11435}"
-          export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
-          export ENABLE_PROMPT_OPTIMIZATION="${ENABLE_PROMPT_OPTIMIZATION:-1}"
-          export ENABLE_CONTEXT_COMPRESSION="${ENABLE_CONTEXT_COMPRESSION:-1}"
-          export ENABLE_ENSEMBLE="${ENABLE_ENSEMBLE:-0}"
-          
-          python3 "$SCRIPT_DIR/tools/ollama_proxy_server.py" > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
-          echo $! > "$pid_dir/ollama_proxy.pid"
-          sleep 2  # Give proxy time to start
-          if kill -0 "$(cat "$pid_dir/ollama_proxy.pid" 2>/dev/null)" 2>/dev/null; then
-            print_success "Optimization proxy started (PID: $(cat "$pid_dir/ollama_proxy.pid"))"
+        # Use wrapper script to ensure services are running
+        if [[ -f "$SCRIPT_DIR/tools/ensure-optimizations.sh" ]]; then
+          if "$SCRIPT_DIR/tools/ensure-optimizations.sh" 2>/dev/null; then
+            print_success "Optimization services started"
+            print_info "Config will be generated with proxy enabled (port 11435)"
           else
-            print_warn "Proxy may have failed to start. Check logs: $HOME/.local-llm-setup/proxy.log"
+            print_warn "Failed to start optimization services. Check logs: $HOME/.local-llm-setup/ensure-optimizations.log"
+            print_info "Config will use direct Ollama connection"
           fi
         else
-          print_info "Optimization proxy already running"
+          # Fallback to start-optimizations.sh if wrapper doesn't exist
+          if [[ -f "$SCRIPT_DIR/tools/start-optimizations.sh" ]]; then
+            "$SCRIPT_DIR/tools/start-optimizations.sh" --all
+            print_success "Optimization services started"
+            print_info "Config will be generated with proxy enabled (port 11435)"
+          else
+            print_warn "Optimization scripts not found, skipping optimization services"
+            print_info "Config will use direct Ollama connection"
+          fi
         fi
-        
-        # Start memory monitor if not running
-        if [[ ! -f "$pid_dir/memory_monitor.pid" ]] || ! kill -0 "$(cat "$pid_dir/memory_monitor.pid" 2>/dev/null)" 2>/dev/null; then
-          print_info "Starting memory pressure monitoring..."
-          (
-            source "$SCRIPT_DIR/lib/optimization.sh"
-            monitor_memory_pressure 60 85
-          ) > "$HOME/.local-llm-setup/memory_monitor.log" 2>&1 &
-          echo $! > "$pid_dir/memory_monitor.pid"
-          print_success "Memory monitor started (PID: $(cat "$pid_dir/memory_monitor.pid"))"
-        else
-          print_info "Memory monitor already running"
-        fi
-        
-        # Start queue processor if not running
-        if [[ ! -f "$pid_dir/queue_processor.pid" ]] || ! kill -0 "$(cat "$pid_dir/queue_processor.pid" 2>/dev/null)" 2>/dev/null; then
-          print_info "Starting request queue processor..."
-          (
-            source "$SCRIPT_DIR/lib/optimization.sh"
-            while true; do
-              process_request_queue 5 10
-              sleep 5
-            done
-          ) > "$HOME/.local-llm-setup/queue_processor.log" 2>&1 &
-          echo $! > "$pid_dir/queue_processor.pid"
-          print_success "Queue processor started (PID: $(cat "$pid_dir/queue_processor.pid"))"
-        else
-          print_info "Queue processor already running"
-        fi
-        
-        print_success "Optimization services started"
-        print_info "Config will be generated with proxy enabled (port 11435)"
+        echo ""
       else
-        print_warn "start-optimizations.sh not found, skipping optimization services"
-        print_info "Config will use direct Ollama connection"
+        print_info "Advanced optimizations disabled. Config will use direct Ollama connection."
+        echo ""
       fi
-      echo ""
-    else
-      print_info "Advanced optimizations disabled. Config will use direct Ollama connection."
-      echo ""
     fi
   fi
   

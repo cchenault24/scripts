@@ -23,6 +23,116 @@ ENABLE_PROMPT_OPTIMIZATION = os.environ.get('ENABLE_PROMPT_OPTIMIZATION', '1') =
 ENABLE_CONTEXT_COMPRESSION = os.environ.get('ENABLE_CONTEXT_COMPRESSION', '1') == '1'
 ENABLE_ENSEMBLE = os.environ.get('ENABLE_ENSEMBLE', '0') == '1'  # Off by default (slower but better quality)
 
+def ensure_optimization_services_running():
+    """Ensure memory monitor and queue processor are running (unless disabled)"""
+    import os
+    import subprocess
+    import time
+    
+    pid_dir = os.path.expanduser("~/.local-llm-setup/pids")
+    os.makedirs(pid_dir, exist_ok=True)
+    
+    # Check disable flag first
+    disabled_flag = os.path.expanduser("~/.local-llm-setup/optimizations.disabled")
+    if os.path.exists(disabled_flag):
+        print("Auto-start is disabled, skipping service startup")
+        return
+    
+    # Check if memory monitor is running
+    memory_monitor_pid_file = os.path.join(pid_dir, "memory_monitor.pid")
+    memory_monitor_running = False
+    if os.path.exists(memory_monitor_pid_file):
+        try:
+            with open(memory_monitor_pid_file, 'r') as f:
+                pid = int(f.read().strip())
+                os.kill(pid, 0)  # Check if process exists (raises OSError if not)
+                memory_monitor_running = True
+        except (OSError, ValueError):
+            # Process doesn't exist, remove stale PID file
+            try:
+                os.remove(memory_monitor_pid_file)
+            except:
+                pass
+    
+    # Check if queue processor is running
+    queue_processor_pid_file = os.path.join(pid_dir, "queue_processor.pid")
+    queue_processor_running = False
+    if os.path.exists(queue_processor_pid_file):
+        try:
+            with open(queue_processor_pid_file, 'r') as f:
+                pid = int(f.read().strip())
+                os.kill(pid, 0)
+                queue_processor_running = True
+        except (OSError, ValueError):
+            # Process doesn't exist, remove stale PID file
+            try:
+                os.remove(queue_processor_pid_file)
+            except:
+                pass
+    
+    # Start missing services
+    if not memory_monitor_running or not queue_processor_running:
+        # Source optimization.sh and start services
+        bash_script = f'''
+export PROJECT_DIR="{PROJECT_DIR}"
+source "{PROJECT_DIR}/lib/constants.sh"
+source "{PROJECT_DIR}/lib/logger.sh"
+source "{PROJECT_DIR}/lib/ui.sh"
+source "{PROJECT_DIR}/lib/hardware.sh"
+source "{PROJECT_DIR}/lib/ollama.sh"
+source "{PROJECT_DIR}/lib/models.sh"
+source "{PROJECT_DIR}/lib/optimization.sh"
+
+PID_DIR="{pid_dir}"
+mkdir -p "$PID_DIR"
+
+'''
+        
+        if not memory_monitor_running:
+            bash_script += '''
+# Start memory monitor
+if [[ ! -f "$PID_DIR/memory_monitor.pid" ]] || ! kill -0 "$(cat "$PID_DIR/memory_monitor.pid" 2>/dev/null)" 2>/dev/null; then
+  (
+    source "$PROJECT_DIR/lib/optimization.sh"
+    monitor_memory_pressure 60 85
+  ) > "$HOME/.local-llm-setup/memory_monitor.log" 2>&1 &
+  echo $! > "$PID_DIR/memory_monitor.pid"
+fi
+'''
+        
+        if not queue_processor_running:
+            bash_script += '''
+# Start queue processor
+if [[ ! -f "$PID_DIR/queue_processor.pid" ]] || ! kill -0 "$(cat "$PID_DIR/queue_processor.pid" 2>/dev/null)" 2>/dev/null; then
+  (
+    source "$PROJECT_DIR/lib/optimization.sh"
+    while true; do
+      process_request_queue 5 10
+      sleep 5
+    done
+  ) > "$HOME/.local-llm-setup/queue_processor.log" 2>&1 &
+  echo $! > "$PID_DIR/queue_processor.pid"
+fi
+'''
+        
+        # Execute bash script to start services
+        try:
+            proc = subprocess.Popen(
+                ['/bin/bash', '-c', bash_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Give services a moment to start
+            time.sleep(1)
+            # Check if process is still running (bash script should have started background processes)
+            if proc.poll() is None or proc.returncode == 0:
+                print("Started optimization services (memory monitor and queue processor)")
+            else:
+                print("Warning: Service startup script may have failed")
+        except Exception as e:
+            print(f"Warning: Failed to start optimization services: {e}")
+            # Continue anyway - proxy can run without these services
+
 class OptimizationProxyHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         """Handle POST requests (Ollama API calls)"""
@@ -385,6 +495,9 @@ class OptimizationProxyHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 if __name__ == '__main__':
+    # Auto-start other optimization services (unless disabled)
+    ensure_optimization_services_running()
+    
     PORT = int(os.environ.get('PROXY_PORT', '11435'))
     
     with socketserver.TCPServer(("", PORT), OptimizationProxyHandler) as httpd:
