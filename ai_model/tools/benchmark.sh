@@ -230,20 +230,47 @@ benchmark_model() {
       echo -e "${YELLOW}     • Resource exhaustion (CPU/memory)${NC}" >&2
       if [[ -n "$model_size_info" ]]; then
         echo -e "${CYAN}  → Model info: $model_size_info${NC}" >&2
+        # Warn about very large models
+        if echo "$model_size_info" | grep -qiE "70|65|80|90|100|billion"; then
+          echo -e "${RED}  → WARNING: This is a very large model (70B+ parameters)${NC}" >&2
+          echo -e "${YELLOW}  → 70B models typically need 40-50GB+ RAM to run${NC}" >&2
+          echo -e "${YELLOW}  → Consider using a quantized version or smaller model${NC}" >&2
+        fi
       fi
       echo "" >&2
       echo -e "${CYAN}  → Troubleshooting steps:${NC}" >&2
       echo -e "${YELLOW}     1. Check available memory:${NC}" >&2
       echo -e "${YELLOW}        free -h  (Linux) or vm_stat (macOS)${NC}" >&2
       echo -e "${YELLOW}     2. Check Ollama server logs for details:${NC}" >&2
-      local log_file="$HOME/.ollama/logs/server.log"
-      if [[ -f "$log_file" ]]; then
+      # Try multiple possible log locations
+      local log_file=""
+      local possible_locations=(
+        "$HOME/.ollama/logs/server.log"
+        "$HOME/Library/Logs/ollama/server.log"
+        "/var/log/ollama/server.log"
+        "$(brew --prefix)/var/log/ollama/server.log" 2>/dev/null
+      )
+      
+      for loc in "${possible_locations[@]}"; do
+        if [[ -f "$loc" ]]; then
+          log_file="$loc"
+          break
+        fi
+      done
+      
+      if [[ -n "$log_file" ]] && [[ -f "$log_file" ]]; then
         echo -e "${YELLOW}        tail -n 50 $log_file${NC}" >&2
         echo -e "${YELLOW}        (Last few log entries shown below)${NC}" >&2
         tail -n 10 "$log_file" 2>/dev/null | sed 's/^/        /' >&2 || true
       else
-        echo -e "${YELLOW}        Log file not found at: $log_file${NC}" >&2
-        echo -e "${YELLOW}        Check: brew services list ollama${NC}" >&2
+        echo -e "${YELLOW}        Log file not found in common locations${NC}" >&2
+        echo -e "${YELLOW}        Try: brew services list ollama${NC}" >&2
+        echo -e "${YELLOW}        Or check: journalctl -u ollama (Linux)${NC}" >&2
+        # Try to get logs from ollama directly if possible
+        if command -v ollama &>/dev/null; then
+          echo -e "${YELLOW}        Checking ollama service status...${NC}" >&2
+          brew services list 2>/dev/null | grep ollama >&2 || true
+        fi
       fi
       echo -e "${YELLOW}     3. Try a smaller model or reduce context size${NC}" >&2
       echo -e "${YELLOW}     4. Restart Ollama service:${NC}" >&2
@@ -253,6 +280,18 @@ benchmark_model() {
         echo -e "${YELLOW}  → Full error message:${NC}" >&2
         echo "$response" | head -n 5 >&2
       fi
+      
+      # Suggest smaller alternatives if this is a large model
+      if echo "$model" | grep -qiE "70|65|80|90|100"; then
+        echo "" >&2
+        echo -e "${CYAN}  → Suggested alternatives (smaller models):${NC}" >&2
+        echo -e "${YELLOW}     • qwen2.5-coder:7b-instruct-q4_K_M (7B, quantized)${NC}" >&2
+        echo -e "${YELLOW}     • codestral:22b (22B, smaller than 70B)${NC}" >&2
+        echo -e "${YELLOW}     • deepseek-coder-v2:16b-lite-base-q4_0 (16B, quantized)${NC}" >&2
+        echo -e "${YELLOW}     • codellama:13b-instruct-q4_0 (13B, quantized)${NC}" >&2
+        echo -e "${YELLOW}     • qwen2.5-coder:14b (14B, smaller than 70B)${NC}" >&2
+      fi
+      
       return 1
     fi
     
@@ -423,6 +462,18 @@ run_benchmark() {
   # Check system resources
   echo -e "${YELLOW}  → Checking system resources...${NC}" >&2
   check_system_resources "$model"
+  
+  # Warn about very large models before starting
+  if echo "$model" | grep -qiE "70|65|80|90|100"; then
+    print_warn "Warning: This is a very large model (70B+ parameters)"
+    echo -e "${YELLOW}  → Large models like this typically require 40-50GB+ RAM${NC}" >&2
+    echo -e "${YELLOW}  → If you encounter Error 500, try a smaller quantized model instead${NC}" >&2
+    if ! prompt_yes_no "Continue with benchmark anyway?" "y"; then
+      print_info "Benchmark cancelled"
+      return 0
+    fi
+    echo "" >&2
+  fi
   
   print_info "This will take a few minutes..."
   echo ""
