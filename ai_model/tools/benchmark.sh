@@ -799,12 +799,26 @@ main() {
   # Check Ollama
   if ! command -v ollama &>/dev/null; then
     print_error "Ollama not found"
+    print_error_with_suggestion "Ollama is required for benchmarking" "Install with: brew install ollama"
     exit 1
   fi
   
-  if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+  # Check Ollama service with retry
+  local ollama_available=false
+  for i in {1..3}; do
+    if curl -s --max-time 5 http://localhost:11434/api/tags &>/dev/null; then
+      ollama_available=true
+      break
+    fi
+    if [[ $i -lt 3 ]]; then
+      print_info "Waiting for Ollama service... (attempt $i/3)"
+      sleep 2
+    fi
+  done
+  
+  if [[ "$ollama_available" != "true" ]]; then
     print_error "Ollama service is not running"
-    print_info "Start with: brew services start ollama"
+    print_error_with_suggestion "Ollama service is required" "Start with: brew services start ollama"
     exit 1
   fi
   

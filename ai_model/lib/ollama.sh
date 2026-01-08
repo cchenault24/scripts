@@ -178,9 +178,28 @@ configure_ollama_service() {
 get_installed_models() {
   # Use a global cache variable to avoid multiple ollama list calls
   if [[ -z "${_INSTALLED_MODELS_CACHE:-}" ]]; then
+    # Check if Ollama is available before calling
+    if ! command -v ollama &>/dev/null; then
+      echo ""
+      return 1
+    fi
+    
+    # Check if Ollama service is running
+    if ! curl -s --max-time 2 http://localhost:11434/api/tags &>/dev/null; then
+      log_warn "Ollama service not running, cannot get installed models"
+      echo ""
+      return 1
+    fi
+    
     _INSTALLED_MODELS_CACHE=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
   fi
   echo "$_INSTALLED_MODELS_CACHE"
+}
+
+# Clear installed models cache (call after installing/uninstalling models)
+clear_installed_models_cache() {
+  unset _INSTALLED_MODELS_CACHE
+  log_info "Cleared installed models cache"
 }
 
 # Check if a specific model is installed

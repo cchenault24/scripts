@@ -24,14 +24,29 @@ generate_continue_config() {
   local continue_dir="$HOME/.continue"
   local config_file="$continue_dir/config.yaml"
   
-  mkdir -p "$continue_dir"
+  # Validate and create directory
+  if ! mkdir -p "$continue_dir" 2>/dev/null; then
+    log_error "Cannot create Continue.dev directory: $continue_dir"
+    print_error "Failed to create Continue.dev configuration directory"
+    return 1
+  fi
+  
+  if [[ ! -w "$continue_dir" ]]; then
+    log_error "Continue.dev directory is not writable: $continue_dir"
+    print_error "Cannot write to Continue.dev directory"
+    return 1
+  fi
   
   # Backup existing config if it exists
   if [[ -f "$config_file" ]]; then
     local backup_file="${config_file}.backup-$(date +%Y%m%d-%H%M%S)"
-    cp "$config_file" "$backup_file"
-    print_info "Backed up existing config to: $backup_file"
-    log_info "Backed up existing config to: $backup_file"
+    if cp "$config_file" "$backup_file" 2>/dev/null; then
+      print_info "Backed up existing config to: $backup_file"
+      log_info "Backed up existing config to: $backup_file"
+    else
+      log_warn "Failed to backup existing config, continuing anyway"
+      print_warn "Could not backup existing config file"
+    fi
   fi
   
   # Separate coding models from embedding models
@@ -286,10 +301,51 @@ contextProviders:
 EOF
   )
   
-  # Write config
-  echo "$config_yaml" > "$config_file"
-  print_success "Continue.dev config generated: $config_file"
-  log_info "Continue.dev config written to $config_file with ${#coding_models[@]} coding model(s)"
+  # Write config atomically
+  if command -v atomic_write &>/dev/null; then
+    if atomic_write "$config_file" "$config_yaml"; then
+      print_success "Continue.dev config generated: $config_file"
+      log_info "Continue.dev config written to $config_file with ${#coding_models[@]} coding model(s)"
+    else
+      log_error "Failed to write Continue.dev config atomically"
+      print_error "Failed to generate Continue.dev config"
+      return 1
+    fi
+  else
+    # Fallback: regular write
+    if echo "$config_yaml" > "$config_file" 2>/dev/null; then
+      print_success "Continue.dev config generated: $config_file"
+      log_info "Continue.dev config written to $config_file with ${#coding_models[@]} coding model(s)"
+    else
+      log_error "Failed to write Continue.dev config"
+      print_error "Failed to generate Continue.dev config"
+      return 1
+    fi
+  fi
+  
+  # Validate config file was created and is readable
+  if [[ ! -f "$config_file" ]] || [[ ! -r "$config_file" ]]; then
+    log_error "Continue.dev config file validation failed"
+    print_error "Config file was not created or is not readable"
+    return 1
+  fi
+  
+  # Basic YAML validation (check for key structure)
+  if ! grep -q "name:" "$config_file" || ! grep -q "models:" "$config_file"; then
+    log_warn "Continue.dev config may be malformed (basic validation failed)"
+    print_warn "Config file generated but may have issues"
+  fi
+  
+  # Test API connectivity if proxy is enabled
+  if echo "$config_yaml" | grep -q "localhost:11435"; then
+    print_info "Testing optimization proxy connectivity..."
+    if curl -s --max-time 5 http://localhost:11435/api/tags &>/dev/null; then
+      print_success "Optimization proxy is reachable"
+    else
+      print_warn "Optimization proxy may not be running (config will use direct Ollama connection)"
+      log_warn "Proxy configured but not reachable, Continue.dev may fall back to direct connection"
+    fi
+  fi
   
   CONTINUE_PROFILES=("chat" "edit" "apply" "autocomplete")
 }

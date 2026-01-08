@@ -32,6 +32,7 @@ SELECTED_EXTENSIONS=()
 source "$SCRIPT_DIR/lib/constants.sh"
 source "$SCRIPT_DIR/lib/logger.sh"
 source "$SCRIPT_DIR/lib/ui.sh"
+source "$SCRIPT_DIR/lib/utils.sh"
 source "$SCRIPT_DIR/lib/state.sh"
 source "$SCRIPT_DIR/lib/hardware.sh"
 source "$SCRIPT_DIR/lib/ollama.sh"
@@ -52,6 +53,72 @@ cleanup_on_exit() {
       unload_all_models 2>/dev/null || true
     fi
   fi
+}
+
+# Pre-flight checks before starting installation
+preflight_checks() {
+  print_header "🔍 Pre-Flight Checks"
+  
+  local checks_passed=0
+  local checks_failed=0
+  
+  # Check disk space (require at least 20GB for model downloads)
+  print_info "Checking disk space..."
+  if validate_disk_space 20 "$HOME"; then
+    print_success "Disk space check passed"
+    ((checks_passed++))
+  else
+    print_error "Insufficient disk space (required: 20GB)"
+    print_info "Free up space or choose smaller models"
+    ((checks_failed++))
+  fi
+  
+  # Check network connectivity (if models will be downloaded)
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    print_info "Checking network connectivity..."
+    if check_network_connectivity "https://ollama.com" 2 5 2; then
+      print_success "Network connectivity check passed"
+      ((checks_passed++))
+    else
+      print_warn "Network connectivity check failed"
+      print_info "Model downloads may fail. Continuing anyway..."
+      ((checks_failed++))
+    fi
+  fi
+  
+  # Check state directory permissions
+  print_info "Checking state directory permissions..."
+  if mkdir -p "$STATE_DIR" 2>/dev/null && [[ -w "$STATE_DIR" ]]; then
+    print_success "State directory is writable"
+    ((checks_passed++))
+  else
+    print_error "State directory is not writable: $STATE_DIR"
+    ((checks_failed++))
+  fi
+  
+  # Check Continue.dev config directory
+  print_info "Checking Continue.dev config directory..."
+  local continue_dir="$HOME/.continue"
+  if mkdir -p "$continue_dir" 2>/dev/null && [[ -w "$continue_dir" ]]; then
+    print_success "Continue.dev directory is writable"
+    ((checks_passed++))
+  else
+    print_error "Continue.dev directory is not writable: $continue_dir"
+    ((checks_failed++))
+  fi
+  
+  echo ""
+  if [[ $checks_failed -gt 0 ]]; then
+    print_warn "$checks_failed check(s) failed, $checks_passed check(s) passed"
+    if ! prompt_yes_no "Continue despite failed checks?" "n"; then
+      log_error "Pre-flight checks failed, user chose to abort"
+      exit 1
+    fi
+  else
+    print_success "All pre-flight checks passed ($checks_passed checks)"
+  fi
+  
+  echo ""
 }
 
 # Main installation flow
@@ -88,6 +155,9 @@ main() {
   detect_hardware
   check_prerequisites
   
+  # Pre-flight checks (after prerequisites, before installations)
+  preflight_checks
+  
   # Ask if user wants to install models
   local install_models=true
   if [[ "$resume_installation" != "true" ]]; then
@@ -123,6 +193,35 @@ main() {
   fi
   
   # ============================================
+  # Show summary and confirm before starting
+  # ============================================
+  print_header "📋 Installation Summary"
+  echo -e "${CYAN}Please review your selections before installation begins:${NC}"
+  echo ""
+  echo -e "  ${BOLD}Hardware Tier:${NC} $TIER_LABEL"
+  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+    echo -e "  ${BOLD}Models to install:${NC}"
+    for model in "${SELECTED_MODELS[@]}"; do
+      local ram=$(get_model_ram "$model")
+      echo -e "    • $model (~${ram}GB RAM)"
+    done
+  else
+    echo -e "  ${BOLD}Models:${NC} None selected"
+  fi
+  if [[ ${#SELECTED_EXTENSIONS[@]} -gt 0 ]]; then
+    echo -e "  ${BOLD}VS Code Extensions:${NC} ${#SELECTED_EXTENSIONS[@]} selected"
+  else
+    echo -e "  ${BOLD}VS Code Extensions:${NC} None selected"
+  fi
+  echo ""
+  
+  if ! prompt_yes_no "Proceed with installation?" "y"; then
+    print_info "Installation cancelled by user"
+    exit 0
+  fi
+  echo ""
+  
+  # ============================================
   # Begin all installations/setup
   # ============================================
   print_header "🚀 Starting Installation"
@@ -136,12 +235,74 @@ main() {
     print_info "This may take 10-30 minutes depending on your internet connection..."
     echo ""
     
+    # Check network before starting downloads
+    if ! check_network_connectivity "https://ollama.com" 2 5 2; then
+      print_warn "Network connectivity check failed"
+      if ! prompt_yes_no "Continue with model downloads anyway?" "n"; then
+        print_info "Skipping model installation due to network issues"
+        SELECTED_MODELS=()
+        failed_models=()
+      fi
+    fi
+    
+    # Estimate total disk space needed
+    local total_size=0
     for model in "${SELECTED_MODELS[@]}"; do
-      if install_model "$model"; then
+      local model_size
+      model_size=$(estimate_model_size "$model")
+      if command -v bc &>/dev/null; then
+        total_size=$(echo "scale=2; $total_size + $model_size" | bc 2>/dev/null || echo "$total_size")
+      else
+        local size_int=${model_size%%.*}
+        local total_int=${total_size%%.*}
+        total_size=$((total_int + size_int))
+      fi
+    done
+    
+    if [[ -n "$total_size" ]] && [[ "$total_size" != "0" ]]; then
+      print_info "Estimated total download size: ~${total_size}GB"
+      if ! validate_disk_space "$total_size" "$HOME"; then
+        print_warn "Insufficient disk space for all models"
+        if ! prompt_yes_no "Continue anyway? (Some models may fail to install)" "n"; then
+          print_info "Skipping model installation due to insufficient disk space"
+          SELECTED_MODELS=()
+          failed_models=()
+        fi
+      fi
+    fi
+    
+    for model in "${SELECTED_MODELS[@]}"; do
+      # Sanitize and validate model name
+      local sanitized_model
+      sanitized_model=$(sanitize_model_name "$model")
+      if [[ -z "$sanitized_model" ]] || ! validate_model_name "$sanitized_model"; then
+        log_error "Invalid model name: $model"
+        failed_models+=("$model")
+        continue
+      fi
+      
+      # Check disk space for this specific model
+      local model_size
+      model_size=$(estimate_model_size "$sanitized_model")
+      if ! validate_disk_space "$model_size" "$HOME"; then
+        print_warn "Insufficient disk space for $sanitized_model (~${model_size}GB required)"
+        if ! prompt_yes_no "Skip $sanitized_model and continue with other models?" "y"; then
+          failed_models+=("$sanitized_model")
+          continue
+        fi
+      fi
+      
+      if install_model "$sanitized_model"; then
         # Get the actual installed model name (may be optimized variant)
-        local installed_model=$(resolve_installed_model "$model")
+        local installed_model=$(resolve_installed_model "$sanitized_model")
         print_success "$installed_model downloaded"
         echo ""
+        
+        # Verify model is actually installed
+        if ! is_model_installed "$installed_model"; then
+          log_warn "Model $installed_model may not be fully installed"
+          print_warn "Installation verification failed for $installed_model"
+        fi
         
         # Prompt for validation
         if prompt_yes_no "Would you like to validate $installed_model?" "y"; then

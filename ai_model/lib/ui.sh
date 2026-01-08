@@ -28,6 +28,39 @@ print_error() {
   echo -e "${RED}✗ $1${NC}"
 }
 
+# Print error with actionable suggestion
+print_error_with_suggestion() {
+  local error_msg="$1"
+  local suggestion="$2"
+  print_error "$error_msg"
+  if [[ -n "$suggestion" ]]; then
+    echo -e "${CYAN}💡 Suggestion:${NC} $suggestion"
+  fi
+}
+
+# Progress indicator (simple spinner)
+show_progress() {
+  local message="$1"
+  local pid="$2"
+  
+  if [[ -z "$pid" ]]; then
+    # No PID provided, just show message
+    echo -e "${CYAN}⏳${NC} $message"
+    return
+  fi
+  
+  # Show spinner while process is running
+  local spinner='|/-\'
+  local i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    local char="${spinner:$((i % 4)):1}"
+    echo -ne "\r${CYAN}${char}${NC} $message"
+    sleep 0.1
+    ((i++))
+  done
+  echo -ne "\r${GREEN}✓${NC} $message\n"
+}
+
 prompt_yes_no() {
   local prompt="$1"
   local default="${2:-n}"

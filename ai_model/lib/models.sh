@@ -28,17 +28,34 @@ validate_model_exists() {
     return 1
   fi
   
+  # Sanitize model name first
+  local sanitized_model
+  if command -v sanitize_model_name &>/dev/null; then
+    sanitized_model=$(sanitize_model_name "$model")
+    if [[ -z "$sanitized_model" ]] || [[ "$sanitized_model" != "$model" ]]; then
+      print_error "Model name contains invalid characters"
+      return 1
+    fi
+  fi
+  
+  # Validate model name format and safety
+  if command -v validate_model_name &>/dev/null; then
+    if ! validate_model_name "$model"; then
+      return 1
+    fi
+  else
+    # Fallback validation
+    if ! [[ "$model" =~ ^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$ ]]; then
+      print_error "Invalid model name format. Expected format: modelname:tag or modelname"
+      print_info "Example: codellama:13b or llama3.1:8b"
+      return 1
+    fi
+  fi
+  
   # Check if model is already installed locally
   if is_model_installed "$model"; then
     print_success "Model $model is already installed locally"
     return 0
-  fi
-  
-  # Validate model name format first (cheaper than ollama show)
-  if ! [[ "$model" =~ ^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$ ]]; then
-    print_error "Invalid model name format. Expected format: modelname:tag or modelname"
-    print_info "Example: codellama:13b or llama3.1:8b"
-    return 1
   fi
   
   # Quick check: try to get model info (works for locally installed models)
@@ -450,14 +467,27 @@ EOF
 install_model() {
   local model="$1"
   
-  print_info "Installing $model..."
+  # Validate and sanitize model name
+  if ! validate_model_name "$model"; then
+    log_error "Invalid model name: $model"
+    return 1
+  fi
+  
+  local sanitized_model
+  sanitized_model=$(sanitize_model_name "$model")
+  if [[ -z "$sanitized_model" ]] || [[ "$sanitized_model" != "$model" ]]; then
+    log_error "Model name sanitization failed: $model"
+    return 1
+  fi
+  
+  print_info "Installing $sanitized_model..."
   print_info "Ollama will automatically select optimal quantization (Q4_K_M/Q5_K_M) for Apple Silicon"
-  log_info "Installing model: $model (Ollama auto-optimizes for Apple Silicon)"
+  log_info "Installing model: $sanitized_model (Ollama auto-optimizes for Apple Silicon)"
   
   # Check if model is already installed
-  if is_model_installed "$model"; then
-    print_success "$model already installed, skipping download"
-    INSTALLED_MODELS+=("$model")
+  if is_model_installed "$sanitized_model"; then
+    print_success "$sanitized_model already installed, skipping download"
+    INSTALLED_MODELS+=("$sanitized_model")
     # Initialize usage tracking for existing model
     if command -v init_usage_tracking &>/dev/null; then
       init_usage_tracking
@@ -465,18 +495,49 @@ install_model() {
     return 0
   fi
   
-  # Download model - Ollama automatically selects best quantization for Apple Silicon
-  if ollama pull "$model" 2>&1 | tee -a "$LOG_FILE"; then
-    print_success "$model installed (automatically optimized for Apple Silicon)"
-    log_info "Model $model installed with automatic quantization optimization"
-    INSTALLED_MODELS+=("$model")
-    # Initialize usage tracking for new model
-    if command -v init_usage_tracking &>/dev/null; then
-      init_usage_tracking
+  # Check network connectivity before download
+  if ! check_network_connectivity "https://ollama.com" 2 10 2; then
+    log_error "Network connectivity check failed, cannot download model"
+    print_error "Cannot download $sanitized_model: network connectivity failed"
+    return 1
+  fi
+  
+  # Download model with retry logic - Ollama automatically selects best quantization for Apple Silicon
+  local download_success=false
+  if command -v retry_with_backoff &>/dev/null; then
+    if retry_with_backoff 3 2 "ollama pull \"$sanitized_model\" 2>&1 | tee -a \"$LOG_FILE\""; then
+      download_success=true
     fi
-    return 0
   else
-    log_error "Failed to install $model"
+    # Fallback: direct download
+    if ollama pull "$sanitized_model" 2>&1 | tee -a "$LOG_FILE"; then
+      download_success=true
+    fi
+  fi
+  
+  if [[ "$download_success" == "true" ]]; then
+    # Clear cache to force refresh
+    if command -v clear_installed_models_cache &>/dev/null; then
+      clear_installed_models_cache
+    fi
+    
+    # Verify model is actually installed
+    if is_model_installed "$sanitized_model"; then
+      print_success "$sanitized_model installed (automatically optimized for Apple Silicon)"
+      log_info "Model $sanitized_model installed with automatic quantization optimization"
+      INSTALLED_MODELS+=("$sanitized_model")
+      # Initialize usage tracking for new model
+      if command -v init_usage_tracking &>/dev/null; then
+        init_usage_tracking
+      fi
+      return 0
+    else
+      log_error "Model download appeared successful but model is not installed: $sanitized_model"
+      print_error "Installation verification failed for $sanitized_model"
+      return 1
+    fi
+  else
+    log_error "Failed to install $sanitized_model after retries"
     return 1
   fi
 }
