@@ -354,11 +354,22 @@ select_models() {
 }
 
 # Auto-tune model parameters
+# Supports Phase 1 optimizations via optional parameters
 tune_model() {
   local model="$1"
   local tier="$2"
   local role="${3:-coding}"
+  local use_optimizations="${4:-1}"  # New: Enable optimizations by default (Phase 1)
+  local task_type="${5:-general}"  # New: Task type for dynamic optimization
+  local prompt_length="${6:-0}"  # New: Estimated prompt length
   
+  # Use optimized tuning if available and enabled
+  if [[ "$use_optimizations" == "1" ]] && command -v tune_model_optimized &>/dev/null; then
+    tune_model_optimized "$model" "$tier" "$role" "$task_type" "$prompt_length"
+    return
+  fi
+  
+  # Original tuning logic (fallback)
   local context_size
   local max_tokens
   local temperature
@@ -447,6 +458,10 @@ install_model() {
   if is_model_installed "$model"; then
     print_success "$model already installed, skipping download"
     INSTALLED_MODELS+=("$model")
+    # Initialize usage tracking for existing model
+    if command -v init_usage_tracking &>/dev/null; then
+      init_usage_tracking
+    fi
     return 0
   fi
   
@@ -455,6 +470,10 @@ install_model() {
     print_success "$model installed (automatically optimized for Apple Silicon)"
     log_info "Model $model installed with automatic quantization optimization"
     INSTALLED_MODELS+=("$model")
+    # Initialize usage tracking for new model
+    if command -v init_usage_tracking &>/dev/null; then
+      init_usage_tracking
+    fi
     return 0
   else
     log_error "Failed to install $model"
@@ -469,10 +488,20 @@ benchmark_model_performance() {
   print_info "Benchmarking $model performance..."
   log_info "Benchmarking model: $model"
   
+  # Use smart loading if available
+  if command -v smart_load_model &>/dev/null; then
+    smart_load_model "$model" 0
+  fi
+  
   local test_prompt="Write a simple TypeScript function that adds two numbers and returns the result."
   local start_time=$(date +%s.%N 2>/dev/null || date +%s)
   local response
   local token_count=0
+  
+  # Track model usage
+  if command -v track_model_usage &>/dev/null; then
+    track_model_usage "$model"
+  fi
   
   # Run model and capture response
   response=$(run_with_timeout 60 ollama run "$model" "$test_prompt" 2>&1)
@@ -603,9 +632,19 @@ validate_model_simple() {
   print_info "Validating $model..."
   log_info "Validating model: $model"
   
+  # Use smart loading if available
+  if command -v smart_load_model &>/dev/null; then
+    smart_load_model "$model" 0
+  fi
+  
   local test_prompt="Write a simple TypeScript function that adds two numbers."
   local start_time=$(date +%s)
   local response
+  
+  # Track model usage
+  if command -v track_model_usage &>/dev/null; then
+    track_model_usage "$model"
+  fi
   
   # Test with timeout
   if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then

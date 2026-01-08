@@ -30,16 +30,16 @@ detect_hardware() {
   # Classify tier
   if [[ $ram_gb -ge $TIER_S_MIN ]]; then
     HARDWARE_TIER="S"
-    TIER_LABEL="Tier S (≥48GB RAM)"
+    TIER_LABEL="Tier S (≥49GB RAM)"
   elif [[ $ram_gb -ge $TIER_A_MIN ]]; then
     HARDWARE_TIER="A"
-    TIER_LABEL="Tier A (32-47GB RAM)"
+    TIER_LABEL="Tier A (33-48GB RAM)"
   elif [[ $ram_gb -ge $TIER_B_MIN ]]; then
     HARDWARE_TIER="B"
-    TIER_LABEL="Tier B (16-31GB RAM)"
+    TIER_LABEL="Tier B (17-32GB RAM)"
   else
     HARDWARE_TIER="C"
-    TIER_LABEL="Tier C (<16GB RAM)"
+    TIER_LABEL="Tier C (<17GB RAM)"
   fi
   
   log_info "Hardware tier: $HARDWARE_TIER ($TIER_LABEL)"

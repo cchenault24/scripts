@@ -57,27 +57,27 @@ This setup provides a seamless "zero to productive" local AI coding experience i
 
 The setup automatically detects your hardware and classifies it into tiers:
 
-### Tier S (≥48GB RAM)
+### Tier S (≥49GB RAM)
 - **All models available**
 - **Recommended**: qwen2.5-coder:14b + codestral:22b (or llama3.1:70b for maximum quality)
 - Keep-alive (1h) - models unload after 1 hour of inactivity
 - High context window (32K tokens)
 - Best for: Complex refactoring, architecture work, multi-model workflows
 
-### Tier A (32-47GB RAM)
+### Tier A (33-48GB RAM)
 - **Excludes**: llama3.1:70b
 - **Recommended**: qwen2.5-coder:14b + codestral:22b
 - Keep-alive (1h) - models unload after 1 hour of inactivity
 - Medium context window (16K tokens)
 - Best for: General development, code review, complex coding tasks
 
-### Tier B (16-31GB RAM)
+### Tier B (17-32GB RAM)
 - **Excludes**: llama3.1:70b, codestral:22b
 - Conservative keep-alive (5m)
 - Smaller context window (8K tokens)
 - Best for: Lightweight development, autocomplete
 
-### Tier C (<16GB RAM)
+### Tier C (<17GB RAM)
 - **Only**: qwen2.5-coder:7b, llama3.1:8b
 - Minimal keep-alive (5m)
 - Small context window (4K tokens)

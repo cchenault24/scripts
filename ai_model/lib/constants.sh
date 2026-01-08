@@ -29,9 +29,9 @@ readonly APPROVED_MODELS=(
 )
 
 # Hardware tier thresholds (RAM in GB)
-readonly TIER_S_MIN=48
-readonly TIER_A_MIN=32
-readonly TIER_B_MIN=16
+readonly TIER_S_MIN=49
+readonly TIER_A_MIN=33
+readonly TIER_B_MIN=17
 
 # Model resource estimates (RAM in GB) - Quantized variants for Apple Silicon
 # Function to get model RAM (reflects Q4_K_M/Q5_K_M quantization)

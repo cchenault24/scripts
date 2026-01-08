@@ -103,10 +103,10 @@ format_model_for_gum() {
   
   # Get tier label
   case "$tier" in
-    S) tier_label="Tier S (≥48GB RAM)" ;;
-    A) tier_label="Tier A (32-47GB RAM)" ;;
-    B) tier_label="Tier B (16-31GB RAM)" ;;
-    C) tier_label="Tier C (<16GB RAM)" ;;
+    S) tier_label="Tier S (≥49GB RAM)" ;;
+    A) tier_label="Tier A (33-48GB RAM)" ;;
+    B) tier_label="Tier B (17-32GB RAM)" ;;
+    C) tier_label="Tier C (<17GB RAM)" ;;
   esac
   
   if [[ "$eligible" == "false" ]]; then

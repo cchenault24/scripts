@@ -36,6 +36,7 @@ source "$SCRIPT_DIR/lib/state.sh"
 source "$SCRIPT_DIR/lib/hardware.sh"
 source "$SCRIPT_DIR/lib/ollama.sh"
 source "$SCRIPT_DIR/lib/models.sh"
+source "$SCRIPT_DIR/lib/optimization.sh"
 source "$SCRIPT_DIR/lib/continue.sh"
 source "$SCRIPT_DIR/lib/vscode.sh"
 source "$SCRIPT_DIR/lib/prerequisites.sh"
@@ -44,7 +45,12 @@ source "$SCRIPT_DIR/lib/prerequisites.sh"
 cleanup_on_exit() {
   # Unload all models on exit to free memory
   if command -v ollama &>/dev/null && curl -s http://localhost:11434/api/tags &>/dev/null 2>/dev/null; then
-    unload_all_models 2>/dev/null || true
+    # Use smart unloading if available, otherwise fallback to regular unloading
+    if command -v smart_unload_idle_models &>/dev/null; then
+      smart_unload_idle_models 2>/dev/null || unload_all_models 2>/dev/null || true
+    else
+      unload_all_models 2>/dev/null || true
+    fi
   fi
 }
 
@@ -213,7 +219,12 @@ main() {
   
   # Final cleanup - unload all models to free memory
   print_info "Cleaning up: unloading models from memory..."
-  unload_all_models
+  # Use smart unloading if available, otherwise fallback to regular unloading
+  if command -v smart_unload_idle_models &>/dev/null; then
+    smart_unload_idle_models || unload_all_models
+  else
+    unload_all_models
+  fi
   
   # Final summary
   print_header "✅ Setup Complete!"
