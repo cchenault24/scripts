@@ -194,6 +194,12 @@ check_resources() {
     local page_size=$(pagesize)
     local free_mb=$((free_pages * page_size / 1024 / 1024))
     print_info "Available RAM: ~${free_mb}MB"
+    
+    # Warn if low memory
+    if [[ $free_mb -lt 4096 ]]; then
+      print_warn "Low available memory: ~${free_mb}MB (less than 4GB)"
+      print_info "Consider unloading models with: ./tools/cleanup.sh"
+    fi
   fi
   
   # Disk space
@@ -203,6 +209,65 @@ check_resources() {
   # CPU
   local cpu_cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "Unknown")
   print_info "CPU cores: $cpu_cores"
+}
+
+# Check loaded models and memory usage
+check_loaded_models() {
+  print_header "🧠 Loaded Models & Memory"
+  
+  if ! command -v ollama &>/dev/null; then
+    print_warn "Ollama not found, cannot check loaded models"
+    return 1
+  fi
+  
+  if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+    print_warn "Ollama service not running, cannot check loaded models"
+    return 1
+  fi
+  
+  local loaded_models
+  loaded_models=$(ollama ps 2>/dev/null | tail -n +2 || echo "")
+  
+  if [[ -z "$loaded_models" ]]; then
+    print_success "No models currently loaded in memory"
+    return 0
+  fi
+  
+  local model_count
+  model_count=$(echo "$loaded_models" | wc -l | xargs || echo "0")
+  print_info "Found $model_count loaded model(s)"
+  echo ""
+  
+  # Show each loaded model with memory info
+  echo "$loaded_models" | while IFS= read -r line; do
+    if [[ -n "$line" ]]; then
+      local model_name
+      model_name=$(echo "$line" | awk '{print $1}' || echo "")
+      local memory_info
+      memory_info=$(echo "$line" | awk '{for(i=1;i<=NF;i++) if($i ~ /[0-9]+(\.[0-9]+)?(GB|MB)/) {print $i; exit}}' || echo "")
+      
+      if [[ -n "$model_name" ]]; then
+        if [[ -n "$memory_info" ]]; then
+          print_info "  • $model_name (Memory: $memory_info)"
+        else
+          print_info "  • $model_name"
+        fi
+      fi
+    fi
+  done
+  
+  # Warn if multiple large models loaded
+  if [[ $model_count -gt 2 ]]; then
+    echo ""
+    print_warn "Multiple models loaded ($model_count) - this may cause memory pressure"
+    print_info "Unload unused models with: ./tools/cleanup.sh"
+  fi
+  
+  # Check for very large models (70B+)
+  if echo "$loaded_models" | grep -qiE "70|65|80|90|100"; then
+    echo ""
+    print_warn "Large model (70B+) detected - requires significant memory"
+  fi
 }
 
 # Cross-platform timeout function
@@ -350,6 +415,7 @@ main() {
   check_vscode || ((issues++))
   check_network
   check_resources
+  check_loaded_models
   test_model_response || ((issues++))
   
   # Generate report

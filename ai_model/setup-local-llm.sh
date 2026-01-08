@@ -358,8 +358,8 @@ setup_ollama_environment() {
   
   # Set keep-alive based on hardware tier
   case "$HARDWARE_TIER" in
-    S) export OLLAMA_KEEP_ALIVE="24h" ;;
-    A) export OLLAMA_KEEP_ALIVE="12h" ;;
+    S) export OLLAMA_KEEP_ALIVE="1h" ;;
+    A) export OLLAMA_KEEP_ALIVE="1h" ;;
     B) export OLLAMA_KEEP_ALIVE="5m" ;;
     C) export OLLAMA_KEEP_ALIVE="5m" ;;
     *) export OLLAMA_KEEP_ALIVE="5m" ;;
@@ -1181,6 +1181,83 @@ run_with_timeout() {
       rm -f "$response_file"
       return $exit_code
     fi
+  fi
+}
+
+# Unload model from memory using Ollama API
+unload_model() {
+  local model="$1"
+  local silent="${2:-0}"  # Optional: 1 for silent mode
+  
+  # Check if model is actually loaded
+  if ! ollama ps 2>/dev/null | grep -q "^${model}"; then
+    return 0  # Model not loaded, nothing to do
+  fi
+  
+  if [[ $silent -eq 0 ]]; then
+    print_info "Unloading model from memory..."
+  fi
+  
+  # Use Ollama API to unload the model by setting keep_alive to 0
+  # This is the proper way to unload a model according to Ollama docs
+  local api_response
+  api_response=$(curl -s --max-time 10 -X POST http://localhost:11434/api/generate \
+    -H "Content-Type: application/json" \
+    -d "{\"model\": \"$model\", \"prompt\": \"\", \"keep_alive\": 0}" 2>/dev/null || echo "")
+  
+  # Wait for the model to unload (Ollama needs a moment)
+  sleep 3
+  
+  # Retry if still loaded (sometimes takes a moment)
+  local retries=0
+  while [[ $retries -lt 3 ]] && ollama ps 2>/dev/null | grep -q "^${model}"; do
+    sleep 1
+    ((retries++))
+    # Try again with a minimal request
+    curl -s --max-time 5 -X POST http://localhost:11434/api/generate \
+      -H "Content-Type: application/json" \
+      -d "{\"model\": \"$model\", \"prompt\": \"\", \"keep_alive\": 0}" >/dev/null 2>&1 || true
+  done
+  
+  # Verify model is unloaded
+  if ollama ps 2>/dev/null | grep -q "^${model}"; then
+    if [[ $silent -eq 0 ]]; then
+      print_warn "Model may still be in memory"
+    fi
+    return 1
+  else
+    if [[ $silent -eq 0 ]]; then
+      print_success "Model unloaded from memory"
+    fi
+    return 0
+  fi
+}
+
+# Unload all models from memory (cleanup function)
+unload_all_models() {
+  local loaded_models
+  loaded_models=$(ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  
+  if [[ -z "$loaded_models" ]]; then
+    return 0  # No models loaded
+  fi
+  
+  print_info "Unloading all models from memory..."
+  
+  while IFS= read -r model; do
+    if [[ -n "$model" ]]; then
+      unload_model "$model" 1  # Silent mode
+    fi
+  done <<< "$loaded_models"
+  
+  # Final check
+  sleep 2
+  local remaining
+  remaining=$(ollama ps 2>/dev/null | tail -n +2 | wc -l | xargs || echo "0")
+  if [[ $remaining -eq 0 ]]; then
+    print_success "All models unloaded"
+  else
+    print_warn "$remaining model(s) may still be in memory"
   fi
 }
 
@@ -2495,10 +2572,21 @@ prompt_vscode_extensions() {
   return 0
 }
 
+# Cleanup function for trap
+cleanup_on_exit() {
+  # Unload all models on exit to free memory
+  if command -v ollama &>/dev/null && curl -s http://localhost:11434/api/tags &>/dev/null 2>/dev/null; then
+    unload_all_models 2>/dev/null || true
+  fi
+}
+
 # Main installation flow
 main() {
   clear
   print_header "🚀 VS Code + Continue.dev Local LLM Setup"
+  
+  # Set up trap to cleanup on exit/interrupt
+  trap cleanup_on_exit EXIT INT TERM
   
   # Initialize
   mkdir -p "$STATE_DIR"
@@ -2585,9 +2673,13 @@ main() {
         if prompt_yes_no "Would you like to validate $installed_model?" "y"; then
           if validate_model_simple "$installed_model"; then
             print_success "$installed_model validated"
+            # Unload model after validation to free memory
+            unload_model "$installed_model" 1  # Silent mode
           else
             log_warn "$installed_model validation failed"
             failed_models+=("$model")
+            # Unload model even on failure
+            unload_model "$installed_model" 1  # Silent mode
           fi
           echo ""
         else
@@ -2599,8 +2691,12 @@ main() {
         if prompt_yes_no "Would you like to benchmark $installed_model?" "y"; then
           if benchmark_model_performance "$installed_model"; then
             print_success "$installed_model benchmarked"
+            # Unload model after benchmarking to free memory
+            unload_model "$installed_model" 1  # Silent mode
           else
             log_warn "$installed_model benchmarking had issues"
+            # Unload model even on failure
+            unload_model "$installed_model" 1  # Silent mode
           fi
           echo ""
         else
@@ -2646,6 +2742,10 @@ main() {
   
   # Save state
   save_state
+  
+  # Final cleanup - unload all models to free memory
+  print_info "Cleaning up: unloading models from memory..."
+  unload_all_models
   
   # Final summary
   print_header "✅ Setup Complete!"

@@ -60,14 +60,14 @@ The setup automatically detects your hardware and classifies it into tiers:
 ### Tier S (≥48GB RAM)
 - **All models available**
 - **Recommended**: qwen2.5-coder:14b + codestral:22b (or llama3.1:70b for maximum quality)
-- Aggressive keep-alive (24h)
+- Keep-alive (1h) - models unload after 1 hour of inactivity
 - High context window (32K tokens)
 - Best for: Complex refactoring, architecture work, multi-model workflows
 
 ### Tier A (32-47GB RAM)
 - **Excludes**: llama3.1:70b
 - **Recommended**: qwen2.5-coder:14b + codestral:22b
-- Moderate keep-alive (12h)
+- Keep-alive (1h) - models unload after 1 hour of inactivity
 - Medium context window (16K tokens)
 - Best for: General development, code review, complex coding tasks
 
@@ -206,6 +206,7 @@ Checks:
 - Continue.dev config validity
 - VS Code integration
 - System resources
+- Loaded models and memory usage
 - Model response test
 
 ### Benchmark
@@ -232,6 +233,26 @@ Updates:
 - Ollama to latest version
 - All installed models
 - Refreshes Continue.dev config (optional)
+
+### Cleanup
+
+Unload models from memory to free up RAM:
+```bash
+./tools/cleanup.sh
+```
+
+Features:
+- List all loaded models with memory usage
+- Unload all models at once
+- Unload specific models
+- Show memory before/after cleanup
+- Prevents memory warnings by freeing unused model memory
+
+**When to use:**
+- Seeing low memory warnings
+- Multiple models loaded and not in use
+- Need to free up RAM for other applications
+- After running benchmarks or validations
 
 ### Uninstall
 
@@ -315,11 +336,12 @@ To adjust tuning, edit `~/.continue/config.json`:
 
 1. **Metal GPU Acceleration**: Automatically enabled on Apple Silicon - verify with `curl http://localhost:11434/api/ps`
 2. **Quantized Models**: Use Q4_K_M or Q5_K_M variants for best performance (automatically selected)
-3. **Use keep-alive** for frequently used models (pre-loads in memory)
+3. **Keep-alive settings**: Models stay loaded for 1h (Tier S/A) or 5m (Tier B/C) after use for fast responses, then automatically unload
 4. **Smaller context** for faster responses
 5. **Multiple models** - use smaller for autocomplete, larger for complex tasks
-6. **Monitor memory** - use `ollama ps` to see loaded models
-7. **Environment Variables**: Check `~/.ollama/ollama.env` for optimization settings
+6. **Monitor memory** - use `ollama ps` or `./tools/diagnose.sh` to see loaded models
+7. **Cleanup utility** - use `./tools/cleanup.sh` to unload models and free memory when needed
+8. **Environment Variables**: Check `~/.ollama/ollama.env` for optimization settings
 
 ### Re-running Tuning
 
@@ -404,18 +426,34 @@ ollama serve
    # Keep terminal open
    ```
 
-### Out of Memory
+### Out of Memory / Low Memory Warnings
 
-1. **Unload models:**
+1. **Unload models using cleanup utility:**
+   ```bash
+   ./tools/cleanup.sh
+   ```
+   This will show loaded models and allow you to unload them to free memory.
+
+2. **Check loaded models manually:**
    ```bash
    ollama ps
-   # Stop processes or restart Ollama
    ```
 
-2. **Use smaller models** for your tier
-3. **Reduce keep-alive** duration
-4. **Close other applications**
-5. **Use quantized variants** - Q4_K_M uses less memory than base models
+3. **Unload specific model:**
+   ```bash
+   curl -X POST http://localhost:11434/api/generate \
+     -H "Content-Type: application/json" \
+     -d '{"model": "model-name", "prompt": "", "keep_alive": 0}'
+   ```
+
+4. **Use smaller models** for your tier
+5. **Keep-alive settings**: Models automatically unload after inactivity (1h for Tier S/A, 5m for Tier B/C)
+6. **Close other applications** to free up RAM
+7. **Use quantized variants** - Q4_K_M uses less memory than base models
+8. **Restart Ollama** if models won't unload:
+   ```bash
+   brew services restart ollama
+   ```
 
 ### Metal GPU Not Working
 
@@ -596,6 +634,7 @@ ai_model/
 ├── tools/
 │   ├── diagnose.sh              # Health checks and diagnostics
 │   ├── benchmark.sh             # Model performance testing
+│   ├── cleanup.sh               # Memory cleanup utility
 │   ├── update.sh                # Update Ollama and models
 │   └── uninstall.sh             # Cleanup and removal
 ├── .continue/
