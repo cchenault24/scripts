@@ -124,6 +124,56 @@ run_with_timeout() {
   fi
 }
 
+# Check system resources before benchmarking
+check_system_resources() {
+  local model="$1"
+  
+  # Try to get model size info
+  local model_info
+  model_info=$(ollama show "$model" 2>/dev/null | grep -i "parameter\|size" || echo "")
+  
+  # Check available memory (macOS)
+  if [[ "$(uname)" == "Darwin" ]]; then
+    local free_mem
+    free_mem=$(vm_stat | grep "Pages free" | awk '{print $3}' | sed 's/\.//')
+    local page_size
+    page_size=$(vm_stat | grep "page size" | awk '{print $8}')
+    if [[ -n "$free_mem" ]] && [[ -n "$page_size" ]]; then
+      # Calculate free memory in GB (rough estimate)
+      local free_gb
+      free_gb=$(echo "scale=1; ($free_mem * $page_size) / 1073741824" | bc 2>/dev/null || echo "0")
+      
+      # Warn if less than 4GB free (models often need 2-3x their size in RAM)
+      local should_warn=0
+      if command -v bc &>/dev/null; then
+        if [[ $(echo "$free_gb < 4" | bc 2>/dev/null || echo "0") -eq 1 ]]; then
+          should_warn=1
+        fi
+      else
+        # Fallback: check if free_gb is less than 4 (simple string comparison for integers)
+        local free_int=${free_gb%%.*}
+        if [[ $free_int -lt 4 ]] 2>/dev/null; then
+          should_warn=1
+        fi
+      fi
+      
+      if [[ $should_warn -eq 1 ]]; then
+        print_warn "Low available memory detected (~${free_gb}GB free)"
+        echo -e "${YELLOW}  → Large models may fail with Error 500 if memory is insufficient${NC}" >&2
+        echo -e "${YELLOW}  → Consider closing other applications or using a smaller model${NC}" >&2
+        echo "" >&2
+      fi
+    fi
+  fi
+  
+  # Check if model is already loaded (to avoid double-loading)
+  if ollama ps 2>/dev/null | grep -q "^${model}"; then
+    echo -e "${GREEN}  ✓ Model is already loaded in memory${NC}" >&2
+  else
+    echo -e "${YELLOW}  → Model will be loaded on first use (may take time and memory)${NC}" >&2
+  fi
+}
+
 # Benchmark single model
 benchmark_model() {
   local model="$1"
@@ -166,6 +216,46 @@ benchmark_model() {
   
   # Check for other errors
   if [[ $exit_code -ne 0 ]]; then
+    # Check for specific Ollama error messages
+    if echo "$response" | grep -qi "500.*internal server error\|model runner.*unexpectedly stopped\|resource limitations"; then
+      print_error "Benchmark failed for $model - Ollama model runner crashed (Error 500)"
+      
+      # Try to get model info to help diagnose
+      local model_size_info
+      model_size_info=$(ollama show "$model" 2>/dev/null | grep -iE "parameter|size|billion" | head -n 1 || echo "")
+      
+      echo -e "${RED}  → This usually indicates:${NC}" >&2
+      echo -e "${YELLOW}     • Insufficient memory (model too large for available RAM)${NC}" >&2
+      echo -e "${YELLOW}     • Model crashed due to internal error${NC}" >&2
+      echo -e "${YELLOW}     • Resource exhaustion (CPU/memory)${NC}" >&2
+      if [[ -n "$model_size_info" ]]; then
+        echo -e "${CYAN}  → Model info: $model_size_info${NC}" >&2
+      fi
+      echo "" >&2
+      echo -e "${CYAN}  → Troubleshooting steps:${NC}" >&2
+      echo -e "${YELLOW}     1. Check available memory:${NC}" >&2
+      echo -e "${YELLOW}        free -h  (Linux) or vm_stat (macOS)${NC}" >&2
+      echo -e "${YELLOW}     2. Check Ollama server logs for details:${NC}" >&2
+      local log_file="$HOME/.ollama/logs/server.log"
+      if [[ -f "$log_file" ]]; then
+        echo -e "${YELLOW}        tail -n 50 $log_file${NC}" >&2
+        echo -e "${YELLOW}        (Last few log entries shown below)${NC}" >&2
+        tail -n 10 "$log_file" 2>/dev/null | sed 's/^/        /' >&2 || true
+      else
+        echo -e "${YELLOW}        Log file not found at: $log_file${NC}" >&2
+        echo -e "${YELLOW}        Check: brew services list ollama${NC}" >&2
+      fi
+      echo -e "${YELLOW}     3. Try a smaller model or reduce context size${NC}" >&2
+      echo -e "${YELLOW}     4. Restart Ollama service:${NC}" >&2
+      echo -e "${YELLOW}        brew services restart ollama${NC}" >&2
+      echo -e "${YELLOW}     5. Check if model is too large for your system${NC}" >&2
+      if [[ -n "$response" ]]; then
+        echo -e "${YELLOW}  → Full error message:${NC}" >&2
+        echo "$response" | head -n 5 >&2
+      fi
+      return 1
+    fi
+    
     print_error "Benchmark failed for $model - ollama command failed (exit code: $exit_code)"
     if [[ -n "$response" ]]; then
       echo -e "${YELLOW}  → Output/Error received:${NC}" >&2
@@ -329,7 +419,10 @@ run_benchmark() {
     return 1
   fi
   echo -e "${GREEN}  ✓ Ollama service is accessible${NC}" >&2
-  echo "" >&2
+  
+  # Check system resources
+  echo -e "${YELLOW}  → Checking system resources...${NC}" >&2
+  check_system_resources "$model"
   
   print_info "This will take a few minutes..."
   echo ""
