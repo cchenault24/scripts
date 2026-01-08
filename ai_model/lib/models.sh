@@ -354,12 +354,12 @@ select_models() {
 }
 
 # Auto-tune model parameters
-# Supports Phase 1 optimizations via optional parameters
+# Supports dynamic optimizations via optional parameters
 tune_model() {
   local model="$1"
   local tier="$2"
   local role="${3:-coding}"
-  local use_optimizations="${4:-1}"  # New: Enable optimizations by default (Phase 1)
+  local use_optimizations="${4:-1}"  # Enable optimizations by default
   local task_type="${5:-general}"  # New: Task type for dynamic optimization
   local prompt_length="${6:-0}"  # New: Estimated prompt length
   

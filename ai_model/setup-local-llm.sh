@@ -69,7 +69,7 @@ main() {
   VSCODE_EXTENSIONS_INSTALLED=false
   
   # ============================================
-  # PHASE 1: Collect all user responses first
+  # Collect all user responses first
   # ============================================
   print_header "📋 Configuration"
   echo -e "${CYAN}Please answer the following questions. All installations will begin after you've completed all prompts.${NC}"
@@ -133,7 +133,7 @@ main() {
   local failed_models=()
   if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
     print_header "📥 Installing Models"
-    print_info "This may take 10-30 minutes depending on your connection..."
+    print_info "This may take 10-30 minutes depending on your internet connection..."
     echo ""
     
     for model in "${SELECTED_MODELS[@]}"; do
@@ -203,7 +203,16 @@ main() {
         # Start proxy if not running
         if [[ ! -f "$pid_dir/ollama_proxy.pid" ]] || ! kill -0 "$(cat "$pid_dir/ollama_proxy.pid" 2>/dev/null)" 2>/dev/null; then
           print_info "Starting Ollama optimization proxy..."
-          "$SCRIPT_DIR/tools/ollama-proxy.sh" 11435 11434 > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
+          
+          # Set optimization flags (can be overridden via environment)
+          export PROJECT_DIR="$SCRIPT_DIR"
+          export PROXY_PORT="${PROXY_PORT:-11435}"
+          export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+          export ENABLE_PROMPT_OPTIMIZATION="${ENABLE_PROMPT_OPTIMIZATION:-1}"
+          export ENABLE_CONTEXT_COMPRESSION="${ENABLE_CONTEXT_COMPRESSION:-1}"
+          export ENABLE_ENSEMBLE="${ENABLE_ENSEMBLE:-0}"
+          
+          python3 "$SCRIPT_DIR/tools/ollama_proxy_server.py" > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
           echo $! > "$pid_dir/ollama_proxy.pid"
           sleep 2  # Give proxy time to start
           if kill -0 "$(cat "$pid_dir/ollama_proxy.pid" 2>/dev/null)" 2>/dev/null; then

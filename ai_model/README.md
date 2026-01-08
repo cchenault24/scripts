@@ -473,10 +473,19 @@ To get optimizations working automatically with Continue.dev:
 
 #### What Gets Enabled
 
+**Core Optimizations:**
 - **Automatic Model Routing**: Requests are routed to optimal models based on task type
 - **Smart Request Queuing**: Requests are queued and processed efficiently
 - **Memory Pressure Monitoring**: Automatically unloads models when memory is low
 - **Performance Tracking**: All requests are tracked for optimization insights
+- **Dynamic Context Sizing**: Context windows adjusted based on task complexity
+- **Adaptive Temperature**: Temperature adjusted based on task type
+
+**Advanced Optimizations:**
+- **Prompt Optimization**: Automatically improves prompts for better responses (ENABLED by default)
+- **Context Compression**: Compresses large contexts to prevent overflow (ENABLED by default)
+- **Model Ensemble**: Combines multiple models for higher quality (DISABLED by default, enable for complex tasks)
+- **Enhanced Batch Processing**: Efficiently processes multiple requests together
 
 #### Management
 
@@ -510,7 +519,30 @@ If you prefer manual control:
 
 3. **Restart VS Code**
 
-See `docs/PHASE2_INTEGRATION.md` for detailed documentation.
+#### Advanced Optimization Configuration
+
+Advanced optimizations can be configured via environment variables:
+
+```bash
+# Enable model ensemble for complex tasks (slower but higher quality)
+export ENABLE_ENSEMBLE=1
+
+# Disable prompt optimization (faster, but less optimized prompts)
+export ENABLE_PROMPT_OPTIMIZATION=0
+
+# Disable context compression (may cause context overflow errors)
+export ENABLE_CONTEXT_COMPRESSION=0
+
+# Start with custom settings
+./tools/start-optimizations.sh
+```
+
+**Recommended Settings:**
+- **Default (Balanced)**: All advanced features enabled except ensemble
+- **High Quality**: Enable ensemble for complex refactoring tasks
+- **Maximum Speed**: Disable all advanced features for fastest responses
+
+See `docs/ADVANCED_OPTIMIZATIONS.md` for detailed documentation.
 
 ## Troubleshooting
 

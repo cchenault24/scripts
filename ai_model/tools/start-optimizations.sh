@@ -137,10 +137,20 @@ if [[ "$START_PROXY" == "true" ]]; then
   
   if [[ ! -f "$PID_DIR/ollama_proxy.pid" ]]; then
     print_info "Starting Ollama optimization proxy..."
-    "$SCRIPT_DIR/ollama-proxy.sh" 11435 11434 > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
+    
+    # Set advanced optimization flags (can be overridden via environment)
+    export PROJECT_DIR="$PROJECT_DIR"
+    export PROXY_PORT="${PROXY_PORT:-11435}"
+    export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+    export ENABLE_PROMPT_OPTIMIZATION="${ENABLE_PROMPT_OPTIMIZATION:-1}"
+    export ENABLE_CONTEXT_COMPRESSION="${ENABLE_CONTEXT_COMPRESSION:-1}"
+    export ENABLE_ENSEMBLE="${ENABLE_ENSEMBLE:-0}"
+    
+    python3 "$SCRIPT_DIR/ollama_proxy_server.py" > "$HOME/.local-llm-setup/proxy.log" 2>&1 &
     echo $! > "$PID_DIR/ollama_proxy.pid"
     print_success "Ollama proxy started (PID: $(cat "$PID_DIR/ollama_proxy.pid"))"
-    print_info "Update Continue.dev config to use: apiBase: http://localhost:11435"
+    print_info "Advanced optimizations: Prompt=${ENABLE_PROMPT_OPTIMIZATION}, Compression=${ENABLE_CONTEXT_COMPRESSION}, Ensemble=${ENABLE_ENSEMBLE}"
+    print_info "Update Continue.dev config to use: apiBase: http://localhost:${PROXY_PORT}"
   fi
 fi
 

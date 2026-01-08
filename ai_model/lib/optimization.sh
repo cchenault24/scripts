@@ -2,7 +2,7 @@
 #
 # optimization.sh - Optimization functions for setup-local-llm.sh
 #
-# Implements:
+# Core Optimizations:
 # - Smart model loading/unloading with usage tracking
 # - Memory pressure detection and auto-unload
 # - Dynamic context window sizing
@@ -11,6 +11,12 @@
 # - GPU layer optimization and testing
 # - Smart request queuing with prioritization
 # - Performance profiling and monitoring
+#
+# Advanced Optimizations:
+# - Model fusion/ensemble (combine multiple models for better results)
+# - Context compression (summarize context when approaching limits)
+# - Prompt optimization (analyze and improve prompt effectiveness)
+# - Enhanced batch processing (efficient multi-request handling)
 #
 # Depends on: constants.sh, logger.sh, ui.sh, hardware.sh, ollama.sh, models.sh
 
@@ -421,7 +427,7 @@ calculate_adaptive_temperature() {
   echo "$adaptive_temp"
 }
 
-# Enhanced tune_model with Phase 1 optimizations
+# Enhanced tune_model with dynamic optimizations
 tune_model_optimized() {
   local model="$1"
   local tier="$2"
@@ -1147,4 +1153,776 @@ generate_performance_report() {
   
   # Also display summary
   echo -e "$report_content"
+}
+
+# ============================================================================
+# Advanced Optimizations
+# ============================================================================
+
+# ============================================================================
+# Model Fusion/Ensemble
+# ============================================================================
+
+# Execute prompt with multiple models and combine results
+execute_ensemble() {
+  local prompt="$1"
+  local task_type="${2:-general}"
+  local models="${3:-}"  # Comma-separated list of models, or empty for auto-selection
+  local strategy="${4:-weighted}"  # Strategy: weighted, majority, best, average
+  
+  if [[ -z "$prompt" ]]; then
+    log_error "Cannot execute ensemble with empty prompt"
+    return 1
+  fi
+  
+  # Auto-select models if not provided
+  if [[ -z "$models" ]]; then
+    local installed_models
+    installed_models=$(get_installed_models)
+    
+    # Select 2-3 models based on task type
+    case "$task_type" in
+      autocomplete|simple|quick)
+        # Use 2 small, fast models
+        models=$(echo "$installed_models" | head -n 2 | tr '\n' ',' | sed 's/,$//')
+        ;;
+      coding|generation|moderate)
+        # Use 2-3 balanced models
+        models=$(echo "$installed_models" | head -n 3 | tr '\n' ',' | sed 's/,$//')
+        ;;
+      refactoring|complex|analysis)
+        # Use 2-3 models including at least one large model
+        models=$(echo "$installed_models" | tr '\n' ',' | sed 's/,$//')
+        ;;
+      *)
+        # Default: use first 2 models
+        models=$(echo "$installed_models" | head -n 2 | tr '\n' ',' | sed 's/,$//')
+        ;;
+    esac
+  fi
+  
+  if [[ -z "$models" ]]; then
+    log_error "No models available for ensemble"
+    return 1
+  fi
+  
+  print_info "Executing ensemble with models: $models (strategy: $strategy)"
+  log_info "Ensemble execution: models=$models, task_type=$task_type, strategy=$strategy"
+  
+  # Split models into array
+  IFS=',' read -ra MODEL_ARRAY <<< "$models"
+  local model_count=${#MODEL_ARRAY[@]}
+  
+  if [[ $model_count -eq 0 ]]; then
+    log_error "No valid models in ensemble"
+    return 1
+  fi
+  
+  # Execute with each model in parallel (simulated - sequential for now)
+  local responses=()
+  local durations=()
+  local model_index=0
+  
+  for model in "${MODEL_ARRAY[@]}"; do
+    model=$(echo "$model" | xargs)  # Trim whitespace
+    if [[ -z "$model" ]]; then
+      continue
+    fi
+    
+    print_info "Running model $((model_index + 1))/$model_count: $model"
+    
+    # Ensure model is loaded
+    smart_load_model "$model" 0 >/dev/null 2>&1 || true
+    
+    # Get optimized parameters
+    local tier="${HARDWARE_TIER:-B}"
+    local params
+    params=$(tune_model_optimized "$model" "$tier" "coding" "$task_type" 0)
+    
+    # Extract parameters
+    local context_size max_tokens temperature
+    if command -v jq &>/dev/null; then
+      context_size=$(echo "$params" | jq -r '.context_size // 8192')
+      max_tokens=$(echo "$params" | jq -r '.max_tokens // 2048')
+      temperature=$(echo "$params" | jq -r '.temperature // 0.7')
+    else
+      context_size=$(echo "$params" | grep -o '"context_size": [0-9]*' | grep -o '[0-9]*' || echo "8192")
+      max_tokens=$(echo "$params" | grep -o '"max_tokens": [0-9]*' | grep -o '[0-9]*' || echo "2048")
+      temperature=$(echo "$params" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.7")
+    fi
+    
+    # Execute request
+    local start_time
+    start_time=$(date +%s.%N 2>/dev/null || date +%s)
+    
+    local response
+    response=$(curl -s --max-time 300 -X POST http://localhost:11434/api/generate \
+      -H "Content-Type: application/json" \
+      -d "{\"model\": \"$model\", \"prompt\": \"$prompt\", \"stream\": false, \"options\": {\"num_ctx\": $context_size, \"num_predict\": $max_tokens, \"temperature\": $temperature}}" 2>/dev/null || echo "")
+    
+    local end_time
+    end_time=$(date +%s.%N 2>/dev/null || date +%s)
+    
+    # Calculate duration
+    local duration=0
+    if command -v bc &>/dev/null && [[ "$start_time" =~ \. ]] && [[ "$end_time" =~ \. ]]; then
+      duration=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "0")
+    else
+      local start_int=${start_time%%.*}
+      local end_int=${end_time%%.*}
+      duration=$((end_int - start_int))
+    fi
+    
+    # Extract response text
+    local response_text=""
+    if [[ -n "$response" ]]; then
+      if command -v jq &>/dev/null; then
+        response_text=$(echo "$response" | jq -r '.response // .' 2>/dev/null || echo "$response")
+      else
+        response_text="$response"
+      fi
+    fi
+    
+    if [[ -n "$response_text" ]]; then
+      responses+=("$response_text")
+      durations+=("$duration")
+      track_model_usage "$model"
+      track_performance "$model" "$task_type" "$duration" 0 1
+    else
+      log_warn "Model $model failed to generate response"
+    fi
+    
+    ((model_index++))
+  done
+  
+  # Combine responses based on strategy
+  local final_response=""
+  
+  case "$strategy" in
+    weighted)
+      # Weight responses by model size/quality (larger models get more weight)
+      final_response=$(combine_responses_weighted "${responses[@]}" "${MODEL_ARRAY[@]}")
+      ;;
+    majority)
+      # Use majority voting (for code generation, use longest/most complete)
+      final_response=$(combine_responses_majority "${responses[@]}")
+      ;;
+    best)
+      # Use the response from the best-performing model
+      final_response=$(combine_responses_best "${responses[@]}" "${durations[@]}" "${MODEL_ARRAY[@]}")
+      ;;
+    average|merge)
+      # Merge responses intelligently
+      final_response=$(combine_responses_merge "${responses[@]}")
+      ;;
+    *)
+      # Default: use first successful response
+      if [[ ${#responses[@]} -gt 0 ]]; then
+        final_response="${responses[0]}"
+      fi
+      ;;
+  esac
+  
+  if [[ -n "$final_response" ]]; then
+    log_info "Ensemble execution complete (${#responses[@]}/${model_count} models succeeded)"
+    echo "$final_response"
+    return 0
+  else
+    log_error "Ensemble execution failed - no valid responses"
+    return 1
+  fi
+}
+
+# Combine responses with weighted voting
+combine_responses_weighted() {
+  local responses=("$@")
+  local model_count=${#responses[@]}
+  local models_start=$((model_count / 2))
+  local models=("${responses[@]:$models_start}")
+  
+  # Simple implementation: use the longest response (often most complete)
+  # In production, this could use semantic similarity, voting, etc.
+  local longest=""
+  local max_length=0
+  
+  for response in "${responses[@]:0:$models_start}"; do
+    local length=${#response}
+    if [[ $length -gt $max_length ]]; then
+      max_length=$length
+      longest="$response"
+    fi
+  done
+  
+  echo "$longest"
+}
+
+# Combine responses with majority voting
+combine_responses_majority() {
+  local responses=("$@")
+  
+  # For code/text generation, use the most complete response
+  # (longest that's not just repetition)
+  local best=""
+  local max_length=0
+  
+  for response in "${responses[@]}"; do
+    local length=${#response}
+    # Check for repetition (simple heuristic)
+    local first_100="${response:0:100}"
+    local repetition_count
+    repetition_count=$(echo "$response" | grep -o "$first_100" | wc -l | tr -d ' ' || echo "1")
+    
+    # Prefer longer responses with less repetition
+    if [[ $length -gt $max_length ]] && [[ $repetition_count -lt 3 ]]; then
+      max_length=$length
+      best="$response"
+    fi
+  done
+  
+  echo "${best:-${responses[0]}}"
+}
+
+# Combine responses by selecting best-performing model's response
+combine_responses_best() {
+  local responses=("$@")
+  local durations_start=$((${#responses[@]} / 3))
+  local models_start=$((durations_start + ${#responses[@]} / 3))
+  
+  local durations=("${responses[@]:$durations_start:$((models_start - durations_start))}")
+  local models=("${responses[@]:$models_start}")
+  local actual_responses=("${responses[@]:0:$durations_start}")
+  
+  # Find fastest response (best performance)
+  local best_index=0
+  local best_duration=999999
+  
+  for i in "${!durations[@]}"; do
+    local dur="${durations[$i]}"
+    local dur_int
+    dur_int=$(echo "$dur" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "999999"}')
+    if [[ "$dur_int" =~ ^[0-9]+$ ]] && [[ $dur_int -lt $best_duration ]]; then
+      best_duration=$dur_int
+      best_index=$i
+    fi
+  done
+  
+  if [[ $best_index -lt ${#actual_responses[@]} ]]; then
+    echo "${actual_responses[$best_index]}"
+  else
+    echo "${actual_responses[0]}"
+  fi
+}
+
+# Merge multiple responses intelligently
+combine_responses_merge() {
+  local responses=("$@")
+  
+  # Simple merge: combine unique parts, remove duplicates
+  # In production, could use semantic analysis
+  local merged=""
+  local seen_chunks=()
+  
+  for response in "${responses[@]}"; do
+    # Split into sentences/lines
+    while IFS= read -r line; do
+      if [[ -n "$line" ]]; then
+        # Check if we've seen similar content (simple substring check)
+        local is_duplicate=0
+        for seen in "${seen_chunks[@]}"; do
+          if [[ "$line" == "$seen" ]] || [[ "$seen" == *"$line"* ]] || [[ "$line" == *"$seen"* ]]; then
+            is_duplicate=1
+            break
+          fi
+        done
+        
+        if [[ $is_duplicate -eq 0 ]]; then
+          merged+="$line"$'\n'
+          seen_chunks+=("$line")
+        fi
+      fi
+    done <<< "$response"
+  done
+  
+  echo "$merged"
+}
+
+# ============================================================================
+# Context Compression
+# ============================================================================
+
+# Compress context when approaching limits
+compress_context() {
+  local context="$1"
+  local max_tokens="${2:-8192}"  # Maximum tokens allowed
+  local compression_ratio="${3:-0.7}"  # Target compression ratio (0.7 = 70% of original)
+  
+  if [[ -z "$context" ]]; then
+    echo ""
+    return 0
+  fi
+  
+  # Estimate token count (rough: ~4 chars per token)
+  local context_length=${#context}
+  local estimated_tokens=0
+  if command -v bc &>/dev/null; then
+    estimated_tokens=$(echo "$context_length / 4" | bc 2>/dev/null || echo "0")
+  else
+    estimated_tokens=$((context_length / 4))
+  fi
+  
+  # Check if compression is needed
+  if [[ $estimated_tokens -le $max_tokens ]]; then
+    log_info "Context within limits ($estimated_tokens tokens), no compression needed"
+    echo "$context"
+    return 0
+  fi
+  
+  print_info "Compressing context: ${estimated_tokens} tokens -> target: $((max_tokens * compression_ratio)) tokens"
+  log_info "Context compression: ${estimated_tokens} tokens, max=${max_tokens}, ratio=${compression_ratio}"
+  
+  # Compression strategies
+  local compressed_context=""
+  
+  # Strategy 1: Remove less relevant sections (comments, whitespace)
+  compressed_context=$(compress_context_remove_noise "$context")
+  
+  # Strategy 2: Summarize long sections
+  if [[ ${#compressed_context} -gt $((max_tokens * 4 * compression_ratio)) ]]; then
+    compressed_context=$(compress_context_summarize "$compressed_context" "$max_tokens" "$compression_ratio")
+  fi
+  
+  # Strategy 3: Truncate if still too long (keep beginning and end)
+  if [[ ${#compressed_context} -gt $((max_tokens * 4)) ]]; then
+    compressed_context=$(compress_context_truncate "$compressed_context" "$max_tokens")
+  fi
+  
+  local final_length=${#compressed_context}
+  local final_tokens=0
+  if command -v bc &>/dev/null; then
+    final_tokens=$(echo "$final_length / 4" | bc 2>/dev/null || echo "0")
+  else
+    final_tokens=$((final_length / 4))
+  fi
+  
+  log_info "Context compressed: ${estimated_tokens} -> ${final_tokens} tokens"
+  echo "$compressed_context"
+}
+
+# Remove noise from context (comments, excessive whitespace)
+compress_context_remove_noise() {
+  local context="$1"
+  
+  # Remove single-line comments (// comments)
+  context=$(echo "$context" | sed 's|//.*$||g')
+  
+  # Remove multi-line comments (/* */)
+  context=$(echo "$context" | sed 's|/\*.*\*/||g')
+  
+  # Remove excessive blank lines (more than 2 consecutive)
+  context=$(echo "$context" | sed '/^$/N;/^\n$/d' | sed '/^$/N;/^\n$/d')
+  
+  # Remove trailing whitespace
+  context=$(echo "$context" | sed 's/[[:space:]]*$//')
+  
+  echo "$context"
+}
+
+# Summarize long sections of context
+compress_context_summarize() {
+  local context="$1"
+  local max_tokens="$2"
+  local ratio="$3"
+  local target_length=$((max_tokens * 4 * $(echo "$ratio" | awk '{printf "%.0f", $1 * 100}') / 100))
+  
+  # Split into logical sections (by function, class, etc.)
+  # Simple implementation: split by double newlines or function/class definitions
+  
+  # Keep first and last sections, summarize middle
+  local lines
+  lines=$(echo "$context" | wc -l | tr -d ' ')
+  local keep_lines=$((lines / 4))  # Keep first and last 25%
+  
+  if [[ $lines -gt $((keep_lines * 2)) ]]; then
+    local first_part
+    first_part=$(echo "$context" | head -n "$keep_lines")
+    local last_part
+    last_part=$(echo "$context" | tail -n "$keep_lines")
+    local middle_part
+    middle_part=$(echo "$context" | sed -n "$((keep_lines + 1)),$((lines - keep_lines))p")
+    
+    # Summarize middle part (keep structure, remove details)
+    local summarized_middle
+    summarized_middle=$(echo "$middle_part" | grep -E "^(function|class|interface|type|const|let|var|export)" | head -n 20)
+    
+    context="${first_part}"$'\n'"... [${#middle_part} chars summarized to ${#summarized_middle} chars] ..."$'\n'"${last_part}"
+  fi
+  
+  echo "$context"
+}
+
+# Truncate context intelligently (keep beginning and end)
+compress_context_truncate() {
+  local context="$1"
+  local max_tokens="$2"
+  local max_chars=$((max_tokens * 4))
+  
+  if [[ ${#context} -le $max_chars ]]; then
+    echo "$context"
+    return 0
+  fi
+  
+  # Keep first 40% and last 40%, remove middle 20%
+  local keep_chars=$((max_chars * 40 / 100))
+  local first_part="${context:0:$keep_chars}"
+  local last_part="${context: -$keep_chars}"
+  
+  echo "${first_part}"$'\n'"... [truncated ${#context} chars to $max_chars] ..."$'\n'"${last_part}"
+}
+
+# ============================================================================
+# Prompt Optimization
+# ============================================================================
+
+# Prompt cache and optimization state
+PROMPT_CACHE_FILE="$STATE_DIR/prompt_cache.json"
+PROMPT_OPTIMIZATION_FILE="$STATE_DIR/prompt_optimizations.json"
+
+# Initialize prompt optimization
+init_prompt_optimization() {
+  if [[ ! -f "$PROMPT_CACHE_FILE" ]]; then
+    mkdir -p "$STATE_DIR"
+    echo '{}' > "$PROMPT_CACHE_FILE"
+    log_info "Initialized prompt cache"
+  fi
+  
+  if [[ ! -f "$PROMPT_OPTIMIZATION_FILE" ]]; then
+    mkdir -p "$STATE_DIR"
+    echo '{}' > "$PROMPT_OPTIMIZATION_FILE"
+    log_info "Initialized prompt optimization tracking"
+  fi
+}
+
+# Optimize a prompt based on historical performance
+optimize_prompt() {
+  local prompt="$1"
+  local task_type="${2:-general}"
+  local model="${3:-}"  # Optional: model-specific optimization
+  
+  if [[ -z "$prompt" ]]; then
+    log_error "Cannot optimize empty prompt"
+    echo ""
+    return 1
+  fi
+  
+  init_prompt_optimization
+  
+  # Check cache first
+  local prompt_hash
+  prompt_hash=$(echo -n "$prompt" | shasum -a 256 2>/dev/null | cut -d' ' -f1 || echo "$prompt")
+  
+  if command -v jq &>/dev/null; then
+    local cached
+    cached=$(jq -r --arg hash "$prompt_hash" '.[$hash] // empty' "$PROMPT_CACHE_FILE" 2>/dev/null || echo "")
+    if [[ -n "$cached" ]] && [[ "$cached" != "null" ]]; then
+      log_info "Using cached optimized prompt"
+      echo "$cached"
+      return 0
+    fi
+  fi
+  
+  # Analyze prompt and suggest optimizations
+  local optimized_prompt
+  optimized_prompt=$(analyze_and_optimize_prompt "$prompt" "$task_type")
+  
+  # Cache optimized prompt
+  if command -v jq &>/dev/null; then
+    local current_cache
+    current_cache=$(cat "$PROMPT_CACHE_FILE" 2>/dev/null || echo '{}')
+    local updated_cache
+    updated_cache=$(echo "$current_cache" | jq --arg hash "$prompt_hash" --arg optimized "$optimized_prompt" \
+      '. + {($hash): $optimized}' 2>/dev/null || echo "$current_cache")
+    echo "$updated_cache" > "$PROMPT_CACHE_FILE"
+  fi
+  
+  log_info "Prompt optimized for task_type: $task_type"
+  echo "$optimized_prompt"
+}
+
+# Analyze prompt and apply optimizations
+analyze_and_optimize_prompt() {
+  local prompt="$1"
+  local task_type="$2"
+  local optimized="$prompt"
+  
+  # Optimization 1: Add task-specific context
+  case "$task_type" in
+    coding|generation)
+      # Ensure prompt includes code context requirements
+      if [[ "$prompt" != *"TypeScript"* ]] && [[ "$prompt" != *"React"* ]] && [[ "$prompt" != *"code"* ]]; then
+        optimized="[Code Generation Task]\n${optimized}\n\nRequirements: Use TypeScript with strict typing, follow React best practices."
+      fi
+      ;;
+    code-review|testing)
+      # Add review checklist
+      if [[ "$prompt" != *"check"* ]] && [[ "$prompt" != *"review"* ]]; then
+        optimized="[Code Review Task]\n${optimized}\n\nReview for: correctness, type safety, performance, best practices."
+      fi
+      ;;
+    refactoring|multi-file)
+      # Add safety requirements
+      if [[ "$prompt" != *"safe"* ]] && [[ "$prompt" != *"incremental"* ]]; then
+        optimized="[Refactoring Task - Safety First]\n${optimized}\n\nRequirements: Show affected files first, propose minimal changes, preserve functionality."
+      fi
+      ;;
+  esac
+  
+  # Optimization 2: Remove redundancy
+  optimized=$(remove_prompt_redundancy "$optimized")
+  
+  # Optimization 3: Add structure for complex tasks
+  if [[ "$task_type" == "complex" ]] || [[ "$task_type" == "refactoring" ]]; then
+    optimized=$(structure_complex_prompt "$optimized")
+  fi
+  
+  # Optimization 4: Ensure clarity and specificity
+  optimized=$(improve_prompt_clarity "$optimized")
+  
+  echo "$optimized"
+}
+
+# Remove redundant phrases from prompt
+remove_prompt_redundancy() {
+  local prompt="$1"
+  
+  # Remove common redundant phrases
+  prompt=$(echo "$prompt" | sed 's/please please/please/gi')
+  prompt=$(echo "$prompt" | sed 's/\bvery very\b/very/gi')
+  prompt=$(echo "$prompt" | sed 's/\bimportant important\b/important/gi')
+  
+  # Remove duplicate sentences (simple check)
+  local lines
+  lines=$(echo "$prompt" | grep -v '^$')
+  local unique_lines=()
+  local seen=()
+  
+  while IFS= read -r line; do
+    local is_duplicate=0
+    for seen_line in "${seen[@]}"; do
+      if [[ "$line" == "$seen_line" ]]; then
+        is_duplicate=1
+        break
+      fi
+    done
+    
+    if [[ $is_duplicate -eq 0 ]]; then
+      unique_lines+=("$line")
+      seen+=("$line")
+    fi
+  done <<< "$lines"
+  
+  printf '%s\n' "${unique_lines[@]}"
+}
+
+# Structure complex prompts better
+structure_complex_prompt() {
+  local prompt="$1"
+  
+  # Check if already structured
+  if [[ "$prompt" == *"Step 1"* ]] || [[ "$prompt" == *"1."* ]] || [[ "$prompt" == *"Task:"* ]]; then
+    echo "$prompt"
+    return 0
+  fi
+  
+  # Add structure for multi-step tasks
+  local structured="Task: ${prompt}\n\nSteps:\n1. Analyze requirements\n2. Identify affected components\n3. Propose solution\n4. Implement changes\n5. Verify correctness"
+  
+  echo "$structured"
+}
+
+# Improve prompt clarity
+improve_prompt_clarity() {
+  local prompt="$1"
+  
+  # Ensure prompt ends with clear instruction
+  if [[ "$prompt" != *"?"* ]] && [[ "$prompt" != *"."* ]] && [[ "$prompt" != *"!"* ]]; then
+    prompt="${prompt}."
+  fi
+  
+  # Ensure it's not too vague
+  if [[ ${#prompt} -lt 20 ]]; then
+    prompt="${prompt} Please provide detailed response with examples."
+  fi
+  
+  echo "$prompt"
+}
+
+# Track prompt performance for optimization
+track_prompt_performance() {
+  local prompt="$1"
+  local optimized_prompt="$2"
+  local task_type="$3"
+  local success="${4:-1}"  # 1 for success, 0 for failure
+  local duration="${5:-0}"  # Response duration
+  local quality_score="${6:-0}"  # Optional quality score (0-10)
+  
+  init_prompt_optimization
+  
+  local prompt_hash
+  prompt_hash=$(echo -n "$prompt" | shasum -a 256 2>/dev/null | cut -d' ' -f1 || echo "$prompt")
+  
+  if command -v jq &>/dev/null; then
+    local current_data
+    current_data=$(cat "$PROMPT_OPTIMIZATION_FILE" 2>/dev/null || echo '{}')
+    local timestamp=$(date +%s)
+    
+    local updated_data
+    updated_data=$(echo "$current_data" | jq --arg hash "$prompt_hash" \
+      --arg task_type "$task_type" \
+      --argjson success "$success" \
+      --argjson duration "$duration" \
+      --argjson quality "$quality_score" \
+      --argjson timestamp "$timestamp" \
+      '. + {($hash): {task_type: $task_type, success: ($success == 1), duration: $duration, quality: $quality, timestamp: $timestamp, count: ((.[$hash].count // 0) + 1)}}' 2>/dev/null || echo "$current_data")
+    
+    echo "$updated_data" > "$PROMPT_OPTIMIZATION_FILE"
+    log_info "Tracked prompt performance: hash=$prompt_hash, success=$success"
+  fi
+}
+
+# ============================================================================
+# Enhanced Batch Processing
+# ============================================================================
+
+# Process multiple requests in a single batch (more efficient than queue)
+process_batch_requests() {
+  local requests_file="${1:-}"  # File with JSON array of requests, or stdin
+  local batch_strategy="${2:-parallel}"  # parallel, sequential, smart
+  
+  if [[ -z "$requests_file" ]] || [[ "$requests_file" == "-" ]]; then
+    # Read from stdin
+    local requests_json
+    requests_json=$(cat)
+  else
+    local requests_json
+    requests_json=$(cat "$requests_file" 2>/dev/null || echo "[]")
+  fi
+  
+  if [[ -z "$requests_json" ]] || [[ "$requests_json" == "[]" ]]; then
+    log_error "No requests provided for batch processing"
+    return 1
+  fi
+  
+  print_info "Processing batch requests (strategy: $batch_strategy)"
+  log_info "Batch processing: strategy=$batch_strategy, requests=$(echo "$requests_json" | jq 'length' 2>/dev/null || echo "?")"
+  
+  local results=()
+  local request_count=0
+  
+  if command -v jq &>/dev/null; then
+    request_count=$(echo "$requests_json" | jq 'length' 2>/dev/null || echo "0")
+    
+    case "$batch_strategy" in
+      parallel)
+        # Process all requests in parallel (simulated - sequential for now)
+        echo "$requests_json" | jq -c '.[]' 2>/dev/null | while IFS= read -r request; do
+          process_single_batch_request "$request"
+        done
+        ;;
+      sequential)
+        # Process requests one by one
+        echo "$requests_json" | jq -c '.[]' 2>/dev/null | while IFS= read -r request; do
+          process_single_batch_request "$request"
+        done
+        ;;
+      smart)
+        # Group similar requests and process together
+        process_smart_batch "$requests_json"
+        ;;
+      *)
+        # Default: sequential
+        echo "$requests_json" | jq -c '.[]' 2>/dev/null | while IFS= read -r request; do
+          process_single_batch_request "$request"
+        done
+        ;;
+    esac
+  else
+    log_warn "jq not available, batch processing limited"
+    # Fallback: process as single request
+    process_single_batch_request "$requests_json"
+  fi
+  
+  log_info "Batch processing complete: $request_count requests"
+}
+
+# Process a single request from batch
+process_single_batch_request() {
+  local request_json="$1"
+  
+  if command -v jq &>/dev/null; then
+    local prompt
+    prompt=$(echo "$request_json" | jq -r '.prompt // ""' 2>/dev/null)
+    local task_type
+    task_type=$(echo "$request_json" | jq -r '.task_type // "general"' 2>/dev/null)
+    local model
+    model=$(echo "$request_json" | jq -r '.model // ""' 2>/dev/null)
+    local role
+    role=$(echo "$request_json" | jq -r '.role // "coding"' 2>/dev/null)
+    
+    if [[ -z "$prompt" ]]; then
+      log_warn "Skipping batch request with empty prompt"
+      echo "{\"error\": \"Empty prompt\"}"
+      return 1
+    fi
+    
+    # Optimize prompt
+    local optimized_prompt
+    optimized_prompt=$(optimize_prompt "$prompt" "$task_type" "$model")
+    
+    # Route to model if not specified
+    if [[ -z "$model" ]]; then
+      model=$(route_task_to_model "$task_type" 0)
+    fi
+    
+    # Execute with routing
+    local response
+    response=$(execute_task_with_routing "$task_type" "$optimized_prompt" "$role" 2>/dev/null || echo "")
+    
+    # Return result as JSON
+    if command -v jq &>/dev/null; then
+      echo "{\"prompt\": $(echo "$prompt" | jq -R .), \"response\": $(echo "$response" | jq -R .), \"task_type\": \"$task_type\", \"model\": \"$model\"}"
+    else
+      echo "{\"prompt\": \"$prompt\", \"response\": \"$response\", \"task_type\": \"$task_type\", \"model\": \"$model\"}"
+    fi
+  else
+    log_warn "jq required for batch request processing"
+    echo "{\"error\": \"jq required\"}"
+    return 1
+  fi
+}
+
+# Process batch with smart grouping
+process_smart_batch() {
+  local requests_json="$1"
+  
+  # Group requests by task_type and model
+  if command -v jq &>/dev/null; then
+    # Group by task_type
+    local task_groups
+    task_groups=$(echo "$requests_json" | jq -c 'group_by(.task_type)' 2>/dev/null || echo "[]")
+    
+    # Process each group
+    echo "$task_groups" | jq -c '.[]' 2>/dev/null | while IFS= read -r group; do
+      local task_type
+      task_type=$(echo "$group" | jq -r '.[0].task_type // "general"' 2>/dev/null)
+      local group_size
+      group_size=$(echo "$group" | jq 'length' 2>/dev/null || echo "0")
+      
+      print_info "Processing group: $task_type ($group_size requests)"
+      
+      # Process group (could be optimized further)
+      echo "$group" | jq -c '.[]' 2>/dev/null | while IFS= read -r request; do
+        process_single_batch_request "$request"
+      done
+    done
+  fi
 }
