@@ -63,19 +63,47 @@ prompt_yes_no() {
 remove_models() {
   print_header "🗑️  Remove Models"
   
-  local models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  # Check if Ollama is installed
+  if ! command -v ollama &>/dev/null; then
+    print_warn "Ollama not found in PATH"
+    print_info "Skipping model removal"
+    return 0
+  fi
+  
+  # Check if Ollama service is running
+  if ! curl -s --max-time 2 http://localhost:11434/api/tags &>/dev/null; then
+    print_warn "Ollama service is not running"
+    print_info "Cannot list models. Start Ollama with: brew services start ollama"
+    print_info "Skipping model removal"
+    return 0
+  fi
+  
+  # Get list of models - use API for more reliable parsing
+  local models
+  models=$(curl -s --max-time 5 http://localhost:11434/api/tags 2>/dev/null | \
+    grep -o '"name":"[^"]*"' | \
+    sed 's/"name":"//g' | \
+    sed 's/"//g' | \
+    sort -u || echo "")
+  
+  # Fallback to ollama list if API fails
+  if [[ -z "$models" ]]; then
+    models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -v '^$' || echo "")
+  fi
   
   if [[ -z "$models" ]]; then
     print_info "No models installed"
     return 0
   fi
   
-  local model_count=$(echo "$models" | wc -l | xargs)
+  # Filter out empty lines and count
+  local model_count
+  model_count=$(echo "$models" | grep -v '^$' | wc -l | xargs)
   print_info "Found $model_count installed model(s)"
   echo ""
   
   echo "Installed models:"
-  echo "$models" | while read -r model; do
+  echo "$models" | grep -v '^$' | while read -r model; do
     if [[ -n "$model" ]]; then
       echo "  • $model"
     fi
@@ -93,13 +121,22 @@ remove_models() {
     return 0
   fi
   
-  local removed=0
-  local failed=0
-  
   # Ensure log directory exists
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   
+  # Process each model - use array to avoid subshell issues
+  local model_array=()
   while IFS= read -r model; do
+    if [[ -n "$model" ]] && [[ "$model" != "" ]]; then
+      model_array+=("$model")
+    fi
+  done <<< "$models"
+  
+  local removed=0
+  local failed=0
+  
+  # Process each model
+  for model in "${model_array[@]}"; do
     if [[ -n "$model" ]]; then
       print_info "Removing $model..."
       
@@ -110,6 +147,7 @@ remove_models() {
       remove_exit_code=$?
       
       # Log output to file, but don't echo to stdout to avoid duplicates
+      echo "[$(date +'%Y-%m-%d %H:%M:%S')] Removing $model:" >> "$LOG_FILE" 2>/dev/null || true
       echo "$remove_output" >> "$LOG_FILE" 2>/dev/null || true
       
       if [ $remove_exit_code -eq 0 ]; then
@@ -124,12 +162,33 @@ remove_models() {
         ((failed++))
       fi
     fi
-  done <<< "$models"
+  done
+  
+  # Re-count after removal to verify
+  local remaining_models
+  remaining_models=$(curl -s --max-time 5 http://localhost:11434/api/tags 2>/dev/null | \
+    grep -o '"name":"[^"]*"' | \
+    sed 's/"name":"//g' | \
+    sed 's/"//g' | \
+    wc -l | tr -d '[:space:]' || echo "0")
+  
+  # Ensure it's a valid integer (default to 0 if not)
+  if ! [[ "$remaining_models" =~ ^[0-9]+$ ]]; then
+    remaining_models=0
+  fi
   
   echo ""
-  print_success "Removed $removed model(s)"
+  if [[ $removed -gt 0 ]]; then
+    print_success "Removed $removed model(s)"
+  fi
   if [[ $failed -gt 0 ]]; then
     print_warn "Failed to remove $failed model(s)"
+  fi
+  if [[ $remaining_models -gt 0 ]]; then
+    print_warn "$remaining_models model(s) still remain"
+    print_info "You may need to remove them manually with: ollama rm <model-name>"
+  elif [[ $removed -gt 0 ]] && [[ $failed -eq 0 ]]; then
+    print_success "All models removed successfully"
   fi
 }
 

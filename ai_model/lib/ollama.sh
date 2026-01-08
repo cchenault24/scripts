@@ -34,14 +34,9 @@ setup_ollama_environment() {
     *) export OLLAMA_KEEP_ALIVE="5m" ;;
   esac
   
-  # Set max loaded models based on RAM tier
-  case "$HARDWARE_TIER" in
-    S) export OLLAMA_MAX_LOADED_MODELS=3 ;;
-    A) export OLLAMA_MAX_LOADED_MODELS=2 ;;
-    B) export OLLAMA_MAX_LOADED_MODELS=1 ;;
-    C) export OLLAMA_MAX_LOADED_MODELS=1 ;;
-    *) export OLLAMA_MAX_LOADED_MODELS=1 ;;
-  esac
+  # Set max loaded models: Always 3 total (1 embedding + 2 coding models)
+  # This ensures nomic-embed-text is always available for code indexing
+  export OLLAMA_MAX_LOADED_MODELS=3
   
   # Write environment variables to file for persistence
   cat > "$ollama_env_file" <<EOF
@@ -207,7 +202,29 @@ is_model_installed() {
   local model="$1"
   local installed_models
   installed_models=$(get_installed_models)
-  echo "$installed_models" | grep -q "^${model}$"
+  
+  # Check for exact match
+  if echo "$installed_models" | grep -q "^${model}$"; then
+    return 0
+  fi
+  
+  # Check for model with :latest tag (Ollama often returns models this way)
+  if echo "$installed_models" | grep -q "^${model}:latest$"; then
+    return 0
+  fi
+  
+  # Check if model name matches (without tag) - handles cases where model is listed as "model:tag"
+  local model_base="${model%%:*}"
+  if echo "$installed_models" | grep -qE "^${model_base}(:.*)?$"; then
+    return 0
+  fi
+  
+  # Fallback: try using ollama show which is more reliable
+  if ollama show "$model" &>/dev/null || ollama show "${model}:latest" &>/dev/null; then
+    return 0
+  fi
+  
+  return 1
 }
 
 # macOS-compatible timeout wrapper

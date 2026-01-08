@@ -8,11 +8,27 @@
 get_friendly_model_name() {
   local model="$1"
   case "$model" in
+    # Agent Plan / Chat / Edit
+    "qwen3-coder:30b") echo "Qwen3 Coder 30B" ;;
+    "devstral:27b") echo "Devstral 27B" ;;
+    "gpt-oss:20b") echo "GPT-OSS 20B" ;;
     "qwen2.5-coder:14b") echo "Qwen2.5-Coder 14B" ;;
+    "codestral:22b") echo "Codestral 22B" ;;
+    # Autocomplete
     "qwen2.5-coder:7b") echo "Qwen2.5-Coder 7B" ;;
+    "qwen2.5-coder:1.5b") echo "Qwen2.5-Coder 1.5B" ;;
+    # General purpose
     "llama3.1:8b") echo "Llama 3.1 8B" ;;
     "llama3.1:70b") echo "Llama 3.1 70B" ;;
-    "codestral:22b") echo "Codestral 22B" ;;
+    # Embedding models
+    "nomic-embed-text") echo "Nomic Embed Text" ;;
+    "qwen3-embedding") echo "Qwen3 Embedding" ;;
+    # Rerank models
+    "zerank-1") echo "Zerank-1" ;;
+    "zerank-1-small") echo "Zerank-1 Small" ;;
+    "qwen3-reranker") echo "Qwen3 Reranker" ;;
+    # Next Edit
+    "instinct") echo "Instinct" ;;
     *) echo "${model%%:*}" | sed 's/\([a-z]\)\([A-Z]\)/\1 \2/g' | sed 's/-/ /g' ;;
   esac
 }
@@ -351,18 +367,32 @@ EOF
   
   # Add embeddings model (use found embedding model or default)
   # api_base is already set above (shared with models)
-  local embed_model_to_use="${embed_model:-nomic-embed-text:latest}"
+  local embed_model_to_use="${embed_model:-nomic-embed-text}"
+  
+  # Resolve actual installed model name (handles :latest tag)
+  local resolved_embed_model
+  if [[ "$embed_model_to_use" == "nomic-embed-text" ]] || [[ "$embed_model_to_use" == "nomic-embed-text:latest" ]]; then
+    # Check if model is installed (with or without :latest tag)
+    if command -v is_model_installed &>/dev/null && is_model_installed "nomic-embed-text"; then
+      resolved_embed_model="nomic-embed-text"
+    elif command -v is_model_installed &>/dev/null && is_model_installed "nomic-embed-text:latest"; then
+      resolved_embed_model="nomic-embed-text:latest"
+    else
+      # Use default even if not installed (will be installed on first use)
+      resolved_embed_model="nomic-embed-text"
+    fi
+  else
+    resolved_embed_model="$embed_model_to_use"
+  fi
+  
   config_yaml+=$(cat <<EOF
 
-  - name: Nomic Embed
+  - name: Nomic Embed Text
     provider: ollama
-    model: $embed_model_to_use
+    model: $resolved_embed_model
     apiBase: $api_base
     roles:
       - embed
-    embedOptions:
-      maxChunkSize: 512
-      maxBatchSize: 10
 EOF
   )
   
@@ -382,7 +412,7 @@ EOF
 # Embeddings provider for codebase search
 embeddingsProvider:
   provider: ollama
-  model: $embed_model_to_use
+  model: $resolved_embed_model
   apiBase: $api_base
 EOF
   )
@@ -676,12 +706,27 @@ EOF
   fi
   
   # Add embeddings model (use existing or default)
-  local embed_model_to_use="${embed_model:-nomic-embed-text:latest}"
+  local embed_model_to_use="${embed_model:-nomic-embed-text}"
+  
+  # Resolve actual installed model name
+  local resolved_embed_model
+  if [[ "$embed_model_to_use" == "nomic-embed-text" ]] || [[ "$embed_model_to_use" == "nomic-embed-text:latest" ]]; then
+    if command -v is_model_installed &>/dev/null && is_model_installed "nomic-embed-text"; then
+      resolved_embed_model="nomic-embed-text"
+    elif command -v is_model_installed &>/dev/null && is_model_installed "nomic-embed-text:latest"; then
+      resolved_embed_model="nomic-embed-text:latest"
+    else
+      resolved_embed_model="nomic-embed-text"
+    fi
+  else
+    resolved_embed_model="$embed_model_to_use"
+  fi
+  
   config_yaml+=$(cat <<EOF
 
-  - name: Nomic Embed
+  - name: Nomic Embed Text
     provider: ollama
-    model: $embed_model_to_use
+    model: $resolved_embed_model
     roles:
       - embed
 EOF

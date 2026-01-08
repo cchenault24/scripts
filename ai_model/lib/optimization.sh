@@ -115,6 +115,7 @@ get_model_usage_frequency() {
 }
 
 # Smart model loading: Load model if not loaded, considering usage patterns
+# Enforces maximum of 3 models loaded: nomic-embed-text (always) + 2 user-selected models
 smart_load_model() {
   local model="$1"
   local force="${2:-0}"  # Optional: 1 to force load even if memory pressure
@@ -125,12 +126,78 @@ smart_load_model() {
     return 0
   fi
   
+  # Get currently loaded models
+  local loaded_models
+  loaded_models=$(ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  
+  # Count loaded models (excluding nomic-embed-text which is always kept)
+  local coding_models_count=0
+  local embed_model_loaded=false
+  while IFS= read -r loaded_model; do
+    if [[ -n "$loaded_model" ]]; then
+      if [[ "$loaded_model" == *"nomic-embed-text"* ]] || [[ "$loaded_model" == *"embed"* ]]; then
+        embed_model_loaded=true
+      else
+        ((coding_models_count++))
+      fi
+    fi
+  done <<< "$loaded_models"
+  
+  # Enforce 3-model limit: 1 embedding (nomic-embed-text) + 2 coding models max
+  local max_coding_models=2
+  if [[ $coding_models_count -ge $max_coding_models ]]; then
+    # Check if the model we're trying to load is the embedding model
+    if [[ "$model" == *"nomic-embed-text"* ]] || [[ "$model" == *"embed"* ]]; then
+      # Embedding model can always be loaded (it's part of the 3)
+      if [[ "$embed_model_loaded" == "false" ]]; then
+        # Unload one coding model to make room for embedding model
+        print_info "Unloading one coding model to make room for embedding model..."
+        smart_unload_idle_models "$model"
+      fi
+    else
+      # Trying to load a coding model, but we're at the limit
+      print_info "Maximum of 2 coding models already loaded. Unloading least-used model..."
+      # Unload least-used coding model (but never unload embedding model)
+      smart_unload_idle_models "$model"
+      # Re-count after unloading
+      loaded_models=$(ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+      coding_models_count=0
+      while IFS= read -r loaded_model; do
+        if [[ -n "$loaded_model" ]] && [[ "$loaded_model" != *"nomic-embed-text"* ]] && [[ "$loaded_model" != *"embed"* ]]; then
+          ((coding_models_count++))
+        fi
+      done <<< "$loaded_models"
+      
+      # If still at limit, force unload one more
+      if [[ $coding_models_count -ge $max_coding_models ]]; then
+        print_warn "Still at model limit. Forcing unload of least-used coding model..."
+        local least_used=""
+        local min_freq=999999
+        while IFS= read -r loaded_model; do
+          if [[ -n "$loaded_model" ]] && [[ "$loaded_model" != *"nomic-embed-text"* ]] && [[ "$loaded_model" != *"embed"* ]] && [[ "$loaded_model" != "$model" ]]; then
+            local freq
+            freq=$(get_model_usage_frequency "$loaded_model")
+            if [[ $freq -lt $min_freq ]]; then
+              min_freq=$freq
+              least_used="$loaded_model"
+            fi
+          fi
+        done <<< "$loaded_models"
+        
+        if [[ -n "$least_used" ]]; then
+          unload_model "$least_used" 1  # Silent mode
+          log_info "Unloaded least-used model: $least_used to enforce 3-model limit"
+        fi
+      fi
+    fi
+  fi
+  
   # Check memory pressure before loading (unless forced)
   if [[ $force -eq 0 ]]; then
     if check_memory_pressure; then
       print_warn "Memory pressure detected. Attempting to free memory before loading $model..."
       
-      # Try to unload least-used models first
+      # Try to unload least-used models first (but never unload embedding model)
       if ! smart_unload_idle_models "$model"; then
         print_warn "Could not free enough memory. Loading $model anyway (may cause issues)"
       fi
@@ -158,6 +225,7 @@ smart_load_model() {
 }
 
 # Smart model unloading: Unload idle models based on usage patterns
+# Never unloads nomic-embed-text (embedding model) - it's always kept loaded
 smart_unload_idle_models() {
   local keep_model="${1:-}"  # Optional: model to keep loaded
   local unloaded_count=0
@@ -171,12 +239,16 @@ smart_unload_idle_models() {
   fi
   
   # Sort models by usage frequency (least used first)
+  # Exclude embedding model (nomic-embed-text) - it should never be unloaded
   local models_to_unload=()
   while IFS= read -r model; do
     if [[ -n "$model" ]] && [[ "$model" != "$keep_model" ]]; then
-      local frequency
-      frequency=$(get_model_usage_frequency "$model")
-      models_to_unload+=("${frequency}:${model}")
+      # Never unload embedding model
+      if [[ "$model" != *"nomic-embed-text"* ]] && [[ "$model" != *"embed"* ]]; then
+        local frequency
+        frequency=$(get_model_usage_frequency "$model")
+        models_to_unload+=("${frequency}:${model}")
+      fi
     fi
   done <<< "$loaded_models"
   

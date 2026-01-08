@@ -59,26 +59,28 @@ The setup automatically detects your hardware and classifies it into tiers:
 
 ### Tier S (≥49GB RAM)
 - **All models available**
-- **Recommended**: qwen2.5-coder:14b + codestral:22b (or llama3.1:70b for maximum quality)
+- **Recommended**: qwen3-coder:30b (or devstral:27b) + codestral:22b (or llama3.1:70b for maximum quality)
 - Keep-alive (1h) - models unload after 1 hour of inactivity
 - High context window (32K tokens)
-- Best for: Complex refactoring, architecture work, multi-model workflows
+- Best for: Complex refactoring, architecture work, multi-model workflows, agent planning
 
 ### Tier A (33-48GB RAM)
-- **Excludes**: llama3.1:70b
-- **Recommended**: qwen2.5-coder:14b + codestral:22b
+- **Excludes**: llama3.1:70b, qwen3-coder:30b
+- **Recommended**: devstral:27b (or gpt-oss:20b) + codestral:22b
 - Keep-alive (1h) - models unload after 1 hour of inactivity
 - Medium context window (16K tokens)
-- Best for: General development, code review, complex coding tasks
+- Best for: General development, code review, complex coding tasks, agent planning
 
 ### Tier B (17-32GB RAM)
-- **Excludes**: llama3.1:70b, codestral:22b
+- **Excludes**: llama3.1:70b, qwen3-coder:30b, devstral:27b, codestral:22b, gpt-oss:20b
+- **Recommended**: qwen2.5-coder:14b + llama3.1:8b
 - Conservative keep-alive (5m)
 - Smaller context window (8K tokens)
 - Best for: Lightweight development, autocomplete
 
 ### Tier C (<17GB RAM)
-- **Only**: qwen2.5-coder:7b, llama3.1:8b
+- **Only**: qwen2.5-coder:7b, qwen2.5-coder:1.5b, llama3.1:8b
+- **Recommended**: llama3.1:8b + qwen2.5-coder:7b (or qwen2.5-coder:1.5b for ultra-fast)
 - Minimal keep-alive (5m)
 - Small context window (4K tokens)
 - Best for: Simple edits, fast autocomplete
@@ -87,33 +89,91 @@ The setup automatically detects your hardware and classifies it into tiers:
 
 All models are automatically optimized by Ollama with optimal quantization (Q4_K_M/Q5_K_M) for Apple Silicon when downloaded. Ollama selects the best quantization automatically, reducing RAM usage by 15-25% while maintaining quality.
 
-1. **qwen2.5-coder:14b** (Recommended Primary)
+**Model Selection**: Models are selected based on [Continue.dev's recommended models](https://docs.continue.dev/customize/models#recommended-models) for each role (Agent Plan, Chat, Edit, Autocomplete, Embed, Rerank, Next Edit). This ensures you're using the best-performing open models for each specific task type.
+
+#### Agent Plan / Chat / Edit Models (Best for coding tasks)
+
+1. **qwen3-coder:30b** (Tier S only - Best open model)
+   - Best open model for agent planning and complex coding tasks
+   - ~15GB RAM (Q4_K_M quantized)
+   - Excellent for complex refactoring and architecture work
+   - Recommended for Tier S hardware
+
+2. **devstral:27b** (Tier A/S - Excellent for agent planning)
+   - Excellent for agent planning and reasoning tasks
+   - ~14GB RAM (Q4_K_M quantized)
+   - Strong coding capabilities with good reasoning
+
+3. **gpt-oss:20b** (Tier A/S - Strong coding)
+   - Strong coding capabilities with good balance
+   - ~10GB RAM (Q4_K_M quantized)
+   - Good alternative for coding tasks
+
+4. **qwen2.5-coder:14b** (Recommended Primary for most tiers)
    - Best balance of quality and speed for React/TypeScript development
    - ~7.5GB RAM (Q4_K_M quantized)
    - Excellent TypeScript, React, and Redux-Saga understanding
    - Optimized for coding tasks
 
-2. **codestral:22b** (Recommended Secondary for Tier A/S)
+5. **codestral:22b** (Recommended Secondary for Tier A/S)
    - Excellent code generation and explanation capabilities
    - ~11.5GB RAM (Q4_K_M quantized)
    - Best for complex coding tasks and code review
    - Superior to general-purpose models for development work
 
-3. **llama3.1:8b** (Fast Alternative)
+6. **llama3.1:70b** (Tier S only - Highest quality)
+   - Highest quality for complex refactoring and architecture
+   - ~35GB RAM (Q4_K_M quantized)
+   - Best for multi-file refactoring and deep analysis
+
+#### Autocomplete Models (Fast, lightweight)
+
+7. **qwen2.5-coder:7b** (Fast autocomplete)
+   - Fast autocomplete and simple edits
+   - ~3.5GB RAM (Q5_K_M quantized)
+   - Perfect for quick suggestions and small changes
+
+8. **qwen2.5-coder:1.5b** (Ultra-fast autocomplete)
+   - Ultra-fast autocomplete (lightweight)
+   - ~0.9GB RAM (Q5_K_M quantized)
+   - Best for real-time suggestions
+
+9. **llama3.1:8b** (Fast general-purpose)
    - Fast, general-purpose coding assistant
    - ~4.2GB RAM (Q5_K_M quantized)
    - Good TypeScript support
    - Best for autocomplete and quick edits
 
-4. **llama3.1:70b** (Tier S only)
-   - Highest quality for complex refactoring and architecture
-   - ~35GB RAM (Q4_K_M quantized)
-   - Best for multi-file refactoring and deep analysis
+#### Embedding Models (For code indexing)
 
-5. **qwen2.5-coder:7b** (Lightweight)
-   - Lightweight, fast autocomplete and simple edits
-   - ~3.5GB RAM (Q5_K_M quantized)
-   - Perfect for quick suggestions and small changes
+10. **nomic-embed-text** (Best open embedding)
+    - Best open embedding model for code indexing
+    - ~0.3GB RAM
+    - Automatically installed for Continue.dev code indexing
+
+11. **qwen3-embedding** (Alternative embedding)
+    - Alternative embedding model for semantic search
+    - ~0.5GB RAM
+
+#### Rerank Models (For search relevance)
+
+12. **zerank-1** (Best open reranker)
+    - Best open reranker for search relevance
+    - ~0.4GB RAM
+
+13. **zerank-1-small** (Smaller reranker)
+    - Smaller reranker, faster processing
+    - ~0.2GB RAM
+
+14. **qwen3-reranker** (Alternative reranker)
+    - Alternative reranker model
+    - ~0.3GB RAM
+
+#### Next Edit Model
+
+15. **instinct** (Best open model for next edit)
+    - Best open model for next edit predictions
+    - ~8GB RAM (estimated)
 
 ## Continue.dev Setup and Usage
 

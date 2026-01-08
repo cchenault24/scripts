@@ -9,11 +9,26 @@ is_model_eligible() {
   local model="$1"
   local tier="$2"
   
+  # Embedding, rerank, and next edit models are always eligible (small)
+  case "$model" in
+    "nomic-embed-text"|"qwen3-embedding"|"zerank-1"|"zerank-1-small"|"qwen3-reranker"|"instinct")
+      return 0 ;;
+  esac
+  
   case "$tier" in
     S) return 0 ;; # All models allowed
-    A) [[ "$model" != "llama3.1:70b" ]] ;; # Exclude 70b
-    B) [[ "$model" != "llama3.1:70b" && "$model" != "codestral:22b" ]] ;; # Exclude 70b and 22b
-    C) [[ "$model" == "qwen2.5-coder:7b" || "$model" == "llama3.1:8b" ]] ;; # Only 7b and 8b
+    A) 
+      # Exclude very large models (70b, 30b)
+      [[ "$model" != "llama3.1:70b" && "$model" != "qwen3-coder:30b" ]] ;;
+    B) 
+      # Exclude large models (70b, 30b, 27b, 22b, 20b)
+      [[ "$model" != "llama3.1:70b" && "$model" != "qwen3-coder:30b" && \
+         "$model" != "devstral:27b" && "$model" != "codestral:22b" && \
+         "$model" != "gpt-oss:20b" ]] ;;
+    C) 
+      # Only small models (7b, 8b, 1.5b)
+      [[ "$model" == "qwen2.5-coder:7b" || "$model" == "llama3.1:8b" || \
+         "$model" == "qwen2.5-coder:1.5b" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -93,23 +108,36 @@ select_models() {
   SELECTED_MODELS=()
   
   # Default selection - optimized for coding tasks on Apple Silicon
-  # Primary: Best coding model for the tier
+  # Based on Continue.dev recommendations: https://docs.continue.dev/customize/models#recommended-models
+  # Primary: Best coding model for the tier (Agent Plan/Chat/Edit role)
   # Secondary: Fast alternative for autocomplete/quick tasks
   local default_primary="qwen2.5-coder:14b"
-  local default_secondary="llama3.1:8b"
+  local default_secondary="qwen2.5-coder:7b"
   
   # Tier-specific optimizations
   case "$HARDWARE_TIER" in
     S)
-      # Tier S: Can use codestral:22b as secondary for better coding quality
+      # Tier S: Can use best models - Qwen3 Coder 30B or Devstral 27B for primary
+      # Prefer qwen3-coder:30b (best open model for agent planning)
+      if is_model_eligible "qwen3-coder:30b" "$HARDWARE_TIER"; then
+        default_primary="qwen3-coder:30b"
+      fi
+      # Secondary: codestral:22b for better coding quality
       default_secondary="codestral:22b"
       ;;
     A)
-      # Tier A: codestral:22b is available and better for coding than llama3.1:8b
+      # Tier A: Use devstral:27b or gpt-oss:20b if available, otherwise qwen2.5-coder:14b
+      if is_model_eligible "devstral:27b" "$HARDWARE_TIER"; then
+        default_primary="devstral:27b"
+      elif is_model_eligible "gpt-oss:20b" "$HARDWARE_TIER"; then
+        default_primary="gpt-oss:20b"
+      fi
+      # Secondary: codestral:22b is available and better for coding
       default_secondary="codestral:22b"
       ;;
     B)
-      # Tier B: Stick with llama3.1:8b (codestral:22b not eligible)
+      # Tier B: Stick with qwen2.5-coder:14b (larger models not eligible)
+      default_primary="qwen2.5-coder:14b"
       default_secondary="llama3.1:8b"
       ;;
     C)
@@ -121,10 +149,22 @@ select_models() {
   
   # Check if defaults are eligible (fallback safety)
   if ! is_model_eligible "$default_primary" "$HARDWARE_TIER"; then
-    default_primary="llama3.1:8b"
+    # Fallback to qwen2.5-coder:14b, then llama3.1:8b
+    if is_model_eligible "qwen2.5-coder:14b" "$HARDWARE_TIER"; then
+      default_primary="qwen2.5-coder:14b"
+    else
+      default_primary="llama3.1:8b"
+    fi
   fi
   if ! is_model_eligible "$default_secondary" "$HARDWARE_TIER"; then
-    default_secondary="qwen2.5-coder:7b"
+    # Fallback to qwen2.5-coder:7b, then qwen2.5-coder:1.5b
+    if is_model_eligible "qwen2.5-coder:7b" "$HARDWARE_TIER"; then
+      default_secondary="qwen2.5-coder:7b"
+    elif is_model_eligible "qwen2.5-coder:1.5b" "$HARDWARE_TIER"; then
+      default_secondary="qwen2.5-coder:1.5b"
+    else
+      default_secondary="llama3.1:8b"
+    fi
   fi
   
   echo -e "${CYAN}Recommended for $TIER_LABEL:${NC}"
@@ -521,8 +561,31 @@ install_model() {
       clear_installed_models_cache
     fi
     
-    # Verify model is actually installed
-    if is_model_installed "$sanitized_model"; then
+    # Wait a moment for Ollama to update its model list (handles timing issues)
+    sleep 1
+    
+    # Verify model is actually installed with retry logic
+    local verification_attempts=0
+    local max_verification_attempts=3
+    local verification_success=false
+    
+    while [[ $verification_attempts -lt $max_verification_attempts ]]; do
+      if is_model_installed "$sanitized_model"; then
+        verification_success=true
+        break
+      fi
+      verification_attempts=$((verification_attempts + 1))
+      if [[ $verification_attempts -lt $max_verification_attempts ]]; then
+        log_info "Model verification attempt $verification_attempts failed, retrying..."
+        sleep 1
+        # Clear cache again before retry
+        if command -v clear_installed_models_cache &>/dev/null; then
+          clear_installed_models_cache
+        fi
+      fi
+    done
+    
+    if [[ "$verification_success" == "true" ]]; then
       print_success "$sanitized_model installed (automatically optimized for Apple Silicon)"
       log_info "Model $sanitized_model installed with automatic quantization optimization"
       INSTALLED_MODELS+=("$sanitized_model")
@@ -534,6 +597,7 @@ install_model() {
     else
       log_error "Model download appeared successful but model is not installed: $sanitized_model"
       print_error "Installation verification failed for $sanitized_model"
+      print_info "The model may still be installing. Try running: ollama list"
       return 1
     fi
   else

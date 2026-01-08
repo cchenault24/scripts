@@ -245,6 +245,21 @@ main() {
       fi
     fi
     
+    # Automatically install embedding model for code indexing (after network check)
+    if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+      print_info "Installing embedding model for code indexing (nomic-embed-text)..."
+      if install_model "nomic-embed-text"; then
+        print_success "Embedding model installed for code indexing"
+        # Add to SELECTED_MODELS so it gets included in config
+        SELECTED_MODELS+=("nomic-embed-text")
+        echo ""
+      else
+        print_warn "Failed to install embedding model. Code indexing may not work."
+        print_info "You can install it manually later with: ollama pull nomic-embed-text"
+        echo ""
+      fi
+    fi
+    
     # Estimate total disk space needed
     local total_size=0
     for model in "${SELECTED_MODELS[@]}"; do
@@ -478,6 +493,10 @@ main() {
     echo -e "  ${CYAN}Selected Models:${NC} ${SELECTED_MODELS[*]}"
     echo -e "  ${CYAN}Installed Models:${NC} ${INSTALLED_MODELS[*]}"
     echo -e "  ${CYAN}Continue.dev Profiles:${NC} ${CONTINUE_PROFILES[*]}"
+    # Check if embedding model is installed
+    if printf '%s\n' "${INSTALLED_MODELS[@]}" | grep -q "nomic-embed-text"; then
+      echo -e "  ${CYAN}Code Indexing:${NC} Enabled (nomic-embed-text installed)"
+    fi
   else
     echo -e "  ${CYAN}Models:${NC} None selected"
   fi
@@ -518,6 +537,12 @@ main() {
     echo ""
     echo -e "  Continue.dev will automatically use the config at: ${BOLD}~/.continue/config.yaml${NC}"
     echo ""
+    # Check if embedding model is installed and mention code indexing
+    if printf '%s\n' "${INSTALLED_MODELS[@]}" | grep -q "nomic-embed-text"; then
+      echo -e "  ${CYAN}Code Indexing:${NC} Enabled! You can use ${BOLD}@Codebase${NC} in Continue.dev chat"
+      echo -e "  for semantic search across your codebase."
+      echo ""
+    fi
     echo -e "  ${CYAN}Verification:${NC}"
     echo -e "  - Ensure Ollama is running: ${BOLD}brew services start ollama${NC}"
     echo -e "  - Check config: ${BOLD}ls -la ~/.continue/config.yaml${NC}"
