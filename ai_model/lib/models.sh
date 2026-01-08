@@ -9,31 +9,33 @@ is_model_eligible() {
   local model="$1"
   local tier="$2"
   
-  # Embedding, rerank, and next edit models are always eligible (small)
+  # Embedding models are always eligible (very small)
   case "$model" in
-    "nomic-embed-text"|"zerank-1"|"zerank-1-small"|"instinct")
-      return 0 ;;
-  esac
-  
-  # Codestral is eligible for all tiers (moderate size, good for autocomplete)
-  case "$model" in
-    "codestral")
+    "nomic-embed-text"|"mxbai-embed-large"|"snowflake-arctic-embed2"|"granite-embedding"|"all-minilm")
       return 0 ;;
   esac
   
   case "$tier" in
-    S) return 0 ;; # All models allowed
+    S) 
+      # Tier S: All models allowed
+      return 0 ;;
     A) 
-      # Exclude very large models (70b)
-      [[ "$model" != "llama3.1:70b" ]] ;;
-    B) 
-      # Exclude large models (70b, 27b, 20b), but allow codestral and gemma2:9b
+      # Tier A: Exclude very large models (70B)
       [[ "$model" != "llama3.1:70b" && \
-         "$model" != "devstral:27b" && \
-         "$model" != "gpt-oss:20b" ]] ;;
+         "$model" != "llama3.3:70b" ]] ;;
+    B) 
+      # Tier B: Exclude large models (70B, 22B+), but allow smaller ones
+      [[ "$model" != "llama3.1:70b" && \
+         "$model" != "llama3.3:70b" && \
+         "$model" != "codestral:22b" ]] ;;
     C) 
-      # Only small models (8b, 9b, codestral)
-      [[ "$model" == "llama3.1:8b" || "$model" == "gemma2:9b" || "$model" == "codestral" ]] ;;
+      # Tier C: Only small models (8B and below)
+      [[ "$model" == "llama3.1:8b" || \
+         "$model" == "codegemma:7b" || \
+         "$model" == "starcoder2:7b" || \
+         "$model" == "granite-code:8b" || \
+         "$model" == "starcoder2:3b" || \
+         "$model" == "llama3.2:3b" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -103,83 +105,213 @@ is_approved_model() {
   return 1
 }
 
-# Model selection
-select_models() {
-  print_header "🤖 Model Selection"
+# Validate total RAM usage and suggest optimizations
+validate_total_ram_usage() {
+  local tier="$1"
+  shift
+  local selected_models=("$@")
   
-  echo -e "${CYAN}Select models to install. Models are auto-tuned based on your hardware tier.${NC}"
-  echo ""
-  
-  SELECTED_MODELS=()
-  
-  # Default selection - optimized for coding tasks on Apple Silicon
-  # Based on Continue.dev recommendations: https://docs.continue.dev/customize/models#recommended-models
-  # Primary: Best coding model for the tier (Agent Plan/Chat/Edit role)
-  # Secondary: Fast alternative for autocomplete/quick tasks
-  local default_primary="devstral:27b"
-  local default_secondary="codestral"
-  
-  # Tier-specific optimizations
-  case "$HARDWARE_TIER" in
-    S)
-      # Tier S: Can use best models - Devstral 27B for primary
-      if is_model_eligible "devstral:27b" "$HARDWARE_TIER"; then
-        default_primary="devstral:27b"
-      fi
-      # Secondary: codestral for autocomplete (excellent for this role)
-      default_secondary="codestral"
-      ;;
-    A)
-      # Tier A: Use devstral:27b or gpt-oss:20b if available
-      if is_model_eligible "devstral:27b" "$HARDWARE_TIER"; then
-        default_primary="devstral:27b"
-      elif is_model_eligible "gpt-oss:20b" "$HARDWARE_TIER"; then
-        default_primary="gpt-oss:20b"
-      fi
-      # Secondary: codestral is excellent for autocomplete
-      default_secondary="codestral"
-      ;;
-    B)
-      # Tier B: Use codestral or llama3.1:8b (larger models not eligible)
-      if is_model_eligible "codestral" "$HARDWARE_TIER"; then
-        default_primary="codestral"
-        default_secondary="llama3.1:8b"
-      else
-        default_primary="llama3.1:8b"
-        default_secondary="llama3.1:8b"
-      fi
-      ;;
-    C)
-      # Tier C: Use codestral, gemma2:9b, or llama3.1:8b
-      if is_model_eligible "codestral" "$HARDWARE_TIER"; then
-        default_primary="codestral"
-        default_secondary="llama3.1:8b"
-      elif is_model_eligible "gemma2:9b" "$HARDWARE_TIER"; then
-        default_primary="gemma2:9b"
-        default_secondary="llama3.1:8b"
-      else
-        default_primary="llama3.1:8b"
-        default_secondary="llama3.1:8b"
-      fi
-      ;;
-  esac
-  
-  # Check if defaults are eligible (fallback safety)
-  if ! is_model_eligible "$default_primary" "$HARDWARE_TIER"; then
-    # Fallback to llama3.1:8b
-    default_primary="llama3.1:8b"
-  fi
-  if ! is_model_eligible "$default_secondary" "$HARDWARE_TIER"; then
-    # Fallback to llama3.1:8b
-    default_secondary="llama3.1:8b"
+  if [[ ${#selected_models[@]} -eq 0 ]]; then
+    return 0
   fi
   
-  echo -e "${CYAN}Recommended for $TIER_LABEL:${NC}"
-  echo -e "  ${GREEN}✓${NC} Primary: ${BOLD}$default_primary${NC}"
-  echo -e "  ${GREEN}✓${NC} Secondary: ${BOLD}$default_secondary${NC}"
-  echo ""
+  local total_ram=$(calculate_total_ram "${selected_models[@]}")
+  local max_ram=$(get_tier_max_ram "$tier")
   
-  # Build gum input with all models, sorted by name
+  # Convert to integers for comparison
+  local total_int=$(echo "$total_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+  local max_int=$(echo "$max_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+  
+  if [[ $total_int -gt $max_int ]]; then
+    print_warn "Total RAM usage (~${total_ram}GB) exceeds recommended limit for $TIER_LABEL (~${max_ram}GB)"
+    echo ""
+    echo -e "${YELLOW}Selected models and RAM usage:${NC}"
+    
+    # Show unique models with their RAM
+    local unique_models_str=$(get_unique_models "${selected_models[@]}")
+    local unique_models=()
+    if [[ -n "$unique_models_str" ]]; then
+      # Convert space-separated string to array
+      for model in $unique_models_str; do
+        unique_models+=("$model")
+      done
+    fi
+    for model in "${unique_models[@]}"; do
+      local ram=$(get_model_ram "$model")
+      local roles=$(get_model_role "$model")
+      echo -e "  • ${BOLD}$model${NC}: ~${ram}GB (roles: ${roles// /, })"
+    done
+    
+    echo ""
+    echo -e "${CYAN}💡 Optimization suggestions:${NC}"
+    echo -e "  1. Reuse models across roles (e.g., use same model for Agent Plan and Autocomplete)"
+    echo -e "  2. Select smaller models for some roles"
+    echo -e "  3. Consider using fewer roles"
+    echo ""
+    
+    if ! prompt_yes_no "Continue with this selection anyway? (May cause performance issues)" "n"; then
+      return 1
+    fi
+  else
+    # Show summary even if under limit
+    local unique_models_str=$(get_unique_models "${selected_models[@]}")
+    local unique_models=()
+    if [[ -n "$unique_models_str" ]]; then
+      for model in $unique_models_str; do
+        unique_models+=("$model")
+      done
+    fi
+    if [[ ${#unique_models[@]} -gt 1 ]]; then
+      print_info "Total RAM usage: ~${total_ram}GB (${#unique_models[@]} unique model(s))"
+      log_info "Total RAM usage for selected models: ~${total_ram}GB"
+    fi
+  fi
+  
+  return 0
+}
+
+# Find models that can be reused for a role from already selected models
+find_reusable_models() {
+  local role="$1"
+  shift
+  local already_selected=("$@")
+  local reusable=()
+  
+  # Handle empty array safely
+  if [[ ${#already_selected[@]} -gt 0 ]]; then
+    for model in "${already_selected[@]}"; do
+      if can_model_serve_role "$model" "$role"; then
+        reusable+=("$model")
+      fi
+    done
+  fi
+  
+  # Return space-separated string (empty if no reusable models)
+  if [[ ${#reusable[@]} -gt 0 ]]; then
+    echo "${reusable[@]}"
+  fi
+}
+
+# Select models for a specific role
+select_models_by_role() {
+  local role="$1"
+  local role_display="$2"
+  local tier="$3"
+  # Models already selected for other roles (handle empty case safely)
+  local already_selected_models=()
+  shift 3
+  if [[ $# -gt 0 ]]; then
+    already_selected_models=("$@")
+  fi
+  
+  
+  local models_for_role=($(get_models_for_role "$role"))
+  
+  
+  if [[ ${#models_for_role[@]} -eq 0 ]]; then
+    # Return empty string instead of returning 1, so command substitution doesn't fail
+    # This allows the calling code to handle empty results gracefully
+    echo ""
+    return 0
+  fi
+  
+  local default_model=$(get_default_model_for_role "$role" "$tier")
+  
+  # Check for reusable models from already selected (prefer these!)
+  # Handle empty array safely - always initialize as empty array
+  local reusable_models=()
+  if [[ ${#already_selected_models[@]} -gt 0 ]]; then
+    local reusable_str=$(find_reusable_models "$role" "${already_selected_models[@]}")
+    if [[ -n "$reusable_str" ]]; then
+      for model in $reusable_str; do
+        reusable_models+=("$model")
+      done
+    fi
+  fi
+  
+  # If we have reusable models, prefer the largest eligible one as default
+  if [[ ${#reusable_models[@]} -gt 0 ]]; then
+    # Find the largest eligible reusable model
+    local best_reusable=""
+    local best_ram=0
+    for model in "${reusable_models[@]}"; do
+      if is_model_eligible "$model" "$tier"; then
+        local ram=$(get_model_ram "$model")
+        local ram_int=$(echo "$ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+        if [[ "$ram_int" =~ ^[0-9]+$ ]] && [[ $ram_int -gt $best_ram ]]; then
+          best_reusable="$model"
+          best_ram=$ram_int
+        fi
+      fi
+    done
+    
+    # Use reusable model as default if found
+    if [[ -n "$best_reusable" ]]; then
+      default_model="$best_reusable"
+    fi
+  fi
+  
+  # Validate that the recommended model is actually eligible for this tier
+  if ! is_model_eligible "$default_model" "$tier"; then
+    # Fallback: find first eligible model
+    for model in "${models_for_role[@]}"; do
+      if is_model_eligible "$model" "$tier"; then
+        default_model="$model"
+        break
+      fi
+    done
+  fi
+  
+  # Redirect all UI output to stderr so it displays but doesn't get captured in command substitution
+  echo "" >&2
+  echo -e "${CYAN}Select models for ${BOLD}$role_display${NC} role:" >&2
+  
+  # Check if default is a reusable model
+  local is_default_reusable=false
+  if [[ ${#reusable_models[@]} -gt 0 ]]; then
+    for model in "${reusable_models[@]}"; do
+      if [[ "$model" == "$default_model" ]]; then
+        is_default_reusable=true
+        break
+      fi
+    done
+  fi
+  
+  if [[ "$is_default_reusable" == "true" ]]; then
+    local default_ram=$(get_model_ram "$default_model")
+    echo -e "${CYAN}Recommended for $TIER_LABEL: ${BOLD}$default_model${NC} ${GREEN}✓ (reuse - saves ~${default_ram}GB RAM)${NC}" >&2
+  else
+    echo -e "${CYAN}Recommended for $TIER_LABEL: ${BOLD}$default_model${NC}" >&2
+  fi
+  
+  # Show reusable models if any (and default is not one of them)
+  if [[ ${#reusable_models[@]} -gt 0 ]] && [[ "$is_default_reusable" == "false" ]]; then
+    echo "" >&2
+    echo -e "${GREEN}💡 Smart suggestion:${NC} You can reuse these already-selected models:" >&2
+    for model in "${reusable_models[@]}"; do
+      local ram=$(get_model_ram "$model")
+      echo -e "  ${GREEN}✓${NC} ${BOLD}$model${NC} (~${ram}GB) - already selected" >&2
+    done
+    echo -e "  ${CYAN}Tip:${NC} Reusing models saves RAM and speeds up loading" >&2
+  fi
+  
+  # Show current RAM usage if models already selected
+  if [[ ${#already_selected_models[@]} -gt 0 ]]; then
+    local current_ram
+    current_ram=$(calculate_total_ram "${already_selected_models[@]}")
+    local max_ram=$(get_tier_max_ram "$tier")
+    local current_int=$(echo "$current_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+    local max_int=$(echo "$max_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+    
+    echo "" >&2
+    echo -e "${CYAN}Current RAM usage:${NC} ~${current_ram}GB / ~${max_ram}GB recommended" >&2
+    if [[ $current_int -gt $max_int ]]; then
+      echo -e "${YELLOW}⚠ Warning:${NC} Already over recommended limit" >&2
+    fi
+  fi
+  
+  echo "" >&2
+  
   local gum_items=()
   local model_map=()
   local temp_items=()
@@ -188,19 +320,12 @@ select_models() {
   local max_model_width=0
   local max_ram_width=0
   
-  for model in "${APPROVED_MODELS[@]}"; do
-    local is_recommended=false
-    if [[ "$model" == "$default_primary" || "$model" == "$default_secondary" ]]; then
-      is_recommended=true
-    fi
-    
-    # Calculate model name width
+  for model in "${models_for_role[@]}"; do
     local model_len=${#model}
     if [[ $model_len -gt $max_model_width ]]; then
       max_model_width=$model_len
     fi
     
-    # Calculate RAM width
     local ram=$(get_model_ram "$model")
     local ram_display="${ram}GB"
     local ram_len=${#ram_display}
@@ -213,25 +338,55 @@ select_models() {
   max_model_width=$((max_model_width + 2))
   max_ram_width=$((max_ram_width + 1))
   
-  # Build temporary array with recommended flag, model name and formatted string
-  for model in "${APPROVED_MODELS[@]}"; do
+  # Build temporary array with priority flag, model name and formatted string
+  for model in "${models_for_role[@]}"; do
     local is_recommended=false
-    if [[ "$model" == "$default_primary" || "$model" == "$default_secondary" ]]; then
+    if [[ "$model" == "$default_model" ]]; then
       is_recommended=true
     fi
-    local formatted=$(format_model_for_gum "$model" "$HARDWARE_TIER" "$is_recommended" "$max_model_width" "$max_ram_width")
-    # Store as "recommended_flag|model_name|formatted_string" for sorting
-    # Use "A" for eligible models (no "Not recommended"), "B" for not eligible (has "Not recommended")
-    # This matches the logic in format_model_for_gum which adds "Not recommended" for ineligible models
+    
+    # Check if this model is already selected (reusable)
+    local is_reusable=false
+    if [[ ${#already_selected_models[@]} -gt 0 ]]; then
+      for existing in "${already_selected_models[@]}"; do
+        if [[ "$model" == "$existing" ]]; then
+          is_reusable=true
+          break
+        fi
+      done
+    fi
+    
+    local formatted=$(format_model_for_gum "$model" "$tier" "$is_recommended" "$max_model_width" "$max_ram_width")
+    
+    # Add reuse indicator to description if reusable
+    if [[ "$is_reusable" == "true" ]]; then
+      # Append reuse indicator (will be shown in the list)
+      formatted="${formatted} ${GREEN}✓ (reuse)${NC}"
+    fi
+    
     local is_eligible=false
-    if is_model_eligible "$model" "$HARDWARE_TIER"; then
+    if is_model_eligible "$model" "$tier"; then
       is_eligible=true
     fi
-    local recommended_flag=$([[ "$is_eligible" == "true" ]] && echo "A" || echo "B")
-    temp_items+=("${recommended_flag}|${model}|${formatted}")
+    
+    # Prioritize: eligible reusable > eligible recommended > eligible > ineligible
+    local priority="C"
+    if [[ "$is_eligible" == "true" ]]; then
+      if [[ "$is_reusable" == "true" ]]; then
+        priority="A"  # Highest priority: eligible and reusable
+      elif [[ "$is_recommended" == "true" ]]; then
+        priority="B"  # Second: eligible and recommended
+      else
+        priority="C"  # Third: eligible but not recommended
+      fi
+    else
+      priority="D"  # Lowest: ineligible
+    fi
+    
+    temp_items+=("${priority}|${model}|${formatted}")
   done
   
-  # Sort by recommended first (A before B), then by model name using natural sort
+  # Sort by priority (A=reusable, B=recommended, C=eligible, D=ineligible), then by model name
   IFS=$'\n' sorted_items=($(printf '%s\n' "${temp_items[@]}" | sort -t'|' -k1,1 -k2,2V))
   unset IFS
   
@@ -245,148 +400,379 @@ select_models() {
     model_map+=("$model_name")
   done
   
-  # Add custom model option at the end
-  gum_items+=("➕ Enter custom model name")
-  model_map+=("CUSTOM")
-  
-  # Use gum choose for multi-select
-  echo ""
-  echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to toggle selection, ${BOLD}Enter${NC} to confirm"
-  echo ""
+  # Use gum choose with --limit=100 to enable visual selection feedback, but only process first selection
+  echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to select, ${BOLD}Enter${NC} to confirm" >&2
+  echo -e "${YELLOW}   Note:${NC} Only select one model. Subsequent selections will be discarded." >&2
+  echo "" >&2
   
   local selected_lines
-  # Minimal UI: Color-based selection, no prefix symbols, compact layout
+  
+  # Capture gum output, but ensure stderr (UI messages) goes to terminal, not command substitution
+  # Use a file descriptor to redirect stderr to the terminal while capturing stdout
   selected_lines=$(printf '%s\n' "${gum_items[@]}" | gum choose \
     --limit=100 \
     --height=15 \
     --cursor="→ " \
-    --selected-prefix="" \
-    --unselected-prefix="" \
+    --selected-prefix="✓ " \
+    --unselected-prefix="  " \
     --selected.foreground="2" \
     --selected.background="0" \
     --cursor.foreground="6" \
-    --header="🤖 Select Models for $TIER_LABEL" \
+    --header="🤖 Select $role_display Models for $TIER_LABEL" \
+    --header.foreground="6" 2>/dev/tty)
+  
+  
+  # If user cancelled (empty selection), return empty string immediately
+  if [[ -z "$selected_lines" ]]; then
+    echo ""
+    return 0
+  fi
+  
+  local selected_models_for_role=()
+  if [[ -n "$selected_lines" ]]; then
+    
+    # Count selections and identify discarded items
+    local selected_count=$(echo "$selected_lines" | grep -c '^[[:space:]]*[^[:space:]]' || echo 0)
+    
+    # Process only the first line (discard subsequent selections)
+    local first_line=$(echo "$selected_lines" | head -n 1)
+    
+    # If multiple selections, log the discarded ones
+    if [[ $selected_count -gt 1 ]]; then
+      local discarded_lines=$(echo "$selected_lines" | tail -n +2)
+      local discarded_items=()
+      while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+          # Clean the line to get the model name
+          local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
+          line_clean="${line_clean#→ }"  # Remove cursor if present
+          line_clean="${line_clean#✓ }"  # Remove selection prefix if present
+          line_clean=$(echo "$line_clean" | sed 's/\x1b\[[0-9;]*m//g')  # Remove ANSI codes
+          
+          # Try to find matching model name
+          local i=0
+          local matched=false
+          for item in "${gum_items[@]}"; do
+            local item_clean=$(echo "$item" | sed 's/\x1b\[[0-9;]*m//g')
+            if [[ "$item_clean" == "$line_clean" ]]; then
+              discarded_items+=("${model_map[$i]}")
+              matched=true
+              break
+            fi
+            ((i++))
+          done
+        fi
+      done <<< "$discarded_lines"
+      
+      if [[ ${#discarded_items[@]} -gt 0 ]]; then
+        print_warn "Multiple models selected. Using first selection, discarding: ${discarded_items[*]}"
+        log_info "Multiple models selected. Using first selection, discarding: ${discarded_items[*]}"
+      fi
+    fi
+    if [[ -n "$first_line" ]]; then
+      # Clean the line - remove leading whitespace, cursor, selection prefix, and any ANSI codes
+      local line_clean="${first_line#"${first_line%%[![:space:]]*}"}"  # Remove leading whitespace
+      line_clean="${line_clean#→ }"  # Remove cursor if present
+      line_clean="${line_clean#✓ }"  # Remove selection prefix if present
+      # Remove ANSI color codes
+      line_clean=$(echo "$line_clean" | sed 's/\x1b\[[0-9;]*m//g')
+      
+      # Try to match the cleaned line to our formatted items
+      local model_name=""
+      local i=0
+      for item in "${gum_items[@]}"; do
+        # Remove ANSI codes from item for comparison
+        local item_clean=$(echo "$item" | sed 's/\x1b\[[0-9;]*m//g')
+        if [[ "$item_clean" == "$line_clean" ]]; then
+          model_name="${model_map[$i]}"
+          break
+        fi
+        ((i++))
+      done
+      
+      # Only add if we found a valid model name
+      
+      if [[ -n "$model_name" ]]; then
+        
+        if is_approved_model "$model_name"; then
+          selected_models_for_role+=("$model_name")
+        fi
+      fi
+    fi
+  fi
+  
+  # Return selected models as space-separated string (only valid model names)
+  if [[ ${#selected_models_for_role[@]} -gt 0 ]]; then
+    local return_value=$(printf '%s ' "${selected_models_for_role[@]}" | sed 's/ $//')  # Remove trailing space
+
+    echo "$return_value"
+  fi
+}
+
+# Model selection with role-based organization
+select_models() {
+  print_header "🤖 Model Selection by Role"
+  
+  echo -e "${CYAN}Select models to install organized by Continue.dev roles.${NC}"
+  echo -e "${CYAN}Models are auto-tuned based on your hardware tier.${NC}"
+  echo ""
+  
+  SELECTED_MODELS=()
+  
+  # Define roles with display names
+  # Note: rerank is excluded since RERANK_MODELS is empty
+  local roles=("agent_chat_edit" "autocomplete" "embed" "next_edit")
+  local role_display=("Agent Plan/Chat/Edit" "Autocomplete" "Embed" "Next Edit")
+  local role_descriptions=(
+    "Complex coding tasks, refactoring, agent planning"
+    "Fast, lightweight real-time code suggestions"
+    "Code indexing and semantic search"
+    "Predicting the next edit"
+  )
+  
+  # First, let user select which roles they want
+  echo -e "${CYAN}Select which roles you want to configure:${NC}"
+  echo ""
+  echo -e "${YELLOW}💡 Tip:${NC} Press ${BOLD}Space${NC} to toggle selection, ${BOLD}Enter${NC} to confirm" >&2
+  echo "" >&2
+  
+  local role_items=()
+  local role_map=()
+  local i=0
+  for role in "${roles[@]}"; do
+    local display="${role_display[$i]}"
+    local desc="${role_descriptions[$i]}"
+    role_items+=("$display - $desc")
+    role_map+=("$role")
+    ((i++))
+  done
+  
+  local selected_role_lines
+  selected_role_lines=$(printf '%s\n' "${role_items[@]}" | gum choose \
+    --limit=100 \
+    --height=10 \
+    --cursor="→ " \
+    --selected-prefix="✓ " \
+    --unselected-prefix="  " \
+    --selected.foreground="2" \
+    --selected.background="0" \
+    --cursor.foreground="6" \
+    --header="📋 Select Roles to Configure" \
     --header.foreground="6")
   
-  if [[ -z "$selected_lines" ]]; then
-    log_error "No models selected"
+  if [[ -z "$selected_role_lines" ]]; then
+    log_error "No roles selected"
     exit 1
   fi
   
-  # Parse gum output - first pass: identify selections and mark if custom input needed
-  local needs_custom_input=false
-  while IFS= read -r line; do
-    if [[ -z "$line" ]]; then
-      continue
-    fi
-    
-    # Check if custom model option was selected - mark flag but let it fall through to model matching
-    if [[ "$line" == *"Enter custom model name"* ]] || [[ "$line" == *"➕"* ]]; then
-      needs_custom_input=true
-      # Don't continue - let it fall through to model matching where fallback will handle it
-    fi
-    
-    # Extract model name from formatted line
-    # With minimal UI (no prefixes), gum outputs the formatted string directly
-    # Strip any leading whitespace or cursor symbols that might be present
-    local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
-    line_clean="${line_clean#→ }"  # Remove cursor if present
-    
-    # Find matching model from the map
-    local model_name=""
+  # Parse selected roles (process all selected lines)
+  local selected_roles=()
+  if [[ -n "$selected_role_lines" ]]; then
+    while IFS= read -r line; do
+      if [[ -z "$line" ]]; then
+        continue
+      fi
+      
+      local line_clean="${line#"${line%%[![:space:]]*}"}"  # Remove leading whitespace
+      line_clean="${line_clean#→ }"  # Remove cursor if present
+      line_clean="${line_clean#✓ }"  # Remove selection prefix if present
+      # Remove ANSI color codes
+      line_clean=$(echo "$line_clean" | sed 's/\x1b\[[0-9;]*m//g')
+      
+      local i=0
+      for item in "${role_items[@]}"; do
+        if [[ "$item" == "$line_clean" ]]; then
+          selected_roles+=("${role_map[$i]}")
+          break
+        fi
+        ((i++))
+      done
+    done <<< "$selected_role_lines"
+  fi
+  
+  if [[ ${#selected_roles[@]} -eq 0 ]]; then
+    log_error "No roles selected"
+    exit 1
+  fi
+  
+  
+  # For each selected role, let user select models
+  for role in "${selected_roles[@]}"; do
+    # Find display name for this role
+    local role_display_name=""
     local i=0
-    for item in "${gum_items[@]}"; do
-      # Direct match (gum outputs selected items as-is with no prefix)
-      if [[ "$item" == "$line_clean" ]]; then
-        model_name="${model_map[$i]}"
+    for r in "${roles[@]}"; do
+      if [[ "$r" == "$role" ]]; then
+        role_display_name="${role_display[$i]}"
         break
       fi
       ((i++))
     done
     
-    # Handle CUSTOM model option - just set flag, don't read here (stdin is invalid after gum)
-    if [[ -n "$model_name" ]] && [[ "$model_name" == "CUSTOM" ]]; then
-      needs_custom_input=true
+    # Check if this role has any models available before trying to select
+    local available_models=($(get_models_for_role "$role"))
+    if [[ ${#available_models[@]} -eq 0 ]]; then
+      echo ""
+      print_warn "Skipping $role_display_name: No models available for this role"
+      echo ""
       continue
-    elif [[ -n "$model_name" ]] && [[ "$model_name" != "CUSTOM" ]] && is_approved_model "$model_name"; then
-      SELECTED_MODELS+=("$model_name")
     fi
-  done <<< "$selected_lines"
-  
-  # Remove duplicates (bash 3.2 compatible)
-  # Initialize unique_models as empty array (set -u compatibility)
-  local unique_models=()
-  # Guard against unset array (set -u compatibility)
-  if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
-    for model in "${SELECTED_MODELS[@]}"; do
-      local found=0
-      # Guard against empty array access (fixes unbound variable error with set -u)
-      if [[ ${#unique_models[@]} -gt 0 ]]; then
-        for existing in "${unique_models[@]}"; do
-          if [[ "$model" == "$existing" ]]; then
-            found=1
-            break
+    
+
+    # Handle empty array safely for set -u compatibility
+    # Use parameter expansion that handles empty arrays: "${array[@]:-}"
+    # IMPORTANT: Declare local variable at start of loop iteration to avoid variable persistence
+    local selected_for_role=""
+    local selected_for_role_clean=""
+    
+    # Call function and capture only stdout (stderr goes to terminal via >&2 in function)
+    # Use a subshell to ensure stderr redirection works correctly
+    if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+      selected_for_role=$(select_models_by_role "$role" "$role_display_name" "$HARDWARE_TIER" "${SELECTED_MODELS[@]}" 2>/dev/tty)
+    else
+      selected_for_role=$(select_models_by_role "$role" "$role_display_name" "$HARDWARE_TIER" 2>/dev/tty)
+    fi
+    
+    
+    # Get selected models for this role (trim any trailing whitespace/newlines)
+    local selected_for_role_clean=$(echo "$selected_for_role" | xargs)
+    
+    
+    if [[ -n "$selected_for_role_clean" ]]; then
+      # Add selected models to SELECTED_MODELS array
+      # Split by space and process each model
+      local models_array=()
+      # Use read to properly split the space-separated string
+      read -ra model_tokens <<< "$selected_for_role_clean"
+      
+      for model in "${model_tokens[@]}"; do
+        # Trim whitespace and validate it's a real model name
+        model=$(echo "$model" | xargs)
+        # Only add if it's non-empty and is an approved model
+        if [[ -n "$model" ]] && is_approved_model "$model"; then
+          models_array+=("$model")
+        fi
+      done
+      
+      # Process each valid model
+      for model in "${models_array[@]}"; do
+        # Check if model is already in SELECTED_MODELS (models can belong to multiple roles)
+        local found=0
+        if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
+          for existing in "${SELECTED_MODELS[@]}"; do
+            if [[ "$model" == "$existing" ]]; then
+              found=1
+              break
+            fi
+          done
+        fi
+        
+        if [[ $found -eq 0 ]]; then
+          # New model - add it
+          SELECTED_MODELS+=("$model")
+
+          
+          # Get model RAM and only show message if valid
+          
+          local model_ram=$(get_model_ram "$model")
+          
+          
+          local model_ram_int=$(echo "$model_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+          
+          
+          # Only show RAM summary if model has valid RAM estimate
+          if [[ "$model_ram_int" =~ ^[0-9]+$ ]] && [[ $model_ram_int -gt 0 ]]; then
+            local current_ram=$(calculate_total_ram "${SELECTED_MODELS[@]}")
+            local max_ram=$(get_tier_max_ram "$HARDWARE_TIER")
+            local current_int=$(echo "$current_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+            local max_int=$(echo "$max_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+            
+            echo ""
+            if [[ $current_int -gt $max_int ]]; then
+              print_warn "RAM usage: ~${current_ram}GB / ~${max_ram}GB (exceeds limit by ~$((current_int - max_int))GB)"
+            else
+              print_info "RAM usage: ~${current_ram}GB / ~${max_ram}GB (${model_ram}GB added)"
+            fi
+            echo ""
           fi
-        done
-      fi
-      [[ $found -eq 0 ]] && unique_models+=("$model")
-    done
-  fi
-  # Assign unique_models to SELECTED_MODELS
-  # unique_models is always initialized as empty array above, so safe to use
-  # Use a safe copy pattern that works with set -u
-  SELECTED_MODELS=()
-  # Copy elements one by one to avoid any set -u issues with array expansion
-  local i
-  for ((i=0; i<${#unique_models[@]}; i++)); do
-    SELECTED_MODELS+=("${unique_models[$i]}")
+        else
+          # Model already selected - show reuse message (only if it's a meaningful reuse)
+          # Skip if this is the same role (no need to announce)
+
+          echo ""
+          print_info "Reusing model $model for $role_display_name (saves RAM)"
+          echo ""
+        fi
+      done
+    fi
   done
   
-  # Handle custom model input AFTER parsing all selections (stdin is now in good state)
-  # Prompt for custom model if the flag was set, regardless of whether other models were selected
-  if [[ "$needs_custom_input" == "true" ]]; then
-    while true; do
-      echo ""
-      echo -e "${YELLOW}Enter custom model name (e.g., codellama:13b):${NC} "
-      read -r custom_model || {
-        print_info "Custom model input cancelled"
-        break
-      }
-      custom_model=$(echo "$custom_model" | xargs) # trim whitespace
-      
-      if [[ -z "$custom_model" ]]; then
-        print_warn "Model name cannot be empty. Try again or press Ctrl+C to cancel."
-        continue
-      fi
-      
-      # Validate the custom model
-      if validate_model_exists "$custom_model"; then
-        SELECTED_MODELS+=("$custom_model")
-        print_success "Custom model $custom_model added to selection"
-        
-        # Ask if user wants to add more custom models
-        if prompt_yes_no "Add another custom model?" "n"; then
-          continue
-        else
-          break
-        fi
-      else
-        # Validation failed - ask if user wants to retry
-        if prompt_yes_no "Would you like to try a different model name?" "y"; then
-          continue
-        else
-          print_info "Skipping custom model selection"
-          break
-        fi
-      fi
-    done
-  fi
-  
+  # Note: Custom model addition via interactive prompt has been disabled
+  # The selection is now limited to predefined and approved models only.
+
   # Validate selection
   if [[ ${#SELECTED_MODELS[@]} -eq 0 ]]; then
     log_error "No models selected"
     exit 1
   fi
+  
+  # Show final summary before validation
+  echo ""
+  print_header "📊 Selection Summary"
+  
+  local unique_models_str=$(get_unique_models "${SELECTED_MODELS[@]}")
+  local unique_models=()
+  if [[ -n "$unique_models_str" ]]; then
+    for model in $unique_models_str; do
+      unique_models+=("$model")
+    done
+  fi
+  local total_ram=$(calculate_total_ram "${SELECTED_MODELS[@]}")
+  local max_ram=$(get_tier_max_ram "$HARDWARE_TIER")
+  
+  echo -e "${CYAN}Selected ${#unique_models[@]} unique model(s) across ${#selected_roles[@]} role(s):${NC}"
+  echo ""
+  
+  # Show models grouped by role
+  for role in "${selected_roles[@]}"; do
+    local role_display_name=""
+    local i=0
+    for r in "${roles[@]}"; do
+      if [[ "$r" == "$role" ]]; then
+        role_display_name="${role_display[$i]}"
+        break
+      fi
+      ((i++))
+    done
+    
+    # Find models that serve this role
+    local role_models=()
+    for model in "${unique_models[@]}"; do
+      if can_model_serve_role "$model" "$role"; then
+        role_models+=("$model")
+      fi
+    done
+    
+    if [[ ${#role_models[@]} -gt 0 ]]; then
+      echo -e "  ${BOLD}$role_display_name:${NC}"
+      for model in "${role_models[@]}"; do
+        local ram=$(get_model_ram "$model")
+        echo -e "    • $model (~${ram}GB)"
+      done
+    fi
+  done
+  
+  echo ""
+  echo -e "${CYAN}Total RAM usage:${NC} ~${total_ram}GB / ~${max_ram}GB recommended for $TIER_LABEL"
+  
+  # Validate total RAM usage
+  if ! validate_total_ram_usage "$HARDWARE_TIER" "${SELECTED_MODELS[@]}"; then
+    print_info "Please adjust your model selection"
+    # Return to selection (could loop back, but for now just exit)
+    exit 1
+  fi
+  
+  echo ""
   
   # Warn about ineligible models
   for model in "${SELECTED_MODELS[@]}"; do
@@ -398,7 +784,7 @@ select_models() {
     fi
   done
   
-  # Warn about large models
+  # Warn about large individual models
   for model in "${SELECTED_MODELS[@]}"; do
     # Check if this is a custom model (not in approved list)
     if ! is_approved_model "$model"; then
@@ -423,7 +809,7 @@ select_models() {
   done
   
   log_info "Selected models: ${SELECTED_MODELS[*]}"
-  print_success "Selected ${#SELECTED_MODELS[@]} model(s)"
+  print_success "Selected ${#unique_models[@]} unique model(s) (~${total_ram}GB total RAM)"
 }
 
 # Auto-tune model parameters
@@ -790,7 +1176,7 @@ validate_model_simple() {
   # Test with timeout
   if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
     local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
+    local duration=$((end_time - start_int))
     
     if [[ -n "$response" && ${#response} -gt 10 ]]; then
       print_success "$model validated (response time: ${duration}s)"

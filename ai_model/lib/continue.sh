@@ -160,9 +160,12 @@ generate_continue_config() {
     fi
   fi
   
-  # Separate coding models from embedding models
-  local coding_models=()
+  # Separate models by role
+  local agent_chat_edit_models=()
+  local autocomplete_models=()
   local embed_model=""
+  local rerank_model=""
+  local next_edit_model=""
   
   # Process all selected models (guard against empty array for set -u compatibility)
   if [[ ${#SELECTED_MODELS[@]} -gt 0 ]]; then
@@ -170,15 +173,30 @@ generate_continue_config() {
       # Resolve actual installed model name (may be optimized variants)
       local model=$(resolve_installed_model "$model_base")
       
+      # Get model roles using helper function
+      local model_roles=$(get_model_role "$model")
+      
       # Check if it's an embedding model
-      if [[ "$model" == *"embed"* ]] || [[ "$model" == *"nomic-embed"* ]]; then
-        embed_model="$model"
-      else
-        # Add to coding models array (avoid duplicates)
+      if [[ "$model" == *"embed"* ]] || [[ "$model" == *"nomic-embed"* ]] || [[ "$model_roles" == *"embed"* ]]; then
+        if [[ -z "$embed_model" ]]; then
+          embed_model="$model"
+        fi
+      # Check if it's a rerank model
+      elif [[ "$model" == *"zerank"* ]] || [[ "$model_roles" == *"rerank"* ]]; then
+        if [[ -z "$rerank_model" ]]; then
+          rerank_model="$model"
+        fi
+      # Check if it's a next_edit model
+      elif [[ "$model" == *"instinct"* ]] || [[ "$model" == *"reasoning"* ]] || [[ "$model" == *"openthinker"* ]] || [[ "$model" == *"magistral"* ]] || [[ "$model_roles" == *"next_edit"* ]]; then
+        if [[ -z "$next_edit_model" ]]; then
+          next_edit_model="$model"
+        fi
+      # Check if it's an autocomplete model
+      elif [[ "$model_roles" == *"autocomplete"* ]]; then
+        # Add to autocomplete models array (avoid duplicates)
         local found=0
-        # Guard against empty array access (fixes unbound variable error with set -u)
-        if [[ ${#coding_models[@]} -gt 0 ]]; then
-          for existing in "${coding_models[@]}"; do
+        if [[ ${#autocomplete_models[@]} -gt 0 ]]; then
+          for existing in "${autocomplete_models[@]}"; do
             if [[ "$existing" == "$model" ]]; then
               found=1
               break
@@ -186,48 +204,105 @@ generate_continue_config() {
           done
         fi
         if [[ $found -eq 0 ]]; then
-          coding_models+=("$model")
+          autocomplete_models+=("$model")
+        fi
+        # Also add to agent_chat_edit if it supports that role
+        if [[ "$model_roles" == *"agent_chat_edit"* ]]; then
+          found=0
+          if [[ ${#agent_chat_edit_models[@]} -gt 0 ]]; then
+            for existing in "${agent_chat_edit_models[@]}"; do
+              if [[ "$existing" == "$model" ]]; then
+                found=1
+                break
+              fi
+            done
+          fi
+          if [[ $found -eq 0 ]]; then
+            agent_chat_edit_models+=("$model")
+          fi
+        fi
+      # Otherwise, treat as agent_chat_edit model
+      else
+        # Add to agent_chat_edit models array (avoid duplicates)
+        local found=0
+        if [[ ${#agent_chat_edit_models[@]} -gt 0 ]]; then
+          for existing in "${agent_chat_edit_models[@]}"; do
+            if [[ "$existing" == "$model" ]]; then
+              found=1
+              break
+            fi
+          done
+        fi
+        if [[ $found -eq 0 ]]; then
+          agent_chat_edit_models+=("$model")
         fi
       fi
     done
   fi
   
-  # If no coding models found, log warning and return
-  if [[ ${#coding_models[@]} -eq 0 ]]; then
-    print_warn "No coding models found in selected models"
-    log_warn "No coding models to add to Continue.dev config"
+  # If no agent_chat_edit models found, log warning and return
+  if [[ ${#agent_chat_edit_models[@]} -eq 0 ]]; then
+    print_warn "No Agent Plan/Chat/Edit models found in selected models"
+    log_warn "No Agent Plan/Chat/Edit models to add to Continue.dev config"
     return 1
   fi
   
-  # Determine default model (first/largest for chat) and autocomplete model
-  local default_model="${coding_models[0]}"
+  # Determine default model (first/largest for chat)
+  local default_model="${agent_chat_edit_models[0]}"
   local default_model_name=$(get_friendly_model_name "$default_model")
   
-  # Find best autocomplete model (prefer smallest/fastest)
+  # Find best autocomplete model
   local autocomplete_model=""
   local autocomplete_model_name=""
-  # Prefer 7b models for autocomplete (faster responses)
-  for model in "${coding_models[@]}"; do
-    if [[ "$model" == *"7b"* ]] || [[ "$model" == *":7b"* ]]; then
-      autocomplete_model="$model"
-      autocomplete_model_name=$(get_friendly_model_name "$model")
-      break
-    fi
-  done
-  # Fallback to 8b if no 7b found
-  if [[ -z "$autocomplete_model" ]]; then
-    for model in "${coding_models[@]}"; do
-      if [[ "$model" == *"8b"* ]] || [[ "$model" == *":8b"* ]]; then
+  # Prefer models from autocomplete_models array
+  if [[ ${#autocomplete_models[@]} -gt 0 ]]; then
+    # Prefer smaller models for autocomplete (faster responses)
+    for model in "${autocomplete_models[@]}"; do
+      if [[ "$model" == *"270m"* ]] || [[ "$model" == *"functiongemma"* ]]; then
         autocomplete_model="$model"
         autocomplete_model_name=$(get_friendly_model_name "$model")
         break
       fi
     done
-  fi
-  # Use first model as fallback if no small model found
-  if [[ -z "$autocomplete_model" && ${#coding_models[@]} -gt 0 ]]; then
-    autocomplete_model="${coding_models[0]}"
-    autocomplete_model_name="$default_model_name"
+    # Fallback to 3b-4b models
+    if [[ -z "$autocomplete_model" ]]; then
+      for model in "${autocomplete_models[@]}"; do
+        if [[ "$model" == *"3b"* ]] || [[ "$model" == *":3b"* ]] || [[ "$model" == *"4b"* ]] || [[ "$model" == *":4b"* ]]; then
+          autocomplete_model="$model"
+          autocomplete_model_name=$(get_friendly_model_name "$model")
+          break
+        fi
+      done
+    fi
+    # Fallback to 8b models
+    if [[ -z "$autocomplete_model" ]]; then
+      for model in "${autocomplete_models[@]}"; do
+        if [[ "$model" == *"8b"* ]] || [[ "$model" == *":8b"* ]]; then
+          autocomplete_model="$model"
+          autocomplete_model_name=$(get_friendly_model_name "$model")
+          break
+        fi
+      done
+    fi
+    # Use first autocomplete model as fallback
+    if [[ -z "$autocomplete_model" ]]; then
+      autocomplete_model="${autocomplete_models[0]}"
+      autocomplete_model_name=$(get_friendly_model_name "$autocomplete_model")
+    fi
+  else
+    # Fallback: try to find a small model from agent_chat_edit_models
+    for model in "${agent_chat_edit_models[@]}"; do
+      if [[ "$model" == *"3b"* ]] || [[ "$model" == *":3b"* ]] || [[ "$model" == *"4b"* ]] || [[ "$model" == *":4b"* ]] || [[ "$model" == *"8b"* ]] || [[ "$model" == *":8b"* ]]; then
+        autocomplete_model="$model"
+        autocomplete_model_name=$(get_friendly_model_name "$model")
+        break
+      fi
+    done
+    # Use first model as final fallback
+    if [[ -z "$autocomplete_model" && ${#agent_chat_edit_models[@]} -gt 0 ]]; then
+      autocomplete_model="${agent_chat_edit_models[0]}"
+      autocomplete_model_name="$default_model_name"
+    fi
   fi
   
   # Get optimized default parameters for default model
@@ -308,8 +383,8 @@ models:
 EOF
   )
   
-  # Add all coding models with chat, edit, apply roles
-  for model in "${coding_models[@]}"; do
+  # Add all agent_chat_edit models with chat, edit, apply roles
+  for model in "${agent_chat_edit_models[@]}"; do
     local friendly_name=$(get_friendly_model_name "$model")
     
     # Get optimized parameters for this model (use coding role as default)
@@ -390,6 +465,16 @@ EOF
   # api_base is already set above (shared with models)
   local embed_model_to_use="${embed_model:-nomic-embed-text}"
   
+  # Add rerank model if selected (Note: Continue.dev may not have explicit rerank role, but we can document it)
+  if [[ -n "$rerank_model" ]]; then
+    log_info "Rerank model selected: $rerank_model (Note: Continue.dev config may not support explicit rerank role)"
+  fi
+  
+  # Add next_edit model if selected (Note: Continue.dev may not have explicit next_edit role, but we can document it)
+  if [[ -n "$next_edit_model" ]]; then
+    log_info "Next Edit model selected: $next_edit_model (Note: Continue.dev config may not support explicit next_edit role)"
+  fi
+  
   # Resolve actual installed model name (handles :latest tag)
   local resolved_embed_model
   if [[ "$embed_model_to_use" == "nomic-embed-text" ]] || [[ "$embed_model_to_use" == "nomic-embed-text:latest" ]]; then
@@ -457,7 +542,7 @@ EOF
   if command -v atomic_write &>/dev/null; then
     if atomic_write "$config_file" "$config_yaml"; then
       print_success "Continue.dev config generated: $config_file"
-      log_info "Continue.dev config written to $config_file with ${#coding_models[@]} coding model(s)"
+      log_info "Continue.dev config written to $config_file with ${#agent_chat_edit_models[@]} Agent Plan/Chat/Edit model(s)"
     else
       log_error "Failed to write Continue.dev config atomically"
       print_error "Failed to generate Continue.dev config"
@@ -467,7 +552,7 @@ EOF
     # Fallback: regular write
     if echo "$config_yaml" > "$config_file" 2>/dev/null; then
       print_success "Continue.dev config generated: $config_file"
-      log_info "Continue.dev config written to $config_file with ${#coding_models[@]} coding model(s)"
+      log_info "Continue.dev config written to $config_file with ${#agent_chat_edit_models[@]} Agent Plan/Chat/Edit model(s)"
     else
       log_error "Failed to write Continue.dev config"
       print_error "Failed to generate Continue.dev config"
