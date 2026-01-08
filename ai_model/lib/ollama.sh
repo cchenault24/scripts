@@ -197,31 +197,165 @@ clear_installed_models_cache() {
   log_info "Cleared installed models cache"
 }
 
+# Verify model installation via Ollama API (more reliable than CLI)
+# Returns 0 if model is found, 1 otherwise
+verify_model_via_api() {
+  local model="$1"
+  local model_base="${model%%:*}"
+  local model_tag="${model#*:}"
+  
+  # If no tag specified, model_tag equals model_base
+  if [[ "$model_tag" == "$model_base" ]]; then
+    model_tag="latest"
+  fi
+  
+  # Query the Ollama API for installed models
+  local api_response
+  api_response=$(curl -s --max-time 10 http://localhost:11434/api/tags 2>/dev/null)
+  
+  if [[ -z "$api_response" ]]; then
+    log_warn "Ollama API not responding for model verification"
+    return 1
+  fi
+  
+  # Check if jq is available for proper JSON parsing
+  if command -v jq &>/dev/null; then
+    # Use jq for reliable JSON parsing
+    # Check for exact model match first
+    if echo "$api_response" | jq -e ".models[]? | select(.name == \"$model\")" &>/dev/null; then
+      log_info "Model $model verified via API (exact match)"
+      return 0
+    fi
+    
+    # Check for model:latest if no tag was originally specified
+    if echo "$api_response" | jq -e ".models[]? | select(.name == \"${model_base}:${model_tag}\")" &>/dev/null; then
+      log_info "Model ${model_base}:${model_tag} verified via API"
+      return 0
+    fi
+    
+    # Check for any version of this model (base name match)
+    if echo "$api_response" | jq -e ".models[]? | select(.name | startswith(\"${model_base}:\"))" &>/dev/null; then
+      log_info "Model with base name $model_base verified via API"
+      return 0
+    fi
+  else
+    # Fallback: grep-based parsing (less reliable but works without jq)
+    # Look for the model name in the JSON response
+    if echo "$api_response" | grep -q "\"name\":\"${model}\""; then
+      log_info "Model $model verified via API (grep match)"
+      return 0
+    fi
+    
+    if echo "$api_response" | grep -q "\"name\":\"${model_base}:${model_tag}\""; then
+      log_info "Model ${model_base}:${model_tag} verified via API (grep match)"
+      return 0
+    fi
+    
+    # Check for any version with this base name
+    if echo "$api_response" | grep -qE "\"name\":\"${model_base}:[^\"]+\""; then
+      log_info "Model with base name $model_base verified via API (grep match)"
+      return 0
+    fi
+  fi
+  
+  log_info "Model $model not found via API verification"
+  return 1
+}
+
+# Wait for model to appear in Ollama with progressive backoff
+# This handles the delay between download completion and model registration
+wait_for_model_registration() {
+  local model="$1"
+  local max_wait="${2:-30}"  # Maximum seconds to wait
+  local waited=0
+  local check_interval=2
+  
+  log_info "Waiting for model $model to be registered (max ${max_wait}s)..."
+  
+  while [[ $waited -lt $max_wait ]]; do
+    # Clear cache before each check
+    clear_installed_models_cache
+    
+    # Try API verification first (more reliable)
+    if verify_model_via_api "$model"; then
+      log_info "Model $model registered after ${waited}s"
+      return 0
+    fi
+    
+    # Fallback to ollama show
+    if ollama show "$model" &>/dev/null; then
+      log_info "Model $model confirmed via ollama show after ${waited}s"
+      return 0
+    fi
+    
+    sleep "$check_interval"
+    waited=$((waited + check_interval))
+    
+    # Increase check interval progressively (but cap at 5s)
+    if [[ $check_interval -lt 5 ]]; then
+      check_interval=$((check_interval + 1))
+    fi
+  done
+  
+  log_warn "Model $model not registered after ${max_wait}s wait"
+  return 1
+}
+
 # Check if a specific model is installed
 is_model_installed() {
   local model="$1"
   local installed_models
   installed_models=$(get_installed_models)
   
-  # Check for exact match
-  if echo "$installed_models" | grep -q "^${model}$"; then
+  # Extract base name and tag from the requested model
+  local model_base="${model%%:*}"
+  local model_tag="${model#*:}"
+  # If no tag was specified, model_tag equals model_base
+  if [[ "$model_tag" == "$model_base" ]]; then
+    model_tag=""
+  fi
+  
+  # Check for exact match first (highest priority)
+  if echo "$installed_models" | grep -qxF "$model"; then
     return 0
   fi
   
   # Check for model with :latest tag (Ollama often returns models this way)
-  if echo "$installed_models" | grep -q "^${model}:latest$"; then
-    return 0
+  # Only if user didn't specify a tag, or specified :latest
+  if [[ -z "$model_tag" ]] || [[ "$model_tag" == "latest" ]]; then
+    if echo "$installed_models" | grep -qxF "${model_base}:latest"; then
+      return 0
+    fi
   fi
   
-  # Check if model name matches (without tag) - handles cases where model is listed as "model:tag"
-  local model_base="${model%%:*}"
-  if echo "$installed_models" | grep -qE "^${model_base}(:.*)?$"; then
-    return 0
+  # Check if model name matches with any tag - but use EXACT base name matching
+  # Use word boundaries to avoid llama3 matching llama3.1
+  # The pattern ensures we match the exact base name followed by a colon and tag
+  if [[ -z "$model_tag" ]]; then
+    # User requested base model without tag - check if ANY version is installed
+    # Use fixed string match for base name, then check for colon
+    while IFS= read -r installed; do
+      if [[ -n "$installed" ]]; then
+        local installed_base="${installed%%:*}"
+        # Exact match of base name (not prefix match)
+        if [[ "$installed_base" == "$model_base" ]]; then
+          return 0
+        fi
+      fi
+    done <<< "$installed_models"
   fi
   
   # Fallback: try using ollama show which is more reliable
-  if ollama show "$model" &>/dev/null || ollama show "${model}:latest" &>/dev/null; then
+  # This handles edge cases where the model list might not be up to date
+  if ollama show "$model" &>/dev/null; then
     return 0
+  fi
+  
+  # Also try with :latest suffix if no tag was specified
+  if [[ -z "$model_tag" ]]; then
+    if ollama show "${model_base}:latest" &>/dev/null; then
+      return 0
+    fi
   fi
   
   return 1

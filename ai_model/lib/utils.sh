@@ -119,29 +119,56 @@ validate_model_name() {
 }
 
 # Retry function with exponential backoff
+# NOTE: For commands with pipelines, use retry_command_with_backoff() instead
+# or handle retries inline since eval doesn't preserve PIPESTATUS correctly
 retry_with_backoff() {
   local max_attempts="${1:-3}"
   local base_delay="${2:-2}"
-  local command="${3:-}"
+  shift 2
   
-  if [[ -z "$command" ]]; then
+  # Support both string command (legacy) and array of arguments
+  local command_str=""
+  local use_eval=false
+  
+  if [[ $# -eq 1 ]] && [[ "$1" == *" "* ]]; then
+    # Single argument with spaces - treat as command string (legacy mode)
+    command_str="$1"
+    use_eval=true
+    log_warn "retry_with_backoff: Using legacy eval mode. For pipelines, handle retries inline."
+  elif [[ $# -gt 0 ]]; then
+    # Multiple arguments - use directly (preferred)
+    command_str="$*"
+    use_eval=false
+  else
     log_error "No command provided to retry_with_backoff"
     return 1
   fi
   
   local attempt=1
   local delay="$base_delay"
+  local exit_code=0
   
   while [[ $attempt -le $max_attempts ]]; do
-    log_info "Attempt $attempt/$max_attempts: $command"
+    log_info "Attempt $attempt/$max_attempts: $command_str"
     
-    if eval "$command"; then
-      log_info "Command succeeded on attempt $attempt"
-      return 0
+    if [[ "$use_eval" == "true" ]]; then
+      # Legacy mode with eval (may not work correctly with pipelines)
+      if eval "$command_str"; then
+        log_info "Command succeeded on attempt $attempt"
+        return 0
+      fi
+      exit_code=$?
+    else
+      # Direct execution (preferred)
+      if "$@"; then
+        log_info "Command succeeded on attempt $attempt"
+        return 0
+      fi
+      exit_code=$?
     fi
     
     if [[ $attempt -lt $max_attempts ]]; then
-      log_warn "Command failed, retrying in ${delay}s..."
+      log_warn "Command failed (exit code: $exit_code), retrying in ${delay}s..."
       sleep "$delay"
       delay=$((delay * 2))  # Exponential backoff
     fi
@@ -149,7 +176,45 @@ retry_with_backoff() {
     ((attempt++))
   done
   
-  log_error "Command failed after $max_attempts attempts"
+  log_error "Command failed after $max_attempts attempts (last exit code: $exit_code)"
+  return 1
+}
+
+# Retry a simple command (no pipelines) with exponential backoff
+# Usage: retry_command_with_backoff max_attempts base_delay command [args...]
+retry_command_with_backoff() {
+  local max_attempts="${1:-3}"
+  local base_delay="${2:-2}"
+  shift 2
+  
+  if [[ $# -eq 0 ]]; then
+    log_error "No command provided to retry_command_with_backoff"
+    return 1
+  fi
+  
+  local attempt=1
+  local delay="$base_delay"
+  local exit_code=0
+  
+  while [[ $attempt -le $max_attempts ]]; do
+    log_info "Attempt $attempt/$max_attempts: $*"
+    
+    if "$@"; then
+      log_info "Command succeeded on attempt $attempt"
+      return 0
+    fi
+    exit_code=$?
+    
+    if [[ $attempt -lt $max_attempts ]]; then
+      log_warn "Command failed (exit code: $exit_code), retrying in ${delay}s..."
+      sleep "$delay"
+      delay=$((delay * 2))  # Exponential backoff
+    fi
+    
+    ((attempt++))
+  done
+  
+  log_error "Command failed after $max_attempts attempts (last exit code: $exit_code)"
   return 1
 }
 

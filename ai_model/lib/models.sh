@@ -946,16 +946,93 @@ install_model() {
   
   # Download model with retry logic - Ollama automatically selects best quantization for Apple Silicon
   local download_success=false
-  if command -v retry_with_backoff &>/dev/null; then
-    if retry_with_backoff 3 2 "ollama pull \"$sanitized_model\" 2>&1 | tee -a \"$LOG_FILE\""; then
-      download_success=true
+  local max_download_attempts=3
+  local download_attempt=1
+  local download_delay=2
+  local last_error_msg=""
+  
+  while [[ $download_attempt -le $max_download_attempts ]]; do
+    log_info "Download attempt $download_attempt/$max_download_attempts for $sanitized_model"
+    print_info "Download attempt $download_attempt of $max_download_attempts..."
+    
+    # Create a temp file to capture output for analysis
+    local output_file
+    output_file=$(mktemp "${TMPDIR:-/tmp}/ollama_pull_XXXXXX.log" 2>/dev/null || echo "/tmp/ollama_pull_$$.log")
+    
+    # Use process substitution to capture exit code correctly
+    # PIPESTATUS[0] gives us the exit code of ollama pull, not tee
+    # Also capture output for error analysis
+    ollama pull "$sanitized_model" 2>&1 | tee -a "$LOG_FILE" "$output_file"
+    local pull_exit_code="${PIPESTATUS[0]}"
+    
+    # Analyze output for specific error conditions
+    local pull_output=""
+    if [[ -f "$output_file" ]]; then
+      pull_output=$(cat "$output_file" 2>/dev/null || echo "")
+      rm -f "$output_file" 2>/dev/null
     fi
-  else
-    # Fallback: direct download
-    if ollama pull "$sanitized_model" 2>&1 | tee -a "$LOG_FILE"; then
-      download_success=true
+    
+    if [[ $pull_exit_code -eq 0 ]]; then
+      # Verify the download actually completed (not just started)
+      if echo "$pull_output" | grep -qiE "success|pulling.*done|verifying.*complete|writing.*manifest"; then
+        download_success=true
+        log_info "Download succeeded on attempt $download_attempt"
+        break
+      elif echo "$pull_output" | grep -qiE "already exists|up to date"; then
+        download_success=true
+        log_info "Model already exists, no download needed"
+        break
+      else
+        # Exit code 0 but no clear success indicator - still treat as success
+        # but log for debugging
+        log_info "Download completed with exit code 0 (output: ${pull_output:0:100}...)"
+        download_success=true
+        break
+      fi
     fi
-  fi
+    
+    # Analyze failure reason
+    if echo "$pull_output" | grep -qiE "not found|does not exist|unknown model"; then
+      last_error_msg="Model '$sanitized_model' not found in Ollama library"
+      log_error "$last_error_msg"
+      print_error "$last_error_msg"
+      print_info "Check available models at: https://ollama.com/library"
+      rm -f "$output_file" 2>/dev/null
+      return 1  # Don't retry if model doesn't exist
+    elif echo "$pull_output" | grep -qiE "connection refused|network.*unreachable|timeout|timed out"; then
+      last_error_msg="Network error during download"
+      log_warn "$last_error_msg (attempt $download_attempt/$max_download_attempts)"
+    elif echo "$pull_output" | grep -qiE "no space|disk full|not enough space"; then
+      last_error_msg="Insufficient disk space for model"
+      log_error "$last_error_msg"
+      print_error "$last_error_msg"
+      print_info "Free up disk space and try again"
+      rm -f "$output_file" 2>/dev/null
+      return 1  # Don't retry if no disk space
+    elif echo "$pull_output" | grep -qiE "unauthorized|forbidden|access denied"; then
+      last_error_msg="Access denied - model may require authentication"
+      log_error "$last_error_msg"
+      print_error "$last_error_msg"
+      rm -f "$output_file" 2>/dev/null
+      return 1  # Don't retry auth failures
+    elif echo "$pull_output" | grep -qiE "rate limit|too many requests"; then
+      last_error_msg="Rate limited by Ollama servers"
+      log_warn "$last_error_msg"
+      download_delay=$((download_delay * 3))  # Longer backoff for rate limits
+    else
+      last_error_msg="Download failed with exit code $pull_exit_code"
+      log_warn "$last_error_msg (attempt $download_attempt/$max_download_attempts)"
+    fi
+    
+    if [[ $download_attempt -lt $max_download_attempts ]]; then
+      print_warn "Download failed: $last_error_msg"
+      print_info "Retrying in ${download_delay}s..."
+      sleep "$download_delay"
+      download_delay=$((download_delay * 2))  # Exponential backoff
+    fi
+    
+    ((download_attempt++))
+  done
   
   if [[ "$download_success" == "true" ]]; then
     # Clear cache to force refresh
@@ -963,29 +1040,52 @@ install_model() {
       clear_installed_models_cache
     fi
     
-    # Wait a moment for Ollama to update its model list (handles timing issues)
-    sleep 1
+    print_info "Verifying installation..."
     
-    # Verify model is actually installed with retry logic
-    local verification_attempts=0
-    local max_verification_attempts=3
+    # Use the new wait_for_model_registration function if available
+    # This handles timing issues with progressive backoff
     local verification_success=false
     
-    while [[ $verification_attempts -lt $max_verification_attempts ]]; do
-      if is_model_installed "$sanitized_model"; then
+    if command -v wait_for_model_registration &>/dev/null; then
+      # Wait up to 30 seconds for model registration with smart backoff
+      if wait_for_model_registration "$sanitized_model" 30; then
         verification_success=true
-        break
       fi
-      verification_attempts=$((verification_attempts + 1))
-      if [[ $verification_attempts -lt $max_verification_attempts ]]; then
-        log_info "Model verification attempt $verification_attempts failed, retrying..."
-        sleep 1
-        # Clear cache again before retry
+    else
+      # Fallback to original verification logic with improved timing
+      local verification_attempts=0
+      local max_verification_attempts=5
+      local verification_delay=2
+      
+      # Initial wait - larger models need more time
+      sleep 3
+      
+      while [[ $verification_attempts -lt $max_verification_attempts ]]; do
+        # Clear cache before each check
         if command -v clear_installed_models_cache &>/dev/null; then
           clear_installed_models_cache
         fi
-      fi
-    done
+        
+        # Try API verification first if available
+        if command -v verify_model_via_api &>/dev/null && verify_model_via_api "$sanitized_model"; then
+          verification_success=true
+          break
+        fi
+        
+        # Fallback to is_model_installed
+        if is_model_installed "$sanitized_model"; then
+          verification_success=true
+          break
+        fi
+        
+        verification_attempts=$((verification_attempts + 1))
+        if [[ $verification_attempts -lt $max_verification_attempts ]]; then
+          log_info "Model verification attempt $verification_attempts/$max_verification_attempts failed, retrying in ${verification_delay}s..."
+          sleep "$verification_delay"
+          verification_delay=$((verification_delay + 1))  # Progressive delay
+        fi
+      done
+    fi
     
     if [[ "$verification_success" == "true" ]]; then
       print_success "$sanitized_model installed (automatically optimized for Apple Silicon)"
@@ -999,11 +1099,20 @@ install_model() {
     else
       log_error "Model download appeared successful but model is not installed: $sanitized_model"
       print_error "Installation verification failed for $sanitized_model"
-      print_info "The model may still be installing. Try running: ollama list"
+      print_info "Troubleshooting steps:"
+      print_info "  1. Check if the model is still being processed: ollama list"
+      print_info "  2. Try manually pulling the model: ollama pull $sanitized_model"
+      print_info "  3. Check Ollama logs for errors: cat ~/.ollama/logs/server.log"
       return 1
     fi
   else
-    log_error "Failed to install $sanitized_model after retries"
+    log_error "Failed to install $sanitized_model after $max_download_attempts attempts"
+    print_error "Download failed for $sanitized_model"
+    print_info "Possible causes:"
+    print_info "  - Network connectivity issues"
+    print_info "  - Model name may be incorrect"
+    print_info "  - Ollama servers may be experiencing issues"
+    print_info "Try again later or check: https://ollama.com/library"
     return 1
   fi
 }
@@ -1166,37 +1275,85 @@ validate_model_simple() {
   
   local test_prompt="Write a simple TypeScript function that adds two numbers."
   local start_time=$(date +%s)
-  local response
+  local response=""
+  local response_file=""
   
   # Track model usage
   if command -v track_model_usage &>/dev/null; then
     track_model_usage "$model"
   fi
   
-  # Test with timeout
-  if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_int))
-    
-    if [[ -n "$response" && ${#response} -gt 10 ]]; then
+  # Create temp file to capture response (avoids pipeline issues)
+  response_file=$(mktemp "${TMPDIR:-/tmp}/ollama_validate_XXXXXX.txt" 2>/dev/null || echo "/tmp/ollama_validate_$$.txt")
+  
+  # Test with timeout - capture to file to avoid pipeline exit code issues
+  local validation_timeout=60  # Increased timeout for slower models
+  run_with_timeout "$validation_timeout" ollama run "$model" "$test_prompt" > "$response_file" 2>&1
+  local run_exit_code=$?
+  
+  # Read response from file
+  if [[ -f "$response_file" ]]; then
+    response=$(head -n 20 "$response_file" 2>/dev/null || cat "$response_file" 2>/dev/null || echo "")
+    rm -f "$response_file" 2>/dev/null
+  fi
+  
+  local end_time=$(date +%s)
+  local duration=$((end_time - start_time))
+  
+  # Log response info for debugging
+  log_info "Validation response for $model: exit_code=$run_exit_code, response_length=${#response}, duration=${duration}s"
+  
+  # Check if we got a valid response
+  # Success criteria: response > 10 chars AND doesn't look like an error message
+  if [[ $run_exit_code -eq 0 ]] && [[ -n "$response" ]] && [[ ${#response} -gt 10 ]]; then
+    # Check it's not just an error message
+    if ! echo "$response" | grep -qiE "^error:|failed to|could not|unable to"; then
       print_success "$model validated (response time: ${duration}s)"
       log_info "Model $model validation successful (${duration}s)"
       return 0
+    else
+      log_warn "Response looks like error message: ${response:0:100}"
     fi
+  elif [[ $run_exit_code -eq 124 ]]; then
+    log_warn "Validation timed out after ${validation_timeout}s for $model"
+  else
+    log_warn "Validation got short/empty response (length=${#response}, exit=$run_exit_code)"
   fi
   
-  # Retry once
-  log_warn "Validation failed for $model, retrying..."
-  sleep 2
+  # Retry once with longer timeout
+  log_warn "Validation failed for $model, retrying with longer timeout..."
+  sleep 3
   
-  if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
-    if [[ -n "$response" && ${#response} -gt 10 ]]; then
+  response_file=$(mktemp "${TMPDIR:-/tmp}/ollama_validate_XXXXXX.txt" 2>/dev/null || echo "/tmp/ollama_validate_retry_$$.txt")
+  validation_timeout=90  # Even longer timeout for retry
+  
+  run_with_timeout "$validation_timeout" ollama run "$model" "$test_prompt" > "$response_file" 2>&1
+  run_exit_code=$?
+  
+  if [[ -f "$response_file" ]]; then
+    response=$(head -n 20 "$response_file" 2>/dev/null || cat "$response_file" 2>/dev/null || echo "")
+    rm -f "$response_file" 2>/dev/null
+  fi
+  
+  if [[ $run_exit_code -eq 0 ]] && [[ -n "$response" ]] && [[ ${#response} -gt 10 ]]; then
+    if ! echo "$response" | grep -qiE "^error:|failed to|could not|unable to"; then
       print_success "$model validated (retry successful)"
+      log_info "Model $model validation successful on retry"
       return 0
     fi
   fi
   
+  # Provide helpful error message
   log_error "Validation failed for $model after retry"
+  if [[ $run_exit_code -eq 124 ]]; then
+    print_error "Model $model validation timed out - model may be too slow or unresponsive"
+  elif [[ -z "$response" ]]; then
+    print_error "Model $model returned empty response"
+  elif [[ ${#response} -le 10 ]]; then
+    print_error "Model $model returned very short response: '${response}'"
+  else
+    print_error "Model $model validation failed (response looks like error)"
+  fi
   return 1
 }
 
@@ -1204,46 +1361,18 @@ validate_model_simple() {
 validate_model() {
   local model="$1"
   
-  print_info "Validating $model..."
-  log_info "Validating model: $model"
-  
-  local test_prompt="Write a simple TypeScript function that adds two numbers."
-  local start_time=$(date +%s)
-  local response
-  
-  # Test with timeout
-  if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    
-    if [[ -n "$response" && ${#response} -gt 10 ]]; then
-      print_success "$model validated (response time: ${duration}s)"
-      log_info "Model $model validation successful (${duration}s)"
-      
-      # Quick performance check
-      print_info "Running quick performance check..."
-      if benchmark_model_performance "$model"; then
-        log_info "Model $model performance check passed"
-      else
-        log_warn "Model $model performance check had issues, but validation passed"
-      fi
-      
-      return 0
+  # Use the improved validate_model_simple for the actual validation
+  if validate_model_simple "$model"; then
+    # Quick performance check after successful validation
+    print_info "Running quick performance check..."
+    if benchmark_model_performance "$model"; then
+      log_info "Model $model performance check passed"
+    else
+      log_warn "Model $model performance check had issues, but validation passed"
     fi
+    return 0
   fi
   
-  # Retry once
-  log_warn "Validation failed for $model, retrying..."
-  sleep 2
-  
-  if response=$(run_with_timeout 30 ollama run "$model" "$test_prompt" 2>&1 | head -n 5); then
-    if [[ -n "$response" && ${#response} -gt 10 ]]; then
-      print_success "$model validated (retry successful)"
-      return 0
-    fi
-  fi
-  
-  log_error "Validation failed for $model after retry"
   return 1
 }
 
