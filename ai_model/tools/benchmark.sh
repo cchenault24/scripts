@@ -124,6 +124,84 @@ run_with_timeout() {
   fi
 }
 
+# Unload model from memory using Ollama API
+unload_model() {
+  local model="$1"
+  local silent="${2:-0}"  # Optional: 1 for silent mode
+  
+  # Check if model is actually loaded
+  if ! ollama ps 2>/dev/null | grep -q "^${model}"; then
+    return 0  # Model not loaded, nothing to do
+  fi
+  
+  if [[ $silent -eq 0 ]]; then
+    print_info "Unloading model from memory..."
+  fi
+  
+  # Use Ollama API to unload the model by setting keep_alive to 0
+  # This is the proper way to unload a model according to Ollama docs
+  local api_response
+  api_response=$(curl -s --max-time 10 -X POST http://localhost:11434/api/generate \
+    -H "Content-Type: application/json" \
+    -d "{\"model\": \"$model\", \"prompt\": \"\", \"keep_alive\": 0}" 2>/dev/null || echo "")
+  
+  # Wait for the model to unload (Ollama needs a moment)
+  sleep 3
+  
+  # Retry if still loaded (sometimes takes a moment)
+  local retries=0
+  while [[ $retries -lt 3 ]] && ollama ps 2>/dev/null | grep -q "^${model}"; do
+    sleep 1
+    ((retries++))
+    # Try again with a minimal request
+    curl -s --max-time 5 -X POST http://localhost:11434/api/generate \
+      -H "Content-Type: application/json" \
+      -d "{\"model\": \"$model\", \"prompt\": \"\", \"keep_alive\": 0}" >/dev/null 2>&1 || true
+  done
+  
+  # Verify model is unloaded
+  if ollama ps 2>/dev/null | grep -q "^${model}"; then
+    if [[ $silent -eq 0 ]]; then
+      print_warn "Model may still be in memory"
+      print_info "You can manually unload with: ollama ps"
+    fi
+    return 1
+  else
+    if [[ $silent -eq 0 ]]; then
+      print_success "Model unloaded from memory"
+    fi
+    return 0
+  fi
+}
+
+# Unload all models from memory (cleanup function)
+unload_all_models() {
+  local loaded_models
+  loaded_models=$(ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' || echo "")
+  
+  if [[ -z "$loaded_models" ]]; then
+    return 0  # No models loaded
+  fi
+  
+  print_info "Unloading all models from memory..."
+  
+  while IFS= read -r model; do
+    if [[ -n "$model" ]]; then
+      unload_model "$model" 1  # Silent mode
+    fi
+  done <<< "$loaded_models"
+  
+  # Final check
+  sleep 2
+  local remaining
+  remaining=$(ollama ps 2>/dev/null | tail -n +2 | wc -l | xargs || echo "0")
+  if [[ $remaining -eq 0 ]]; then
+    print_success "All models unloaded"
+  else
+    print_warn "$remaining model(s) may still be in memory"
+  fi
+}
+
 # Check system resources before benchmarking
 check_system_resources() {
   local model="$1"
@@ -451,6 +529,12 @@ run_benchmark() {
   # Check system resources
   check_system_resources "$model"
   
+  # Unload all models before starting to ensure clean state and prevent memory overflow
+  print_info "Clearing memory: unloading any loaded models..."
+  unload_all_models
+  sleep 2  # Give time for cleanup
+  echo ""
+  
   # Warn about very large models before starting
   if echo "$model" | grep -qiE "70|65|80|90|100"; then
     print_warn "Large model (70B+) - requires 40-50GB+ RAM"
@@ -472,11 +556,15 @@ run_benchmark() {
   ((test_count++))
   echo -e "Test $test_count of $total_tests: Short Prompt" >&2
   echo "" >&2
+  # Unload model before test to ensure clean state
+  unload_model "$model" 1  # Silent mode
   if result=$(benchmark_model "$model" "$PROMPT_SHORT" "short"); then
     results+=("$result")
   else
     echo -e "Test failed" >&2
   fi
+  # Unload after test to free memory
+  unload_model "$model" 1  # Silent mode
   
   sleep 2
   echo "" >&2
@@ -485,11 +573,15 @@ run_benchmark() {
   ((test_count++))
   echo -e "Test $test_count of $total_tests: Medium Prompt" >&2
   echo "" >&2
+  # Unload model before test to ensure clean state
+  unload_model "$model" 1  # Silent mode
   if result=$(benchmark_model "$model" "$PROMPT_MEDIUM" "medium"); then
     results+=("$result")
   else
     echo -e "Test failed" >&2
   fi
+  # Unload after test to free memory
+  unload_model "$model" 1  # Silent mode
   
   sleep 2
   echo "" >&2
@@ -500,11 +592,15 @@ run_benchmark() {
     ((test_count++))
     echo -e "Test $test_count of $total_tests: Long Prompt" >&2
     echo "" >&2
+    # Unload model before test to ensure clean state
+    unload_model "$model" 1  # Silent mode
     if result=$(benchmark_model "$model" "$PROMPT_LONG" "long"); then
       results+=("$result")
     else
       echo -e "Test failed" >&2
     fi
+    # Unload after test to free memory
+    unload_model "$model" 1  # Silent mode
     echo "" >&2
   fi
   
@@ -522,6 +618,10 @@ run_benchmark() {
   else
     generate_benchmark_report "$model"
   fi
+  
+  # Unload model from memory to free up resources
+  echo "" >&2
+  unload_model "$model"
 }
 
 # Generate benchmark report
@@ -658,7 +758,14 @@ generate_benchmark_report() {
 
 prompt_yes_no() {
   local prompt="$1"
-  local default="${2:-n}"
+  # Safely get default value (handle unset variable with set -u)
+  # The ${2:-n} syntax works with set -u, but we check parameter count first to be extra safe
+  local default
+  if [[ $# -ge 2 ]]; then
+    default="${2:-n}"  # Use provided value or 'n' as fallback
+  else
+    default="n"
+  fi
   local choice=""
   echo -e "${YELLOW}$prompt${NC} [y/n] (default: $default): "
   read -r choice || true
@@ -669,10 +776,25 @@ prompt_yes_no() {
   esac
 }
 
+# Global variable to track current model being benchmarked
+CURRENT_BENCHMARK_MODEL=""
+
+# Cleanup function for trap
+cleanup_on_exit() {
+  if [[ -n "$CURRENT_BENCHMARK_MODEL" ]]; then
+    echo "" >&2
+    print_info "Cleaning up: unloading model..."
+    unload_model "$CURRENT_BENCHMARK_MODEL" 1  # Silent mode
+  fi
+}
+
 # Main
 main() {
   clear
   print_header "⚡ Local LLM Benchmark Tool"
+  
+  # Set up trap to cleanup on exit/interrupt
+  trap cleanup_on_exit EXIT INT TERM
   
   # Check Ollama
   if ! command -v ollama &>/dev/null; then
@@ -733,8 +855,19 @@ main() {
   
   local selected_model="${model_list[$((choice-1))]}"
   
+  # Set global variable for cleanup trap
+  CURRENT_BENCHMARK_MODEL="$selected_model"
+  
   # Run benchmark
   run_benchmark "$selected_model"
+  
+  # Clear the global variable
+  CURRENT_BENCHMARK_MODEL=""
+  
+  # Final cleanup - ensure model is unloaded
+  echo ""
+  print_info "Final cleanup: ensuring model is unloaded..."
+  unload_model "$selected_model"
   
   print_success "Benchmark complete!"
 }
