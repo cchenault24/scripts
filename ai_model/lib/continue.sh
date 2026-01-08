@@ -17,6 +17,107 @@ get_friendly_model_name() {
   esac
 }
 
+# Generate Continue.dev rules file
+generate_continue_rules() {
+  local rules_dir="$HOME/.continue/rules"
+  local rules_file="$rules_dir/global-rule.md"
+  
+  # Create rules directory if it doesn't exist
+  if ! mkdir -p "$rules_dir" 2>/dev/null; then
+    log_error "Cannot create Continue.dev rules directory: $rules_dir"
+    print_error "Failed to create Continue.dev rules directory"
+    return 1
+  fi
+  
+  if [[ ! -w "$rules_dir" ]]; then
+    log_error "Continue.dev rules directory is not writable: $rules_dir"
+    print_error "Cannot write to Continue.dev rules directory"
+    return 1
+  fi
+  
+  # Backup existing rules file if it exists
+  if [[ -f "$rules_file" ]]; then
+    local backup_file="${rules_file}.backup-$(date +%Y%m%d-%H%M%S)"
+    if cp "$rules_file" "$backup_file" 2>/dev/null; then
+      print_info "Backed up existing rules file to: $backup_file"
+      log_info "Backed up existing rules file to: $backup_file"
+    else
+      log_warn "Failed to backup existing rules file, continuing anyway"
+      print_warn "Could not backup existing rules file"
+    fi
+  fi
+  
+  # Generate rules markdown content with YAML frontmatter
+  local rules_content=$(cat <<'EOF'
+---
+description: Senior-level coding assistant rules for React, TypeScript, Redux, and Material-UI projects
+---
+Act as a senior-level coding assistant with deep expertise in React, TypeScript, Redux, and Material-UI. Provide guidance that reflects industry best practices and production-ready code quality.
+
+This project uses React, TypeScript, Redux, and Material-UI. Always provide context-aware assistance based on these technologies.
+
+Context Handling: Include project-wide context for architectural decisions and patterns. Keep context focused for specific coding tasks to balance comprehensiveness with performance.
+
+Code Review: Apply strict standards by default - flag potential issues, enforce best practices, and point out style inconsistencies. Be adaptive for quick fixes or exploratory work where appropriate. Review code with the rigor expected at senior engineer level.
+
+TypeScript: Balance type safety with practicality. Use type inference where clear, explicit types where needed. Match existing type patterns in the codebase. NEVER use `any`, `never`, or `unknown` types. Demonstrate senior-level TypeScript expertise including advanced types when appropriate.
+
+Redux: Always match the existing Redux patterns used in the codebase. Do not suggest alternative patterns. Apply best practices for state management, action creators, and selectors.
+
+Material-UI: Match the existing Material-UI version and component patterns currently used in the codebase. Do not suggest upgrades or newer approaches.
+
+Code Formatting: Always suggest proper formatting based on Prettier/ESLint rules configured in the project.
+
+Dependencies: Prefer native/built-in solutions over external dependencies when reasonable. When external dependencies are needed, match the project's existing dependency patterns. Consider long-term maintenance implications.
+
+Code Review Priority: When reviewing code, prioritize in this order: 1) Security vulnerabilities and bugs, 2) Performance implications, 3) Maintainability and readability, 4) Accessibility compliance. Identify issues a senior engineer would catch.
+
+React Components: Strongly prefer functional components with hooks. When encountering class components, suggest refactoring to functional components with proper hooks usage and optimization patterns.
+
+Error Handling: Point out missing error handling and edge cases, but don't automatically add it unless explicitly asked. Match the error handling patterns already established in the codebase. Consider production-level error scenarios.
+
+Refactoring: Briefly mention improvement opportunities while staying focused on the main question. Suggest improvements for code quality and bugs, but not for style or preference changes. Think about scalability and maintainability.
+
+Verbosity: Be concise for simple tasks and detailed for complex architectural decisions. Adapt explanation depth based on the complexity of the request. Communicate with the clarity expected between senior engineers.
+
+Testing: Assume testing is handled separately. Do not mention testing considerations unless explicitly asked.
+
+Code Quality: Provide production-ready code that considers edge cases, performance, accessibility, and long-term maintainability. Avoid overly clever solutions in favor of clear, maintainable code.
+EOF
+  )
+  
+  # Write rules file atomically if available, otherwise regular write
+  if command -v atomic_write &>/dev/null; then
+    if atomic_write "$rules_file" "$rules_content"; then
+      print_success "Continue.dev rules file generated: $rules_file"
+      log_info "Continue.dev rules file written to $rules_file"
+    else
+      log_error "Failed to write Continue.dev rules file atomically"
+      print_error "Failed to generate Continue.dev rules file"
+      return 1
+    fi
+  else
+    # Fallback: regular write
+    if echo "$rules_content" > "$rules_file" 2>/dev/null; then
+      print_success "Continue.dev rules file generated: $rules_file"
+      log_info "Continue.dev rules file written to $rules_file"
+    else
+      log_error "Failed to write Continue.dev rules file"
+      print_error "Failed to generate Continue.dev rules file"
+      return 1
+    fi
+  fi
+  
+  # Validate rules file was created and is readable
+  if [[ ! -f "$rules_file" ]] || [[ ! -r "$rules_file" ]]; then
+    log_error "Continue.dev rules file validation failed"
+    print_error "Rules file was not created or is not readable"
+    return 1
+  fi
+  
+  return 0
+}
+
 # Generate Continue.dev config
 generate_continue_config() {
   print_header "📝 Generating Continue.dev Configuration"
@@ -323,6 +424,12 @@ EOF
     fi
   fi
   
+  # Generate rules file
+  if ! generate_continue_rules; then
+    log_warn "Failed to generate Continue.dev rules file, but config was created successfully"
+    print_warn "Rules file generation failed, but config was created"
+  fi
+  
   # Validate config file was created and is readable
   if [[ ! -f "$config_file" ]] || [[ ! -r "$config_file" ]]; then
     log_error "Continue.dev config file validation failed"
@@ -584,6 +691,12 @@ EOF
   echo "$config_yaml" > "$config_file"
   print_success "Continue.dev config updated: $config_file"
   log_info "Continue.dev config updated with models: ${selected_models[*]}"
+  
+  # Generate rules file
+  if ! generate_continue_rules; then
+    log_warn "Failed to generate Continue.dev rules file, but config was created successfully"
+    print_warn "Rules file generation failed, but config was created"
+  fi
   
   return 0
 }
