@@ -14,7 +14,7 @@ This setup provides a seamless "zero to productive" local AI coding experience i
 
 - **Hardware-Aware Auto-Tuning**: Automatically configures models based on your system's RAM tier
 - **Approved Models Only**: Curated list of trusted open-weight models (no DeepSeek)
-- **Continue.dev Integration**: Auto-generated profiles for coding, review, documentation, and deep analysis
+- **Continue.dev Integration**: Auto-generated role-based configuration for agent planning, chat, edit, autocomplete, and embeddings
 - **VS Code Optimized**: Settings, extensions, and prompts tailored for your stack
 - **Production-Grade**: Idempotent, resumable, with comprehensive error handling
 - **Fully Local**: No cloud APIs, no telemetry, works offline after setup
@@ -46,7 +46,7 @@ This setup provides a seamless "zero to productive" local AI coding experience i
    - Open VS Code
    - Install the [Continue.dev extension](https://marketplace.visualstudio.com/items?itemName=Continue.continue)
    - Restart VS Code
-   - Continue.dev will automatically use the generated config at `~/.continue/config.json`
+   - Continue.dev will automatically use the generated config at `~/.continue/config.yaml`
 
 4. **Start coding with AI:**
    - Use `Cmd+L` to open Continue.dev chat
@@ -59,28 +59,28 @@ The setup automatically detects your hardware and classifies it into tiers:
 
 ### Tier S (≥49GB RAM)
 - **All models available**
-- **Recommended**: devstral:27b + codestral (or llama3.1:70b for maximum quality)
-- Keep-alive (1h) - models unload after 1 hour of inactivity
+- **Recommended**: llama3.3:70b or llama3.1:70b + codestral:22b
+- Keep-alive (24h) - models unload after 24 hours of inactivity
 - High context window (32K tokens)
 - Best for: Complex refactoring, architecture work, multi-model workflows, agent planning
 
 ### Tier A (33-48GB RAM)
-- **Excludes**: llama3.1:70b
-- **Recommended**: devstral:27b (or gpt-oss:20b) + codestral
-- Keep-alive (1h) - models unload after 1 hour of inactivity
+- **Excludes**: llama3.1:70b, llama3.3:70b
+- **Recommended**: codestral:22b + phi4:14b or granite-code:20b
+- Keep-alive (12h) - models unload after 12 hours of inactivity
 - Medium context window (16K tokens)
 - Best for: General development, code review, complex coding tasks, agent planning
 
 ### Tier B (17-32GB RAM)
-- **Excludes**: llama3.1:70b, devstral:27b, gpt-oss:20b
-- **Recommended**: llama3.1:8b
+- **Excludes**: llama3.1:70b, llama3.3:70b, codestral:22b
+- **Recommended**: granite-code:20b or starcoder2:15b + llama3.1:8b
 - Conservative keep-alive (5m)
 - Smaller context window (8K tokens)
 - Best for: Lightweight development, autocomplete
 
 ### Tier C (<17GB RAM)
-- **Only**: llama3.1:8b
-- **Recommended**: llama3.1:8b
+- **Only**: Models 8B and below (llama3.1:8b, codegemma:7b, starcoder2:7b, granite-code:8b, starcoder2:3b, llama3.2:3b)
+- **Recommended**: llama3.1:8b or starcoder2:3b
 - Minimal keep-alive (5m)
 - Small context window (4K tokens)
 - Best for: Simple edits, fast autocomplete
@@ -93,96 +93,198 @@ All models are automatically optimized by Ollama with optimal quantization (Q4_K
 
 #### Agent Plan / Chat / Edit Models (Best for coding tasks)
 
-1. **devstral:27b** (Tier A/S - Excellent for agent planning)
-   - Excellent for agent planning and reasoning tasks
-   - ~14GB RAM (Q4_K_M quantized)
-   - Strong coding capabilities with good reasoning
+1. **llama3.3:70b** (Tier S only - Highest quality)
+   - Similar to Llama 3.1 405B, highest quality for complex refactoring
+   - ~35GB RAM (Q4_K_M quantized)
+   - Best for multi-file refactoring and deep analysis
 
-2. **gpt-oss:20b** (Tier A/S - Strong coding)
-   - Strong coding capabilities with good balance
-   - ~10GB RAM (Q4_K_M quantized)
-   - Good alternative for coding tasks
-
-3. **codestral** (Recommended for Autocomplete and Secondary)
-   - Excellent code generation and autocomplete capabilities
-   - ~5GB RAM (varies by quantization)
-   - Best for autocomplete, complex coding tasks, and code review
-   - Recommended by Continue.dev for autocomplete role
-
-4. **llama3.1:70b** (Tier S only - Highest quality)
+2. **llama3.1:70b** (Tier S only - Highest quality)
    - Highest quality for complex refactoring and architecture
    - ~35GB RAM (Q4_K_M quantized)
    - Best for multi-file refactoring and deep analysis
 
-#### Autocomplete Models (Fast, lightweight)
+3. **codestral:22b** (Tier A/S - Excellent code generation)
+   - Excellent code generation and reasoning
+   - ~11GB RAM (Q4_K_M quantized)
+   - Strong coding capabilities with good balance
 
-5. **llama3.1:8b** (Fast general-purpose)
+4. **granite-code:20b** (Tier A/B/S - IBM Granite code model)
+   - IBM Granite code model with strong coding capabilities
+   - ~10GB RAM (Q4_K_M quantized)
+   - Good alternative for coding tasks
+
+5. **starcoder2:15b** (Tier A/B/S - StarCoder2 code model)
+   - StarCoder2 code model with good performance
+   - ~7.5GB RAM (Q4_K_M quantized)
+   - Solid coding capabilities
+
+6. **phi4:14b** (Tier A/B/S - State-of-the-art open model)
+   - State-of-the-art open model with excellent reasoning
+   - ~7GB RAM (Q4_K_M quantized)
+   - Strong for agent planning and reasoning tasks
+
+7. **llama3.1:8b** (All tiers - Fast general-purpose)
    - Fast, general-purpose coding assistant
    - ~4.2GB RAM (Q5_K_M quantized)
    - Good TypeScript support
    - Best for autocomplete and quick edits
 
+8. **codegemma:7b** (All tiers - CodeGemma code model)
+   - CodeGemma code model for fast coding tasks
+   - ~3.5GB RAM (Q4_K_M quantized)
+   - Good for autocomplete and quick edits
+
+#### Autocomplete Models (Fast, lightweight)
+
+1. **codestral:22b** (Tier A/S - Designed for code generation)
+   - Excellent code generation and autocomplete capabilities
+   - ~11GB RAM (Q4_K_M quantized)
+   - Best for autocomplete, complex coding tasks, and code review
+   - Recommended by Continue.dev for autocomplete role
+
+2. **starcoder2:7b** (All tiers - StarCoder2 for autocomplete)
+   - StarCoder2 optimized for autocomplete
+   - ~3.5GB RAM (Q4_K_M quantized)
+   - Fast autocomplete suggestions
+
+3. **codegemma:7b** (All tiers - CodeGemma for autocomplete)
+   - CodeGemma optimized for autocomplete
+   - ~3.5GB RAM (Q4_K_M quantized)
+   - Fast code suggestions
+
+4. **granite-code:8b** (All tiers - IBM Granite code model)
+   - IBM Granite code model for autocomplete
+   - ~4GB RAM (Q4_K_M quantized)
+   - Good autocomplete performance
+
+5. **llama3.1:8b** (All tiers - Fast general-purpose)
+   - Fast, general-purpose coding assistant
+   - ~4.2GB RAM (Q5_K_M quantized)
+   - Good TypeScript support
+   - Best for autocomplete and quick edits
+
+6. **starcoder2:3b** (All tiers - Small StarCoder2)
+   - Small StarCoder2 for very fast autocomplete
+   - ~1.5GB RAM (Q4_K_M quantized)
+   - Fastest autocomplete option
+
+7. **llama3.2:3b** (All tiers - Small and fast)
+   - Small and fast for autocomplete
+   - ~1.5GB RAM (Q4_K_M quantized)
+   - Very fast suggestions
+
+8. **phi4:14b** (Tier A/B/S - State-of-the-art open model)
+   - State-of-the-art open model
+   - ~7GB RAM (Q4_K_M quantized)
+   - Good for autocomplete with higher quality
+
 #### Embedding Models (For code indexing)
 
-6. **nomic-embed-text** (Best open embedding)
+1. **nomic-embed-text** (Best open embedding)
    - Best open embedding model for code indexing
    - ~0.3GB RAM
+   - Large token context window
    - Automatically installed for Continue.dev code indexing
+
+2. **mxbai-embed-large** (State-of-the-art large embedding)
+   - State-of-the-art large embedding from mixedbread.ai
+   - ~0.2GB RAM
+   - Excellent for code indexing
+
+3. **snowflake-arctic-embed2** (Frontier embedding)
+   - Frontier embedding with multilingual support
+   - ~0.3GB RAM
+   - Strong multilingual capabilities
+
+4. **granite-embedding** (IBM Granite, multilingual)
+   - IBM Granite embedding with multilingual support
+   - ~0.17GB RAM
+   - Good multilingual performance
+
+5. **all-minilm** (Very small, sentence-level)
+   - Very small embedding model
+   - ~0.02GB RAM
+   - Fast but limited context
 
 #### Rerank Models (For search relevance)
 
-7. **zerank-1** (Best open reranker)
-   - Best open reranker for search relevance
-   - ~0.4GB RAM
+Currently, no rerank models are included in the approved list. Rerank functionality can be added in the future as new open rerank models become available.
 
-8. **zerank-1-small** (Smaller reranker)
-   - Smaller reranker, faster processing
-   - ~0.2GB RAM
+#### Next Edit Models (For predicting the next edit)
 
-#### Next Edit Model
+1. **llama3.3:70b** (Tier S only - Similar to Llama 3.1 405B)
+   - Best for next edit predictions on Tier S systems
+   - ~35GB RAM (Q4_K_M quantized)
 
-15. **instinct** (Best open model for next edit)
-    - Best open model for next edit predictions
-    - ~8GB RAM (estimated)
+2. **granite-code:20b** (Tier A/B/S - IBM Granite code model)
+   - IBM Granite code model for next edit
+   - ~10GB RAM (Q4_K_M quantized)
+
+3. **starcoder2:15b** (Tier A/B/S - StarCoder2 code model)
+   - StarCoder2 code model for next edit
+   - ~7.5GB RAM (Q4_K_M quantized)
+
+4. **phi4:14b** (Tier A/B/S - State-of-the-art open model)
+   - State-of-the-art open model for next edit
+   - ~7GB RAM (Q4_K_M quantized)
+
+5. **codestral:22b** (Tier A/S - Code generation)
+   - Excellent for next edit predictions
+   - ~11GB RAM (Q4_K_M quantized)
+
+6. **llama3.1:8b** (All tiers - Fast general-purpose)
+   - Fast general-purpose for next edit
+   - ~4.2GB RAM (Q5_K_M quantized)
+
+7. **codegemma:7b** (All tiers - CodeGemma code model)
+   - CodeGemma code model for next edit
+   - ~3.5GB RAM (Q4_K_M quantized)
+
+8. **starcoder2:7b** (All tiers - StarCoder2 code model)
+   - StarCoder2 code model for next edit
+   - ~3.5GB RAM (Q4_K_M quantized)
 
 ## Continue.dev Setup and Usage
 
 ### Configuration
 
-The setup script automatically generates a Continue.dev config at `~/.continue/config.json` with four profiles:
+The setup script automatically generates a Continue.dev config at `~/.continue/config.yaml` with role-based model configuration:
 
-1. **Coding Assistant** (Primary)
-   - Model: devstral:27b or your selected primary
-   - Temperature: 0.7
-   - Best for: General development, code generation
+The configuration organizes models by their roles:
 
-2. **Code Review**
-   - Model: llama3.1:8b (or alternative)
-   - Temperature: 0.3
-   - Best for: Code review, correctness checks
+1. **Agent Plan / Chat / Edit** (Primary models)
+   - Used for: Complex coding tasks, refactoring, agent planning, chat, and code editing
+   - Models: Selected from Agent Plan/Chat/Edit models based on your hardware tier
+   - Temperature: 0.7 (role-specific tuning)
+   - Best for: General development, code generation, complex refactoring
 
-3. **Documentation**
-   - Model: llama3.1:8b
-   - Temperature: 0.5
-   - Best for: Generating documentation
+2. **Autocomplete** (Fast, lightweight models)
+   - Used for: Real-time code suggestions as you type
+   - Models: Selected from Autocomplete models (typically smaller, faster models)
+   - Optimized for: Fast response times and low latency
+   - Best for: Tab autocomplete, inline suggestions
 
-4. **Deep Analysis**
-   - Model: devstral:27b or llama3.1:70b
-   - Temperature: 0.6
-   - Best for: Complex refactoring, architecture
+3. **Embed** (Code indexing)
+   - Used for: Semantic code search and codebase understanding
+   - Model: nomic-embed-text (automatically installed)
+   - Best for: Code indexing, semantic search with `@Codebase` in Continue.dev
+
+4. **Next Edit** (Predicting next edits)
+   - Used for: Predicting the next code edit
+   - Models: Selected from Next Edit models based on your hardware tier
+   - Best for: Intelligent code completion and edit prediction
 
 ### Using Continue.dev
 
 - **Chat**: `Cmd+L` - Ask questions, get explanations
 - **Inline Edit**: `Cmd+K` - Select code and request changes
-- **Tab Autocomplete**: Automatic suggestions as you type
-- **Context**: Continue.dev automatically indexes your workspace
+- **Tab Autocomplete**: Automatic suggestions as you type (uses Autocomplete role models)
+- **Context**: Continue.dev automatically indexes your workspace (uses Embed role model)
+- **Codebase Search**: Use `@Codebase` in chat for semantic search across your codebase
 
-### Switching Profiles
+### Model Roles
 
-In Continue.dev chat, you can switch between profiles:
-- Use the profile selector in the chat interface
-- Or mention the profile name in your prompt: "Using Code Review profile, review this code..."
+Models are automatically assigned to roles based on their capabilities. A single model can serve multiple roles (e.g., `llama3.1:8b` can be used for both Agent Plan/Chat/Edit and Autocomplete), which saves RAM and improves efficiency.
 
 ## VS Code Integration
 
@@ -324,7 +426,7 @@ Quantization benefits:
 - **Q4_K_M**: 4-bit quantization, ~25% faster, minimal quality loss (used for larger models)
 - **Q5_K_M**: 5-bit quantization, ~15% faster, excellent quality retention (used for smaller models)
 
-The script uses standard model names (e.g., `devstral:27b`) and Ollama automatically downloads the best quantized variant for your system.
+The script uses standard model names (e.g., `llama3.1:70b`, `codestral:22b`) and Ollama automatically downloads the best quantized variant for your system.
 
 #### Performance Verification
 
@@ -347,26 +449,27 @@ Models are automatically tuned based on your hardware tier. Parameters include:
 
 ### Manual Tuning
 
-To adjust tuning, edit `~/.continue/config.json`:
+To adjust tuning, edit `~/.continue/config.yaml`:
 
-```json
-{
-  "models": [
-    {
-      "title": "Coding Assistant",
-      "contextLength": 16384,  // Adjust based on needs
-      "temperature": 0.7,       // Lower = more focused
-      ...
-    }
-  ]
-}
+```yaml
+models:
+  - name: Llama 3.1 8B
+    provider: ollama
+    model: llama3.1:8b
+    apiBase: http://localhost:11434
+    contextLength: 16384  # Adjust based on needs
+    temperature: 0.7       # Lower = more focused
+    roles:
+      - chat
+      - edit
+      - apply
 ```
 
 ### Performance Tips
 
 1. **Metal GPU Acceleration**: Automatically enabled on Apple Silicon - verify with `curl http://localhost:11434/api/ps`
 2. **Quantized Models**: Use Q4_K_M or Q5_K_M variants for best performance (automatically selected)
-3. **Keep-alive settings**: Models stay loaded for 1h (Tier S/A) or 5m (Tier B/C) after use for fast responses, then automatically unload
+3. **Keep-alive settings**: Models stay loaded for 24h (Tier S), 12h (Tier A), or 5m (Tier B/C) after use for fast responses, then automatically unload
 4. **Smaller context** for faster responses
 5. **Multiple models** - use smaller for autocomplete, larger for complex tasks
 6. **Monitor memory** - use `ollama ps` or `./tools/diagnose.sh` to see loaded models
@@ -393,10 +496,10 @@ The setup includes advanced optimizations for enhanced performance and resource 
 
 Intelligent model routing automatically selects the optimal model for each task type:
 
-- **Autocomplete/Simple tasks**: Routes to smallest, fastest models (llama3.1:8b)
-- **Coding/Generation**: Routes to balanced models (codestral, llama3.1:8b)
-- **Refactoring/Complex tasks**: Routes to largest available models (llama3.1:70b, devstral:27b, codestral)
-- **Code Review/Testing**: Routes to models with strong reasoning capabilities
+- **Autocomplete/Simple tasks**: Routes to smallest, fastest models (llama3.1:8b, starcoder2:3b)
+- **Coding/Generation**: Routes to balanced models (codestral:22b, llama3.1:8b, granite-code:20b)
+- **Refactoring/Complex tasks**: Routes to largest available models (llama3.3:70b, llama3.1:70b, codestral:22b)
+- **Code Review/Testing**: Routes to models with strong reasoning capabilities (phi4:14b, codestral:22b)
 
 **Usage:**
 ```bash
@@ -418,10 +521,10 @@ Automatically tests and optimizes GPU layer allocation for maximum performance:
 **Usage:**
 ```bash
 # Benchmark specific GPU layer configuration
-benchmark_gpu_layers "devstral:27b" "40"
+benchmark_gpu_layers "codestral:22b" "40"
 
 # Find optimal GPU layers for a model
-optimize_gpu_layers "devstral:27b"
+optimize_gpu_layers "codestral:22b"
 ```
 
 #### Smart Request Queuing
@@ -457,10 +560,10 @@ Continuous performance monitoring and metrics tracking:
 **Usage:**
 ```bash
 # Track performance for a request
-track_performance "devstral:27b" "coding" 2.5 500 1
+track_performance "codestral:22b" "coding" 2.5 500 1
 
 # Get performance statistics
-get_performance_stats "devstral:27b" "coding"
+get_performance_stats "codestral:22b" "coding"
 
 # Generate performance report
 generate_performance_report
@@ -615,16 +718,17 @@ ollama serve
 
 1. **Verify config exists:**
    ```bash
-   cat ~/.continue/config.json
+   cat ~/.continue/config.yaml
    ```
 
-2. **Check JSON validity:**
+2. **Check YAML validity:**
    ```bash
-   jq empty ~/.continue/config.json
+   # Basic YAML structure check
+   grep -q "models:" ~/.continue/config.yaml && echo "Config structure OK" || echo "Config may be invalid"
    ```
 
 3. **Verify Ollama endpoint:**
-   - Config should have: `"apiBase": "http://localhost:11434"`
+   - Config should have: `apiBase: http://localhost:11434` (or `http://localhost:11435` if using proxy)
    - Test: `curl http://localhost:11434/api/tags`
 
 4. **Restart VS Code**
@@ -768,7 +872,7 @@ ollama serve
 ### Data Storage
 
 - **Models**: Stored in `~/.ollama/models/`
-- **Config**: `~/.continue/config.json`
+- **Config**: `~/.continue/config.yaml`
 - **State**: `~/.local-llm-setup/`
 - **Logs**: `~/.local-llm-setup/*.log`
 
@@ -778,43 +882,38 @@ All data stays on your local machine.
 
 ### Custom Model Configuration
 
-Edit `~/.continue/config.json` to add custom models or adjust parameters:
+Edit `~/.continue/config.yaml` to add custom models or adjust parameters:
 
-```json
-{
-  "models": [
-    {
-      "title": "Custom Model",
-      "provider": "ollama",
-      "model": "your-model:tag",
-      "apiBase": "http://localhost:11434",
-      "contextLength": 16384,
-      "temperature": 0.7,
-      "systemMessage": "Your custom system prompt"
-    }
-  ]
-}
+```yaml
+models:
+  - name: Custom Model
+    provider: ollama
+    model: your-model:tag
+    apiBase: http://localhost:11434
+    contextLength: 16384
+    temperature: 0.7
+    roles:
+      - chat
+      - edit
+      - apply
 ```
 
 ### Workspace-Specific Configs
 
-Continue.dev supports workspace-specific configs. Create `.continue/config.json` in your workspace root to override global config.
+Continue.dev supports workspace-specific configs. Create `.continue/config.yaml` in your workspace root to override global config.
 
 ### Local Embeddings
 
 For better codebase understanding, you can enable local embeddings in Continue.dev config:
 
-```json
-{
-  "embeddingsProvider": {
-    "provider": "ollama",
-    "model": "nomic-embed-text",
-    "apiBase": "http://localhost:11434"
-  }
-}
+```yaml
+embeddingsProvider:
+  provider: ollama
+  model: nomic-embed-text
+  apiBase: http://localhost:11434
 ```
 
-Note: This uses more resources but provides better semantic search.
+Note: This uses more resources but provides better semantic search. The setup script automatically configures embeddings if you select an embedding model during installation.
 
 ## Getting Help
 
@@ -857,7 +956,7 @@ ai_model/
 │   ├── update.sh                # Update Ollama and models
 │   └── uninstall.sh             # Cleanup and removal
 ├── .continue/
-│   └── config.json              # Continue.dev configuration template
+│   └── config.yaml              # Continue.dev configuration template (generated)
 ├── vscode/
 │   ├── settings.json            # VS Code settings snippet
 │   └── extensions.json          # Extension recommendations
