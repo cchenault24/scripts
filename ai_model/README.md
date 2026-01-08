@@ -355,6 +355,163 @@ The script is idempotent - safe to re-run. It will:
 - Offer to resume or start fresh
 - Preserve your customizations where possible
 
+### Advanced Optimizations
+
+The setup includes advanced optimizations for enhanced performance and resource management:
+
+#### Multi-Model Orchestration
+
+Intelligent model routing automatically selects the optimal model for each task type:
+
+- **Autocomplete/Simple tasks**: Routes to smallest, fastest models (qwen2.5-coder:7b, llama3.1:8b)
+- **Coding/Generation**: Routes to balanced models (qwen2.5-coder:14b, codestral:22b)
+- **Refactoring/Complex tasks**: Routes to largest available models (llama3.1:70b, codestral:22b)
+- **Code Review/Testing**: Routes to models with strong reasoning capabilities
+
+**Usage:**
+```bash
+# Route a task to the optimal model
+route_task_to_model "autocomplete" 0 "$HARDWARE_TIER"
+
+# Execute a task with automatic routing
+execute_task_with_routing "refactoring" "Refactor this code..." "coding"
+```
+
+#### GPU Layer Optimization
+
+Automatically tests and optimizes GPU layer allocation for maximum performance:
+
+- Benchmarks different GPU layer configurations
+- Finds optimal balance between GPU and CPU layers
+- Stores performance metrics for future reference
+
+**Usage:**
+```bash
+# Benchmark specific GPU layer configuration
+benchmark_gpu_layers "qwen2.5-coder:14b" "40"
+
+# Find optimal GPU layers for a model
+optimize_gpu_layers "qwen2.5-coder:14b"
+```
+
+#### Smart Request Queuing
+
+Intelligent request queuing system with prioritization and batch processing:
+
+- Priority-based queue (1 = highest, 10 = lowest)
+- Automatic batch processing for efficiency
+- Prevents request overload
+- Supports task type and role routing
+
+**Usage:**
+```bash
+# Queue a request
+queue_request "Write a function..." "coding" 5 "coding"
+
+# Process queued requests
+process_request_queue 5 10  # Process 5 requests, wait up to 10s for batch
+
+# Check queue status
+get_queue_status
+```
+
+#### Performance Profiling
+
+Continuous performance monitoring and metrics tracking:
+
+- Tracks response times, tokens/second, success rates
+- Model-specific and task-specific metrics
+- Automatic performance report generation
+- Historical performance data
+
+**Usage:**
+```bash
+# Track performance for a request
+track_performance "qwen2.5-coder:14b" "coding" 2.5 500 1
+
+# Get performance statistics
+get_performance_stats "qwen2.5-coder:14b" "coding"
+
+# Generate performance report
+generate_performance_report
+```
+
+**Performance Metrics Storage:**
+- Metrics stored in: `~/.local-llm-setup/performance_metrics.json`
+- Reports saved to: `~/.local-llm-setup/performance_report.txt`
+
+#### Integration
+
+Optimizations work seamlessly together:
+
+- **Smart Loading** + **Orchestration**: Automatically loads optimal models for tasks
+- **Memory Monitoring** + **Queuing**: Prevents memory pressure by queuing requests
+- **Dynamic Context** + **Routing**: Adjusts context based on task type and selected model
+- **Adaptive Temperature** + **Profiling**: Tracks which temperature settings perform best
+
+All optimization functions are automatically available when you source `lib/optimization.sh` (which is done automatically by `setup-local-llm.sh`).
+
+### Enabling Optimizations with Continue.dev
+
+To get optimizations working automatically with Continue.dev:
+
+#### Quick Start (Recommended)
+
+1. **Start optimization services:**
+   ```bash
+   cd ai_model
+   ./tools/start-optimizations.sh
+   ```
+
+2. **Regenerate Continue.dev config:**
+   ```bash
+   ./setup-local-llm.sh
+   ```
+   The config will automatically detect and use the proxy if running.
+
+3. **Restart VS Code** completely (Cmd+Q, then reopen)
+
+#### What Gets Enabled
+
+- **Automatic Model Routing**: Requests are routed to optimal models based on task type
+- **Smart Request Queuing**: Requests are queued and processed efficiently
+- **Memory Pressure Monitoring**: Automatically unloads models when memory is low
+- **Performance Tracking**: All requests are tracked for optimization insights
+
+#### Management
+
+```bash
+# Check status
+./tools/status-optimizations.sh
+
+# Stop services
+./tools/stop-optimizations.sh
+
+# Start specific services
+./tools/start-optimizations.sh --proxy    # Just proxy
+./tools/start-optimizations.sh --monitor # Just memory monitor
+./tools/start-optimizations.sh --queue   # Just queue processor
+```
+
+#### Manual Proxy Setup
+
+If you prefer manual control:
+
+1. **Start proxy:**
+   ```bash
+   ./tools/ollama-proxy.sh
+   ```
+
+2. **Update Continue.dev config:**
+   Edit `~/.continue/config.yaml` and change `apiBase` to:
+   ```yaml
+   apiBase: http://localhost:11435  # Changed from 11434
+   ```
+
+3. **Restart VS Code**
+
+See `docs/PHASE2_INTEGRATION.md` for detailed documentation.
+
 ## Troubleshooting
 
 ### Ollama Service Not Running

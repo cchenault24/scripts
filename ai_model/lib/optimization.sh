@@ -1,12 +1,16 @@
 #!/bin/bash
 #
-# optimization.sh - Phase 1 optimization functions for setup-local-llm.sh
+# optimization.sh - Optimization functions for setup-local-llm.sh
 #
 # Implements:
 # - Smart model loading/unloading with usage tracking
 # - Memory pressure detection and auto-unload
 # - Dynamic context window sizing
 # - Adaptive temperature calculation
+# - Multi-model orchestration (model router/dispatcher)
+# - GPU layer optimization and testing
+# - Smart request queuing with prioritization
+# - Performance profiling and monitoring
 #
 # Depends on: constants.sh, logger.sh, ui.sh, hardware.sh, ollama.sh, models.sh
 
@@ -499,4 +503,648 @@ tune_model_optimized() {
   "optimized": true
 }
 EOF
+}
+
+# ============================================================================
+# Multi-Model Orchestration
+# ============================================================================
+
+# Model router: Select optimal model for a given task
+route_task_to_model() {
+  local task_type="${1:-general}"  # Task type: autocomplete, coding, refactoring, analysis, etc.
+  local prompt_length="${2:-0}"  # Estimated prompt length in tokens
+  local tier="${3:-$HARDWARE_TIER}"  # Hardware tier (defaults to detected tier)
+  
+  # Get installed models
+  local installed_models
+  installed_models=$(get_installed_models)
+  
+  if [[ -z "$installed_models" ]]; then
+    log_error "No models installed for routing"
+    echo ""
+    return 1
+  fi
+  
+  # Model selection strategy based on task type
+  local selected_model=""
+  
+  case "$task_type" in
+    autocomplete|simple|quick)
+      # Use smallest, fastest model for autocomplete
+      # Priority: qwen2.5-coder:7b > llama3.1:8b > others
+      if echo "$installed_models" | grep -q "^qwen2.5-coder:7b$"; then
+        selected_model="qwen2.5-coder:7b"
+      elif echo "$installed_models" | grep -q "^llama3.1:8b$"; then
+        selected_model="llama3.1:8b"
+      else
+        # Fallback: smallest available model
+        selected_model=$(echo "$installed_models" | head -n 1)
+      fi
+      ;;
+    coding|generation|moderate)
+      # Use balanced model for coding tasks
+      # Priority: qwen2.5-coder:14b > codestral:22b > llama3.1:8b
+      if echo "$installed_models" | grep -q "^qwen2.5-coder:14b$"; then
+        selected_model="qwen2.5-coder:14b"
+      elif echo "$installed_models" | grep -q "^codestral:22b$"; then
+        selected_model="codestral:22b"
+      elif echo "$installed_models" | grep -q "^llama3.1:8b$"; then
+        selected_model="llama3.1:8b"
+      else
+        selected_model=$(echo "$installed_models" | head -n 1)
+      fi
+      ;;
+    refactoring|complex|multi-file|analysis)
+      # Use largest available model for complex tasks
+      # Priority: llama3.1:70b > codestral:22b > qwen2.5-coder:14b
+      if echo "$installed_models" | grep -q "^llama3.1:70b$" && [[ "$tier" == "S" ]]; then
+        selected_model="llama3.1:70b"
+      elif echo "$installed_models" | grep -q "^codestral:22b$"; then
+        selected_model="codestral:22b"
+      elif echo "$installed_models" | grep -q "^qwen2.5-coder:14b$"; then
+        selected_model="qwen2.5-coder:14b"
+      else
+        # Fallback: largest available model
+        selected_model=$(echo "$installed_models" | tail -n 1)
+      fi
+      ;;
+    code-review|testing|debugging)
+      # Use balanced model with good reasoning
+      # Priority: codestral:22b > qwen2.5-coder:14b > llama3.1:8b
+      if echo "$installed_models" | grep -q "^codestral:22b$"; then
+        selected_model="codestral:22b"
+      elif echo "$installed_models" | grep -q "^qwen2.5-coder:14b$"; then
+        selected_model="qwen2.5-coder:14b"
+      elif echo "$installed_models" | grep -q "^llama3.1:8b$"; then
+        selected_model="llama3.1:8b"
+      else
+        selected_model=$(echo "$installed_models" | head -n 1)
+      fi
+      ;;
+    *)
+      # Default: use most frequently used model or balanced model
+      local most_used=""
+      local max_freq=0
+      while IFS= read -r model; do
+        if [[ -n "$model" ]]; then
+          local freq
+          freq=$(get_model_usage_frequency "$model")
+          if [[ $freq -gt $max_freq ]]; then
+            max_freq=$freq
+            most_used="$model"
+          fi
+        fi
+      done <<< "$installed_models"
+      
+      if [[ -n "$most_used" ]]; then
+        selected_model="$most_used"
+      else
+        # Fallback: use first available model
+        selected_model=$(echo "$installed_models" | head -n 1)
+      fi
+      ;;
+  esac
+  
+  if [[ -z "$selected_model" ]]; then
+    log_error "Failed to route task to model"
+    echo ""
+    return 1
+  fi
+  
+  log_info "Routed task type '$task_type' to model: $selected_model"
+  echo "$selected_model"
+}
+
+# Execute task with optimal model selection
+execute_task_with_routing() {
+  local task_type="${1:-general}"
+  local prompt="${2:-}"
+  local role="${3:-coding}"
+  
+  if [[ -z "$prompt" ]]; then
+    log_error "No prompt provided for task execution"
+    return 1
+  fi
+  
+  # Route to optimal model
+  local model
+  model=$(route_task_to_model "$task_type" 0)
+  
+  if [[ -z "$model" ]]; then
+    log_error "Failed to select model for task"
+    return 1
+  fi
+  
+  # Ensure model is loaded
+  if ! smart_load_model "$model" 0; then
+    log_warn "Model $model failed to load, attempting anyway"
+  fi
+  
+  # Get optimized parameters
+  local tier="${HARDWARE_TIER:-B}"
+  local params
+  params=$(tune_model_optimized "$model" "$tier" "$role" "$task_type" 0)
+  
+  # Extract parameters (simplified - would need proper JSON parsing in production)
+  local context_size max_tokens temperature
+  if command -v jq &>/dev/null; then
+    context_size=$(echo "$params" | jq -r '.context_size // 8192')
+    max_tokens=$(echo "$params" | jq -r '.max_tokens // 2048')
+    temperature=$(echo "$params" | jq -r '.temperature // 0.7')
+  else
+    context_size=$(echo "$params" | grep -o '"context_size": [0-9]*' | grep -o '[0-9]*' || echo "8192")
+    max_tokens=$(echo "$params" | grep -o '"max_tokens": [0-9]*' | grep -o '[0-9]*' || echo "2048")
+    temperature=$(echo "$params" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.7")
+  fi
+  
+  # Track usage
+  track_model_usage "$model"
+  
+  # Execute via Ollama API
+  log_info "Executing task with model $model (task_type: $task_type)"
+  
+  local response
+  response=$(curl -s --max-time 300 -X POST http://localhost:11434/api/generate \
+    -H "Content-Type: application/json" \
+    -d "{\"model\": \"$model\", \"prompt\": \"$prompt\", \"stream\": false, \"options\": {\"num_ctx\": $context_size, \"num_predict\": $max_tokens, \"temperature\": $temperature}}" 2>/dev/null || echo "")
+  
+  if [[ -n "$response" ]]; then
+    # Extract response text (simplified - would need proper JSON parsing)
+    if command -v jq &>/dev/null; then
+      echo "$response" | jq -r '.response // .' 2>/dev/null || echo "$response"
+    else
+      echo "$response"
+    fi
+    return 0
+  else
+    log_error "Task execution failed"
+    return 1
+  fi
+}
+
+# ============================================================================
+# GPU Layer Optimization
+# ============================================================================
+
+# Performance metrics storage
+PERFORMANCE_METRICS_FILE="$STATE_DIR/performance_metrics.json"
+
+# Initialize performance metrics tracking
+init_performance_metrics() {
+  if [[ ! -f "$PERFORMANCE_METRICS_FILE" ]]; then
+    mkdir -p "$STATE_DIR"
+    echo '{}' > "$PERFORMANCE_METRICS_FILE"
+    log_info "Initialized performance metrics tracking"
+  fi
+}
+
+# Benchmark model with specific GPU layer configuration
+benchmark_gpu_layers() {
+  local model="$1"
+  local gpu_layers="${2:-}"  # Number of GPU layers to test (empty = auto)
+  local test_prompt="${3:-Write a simple TypeScript function that adds two numbers.}"
+  
+  if [[ -z "$model" ]]; then
+    log_error "Model name required for GPU layer benchmarking"
+    return 1
+  fi
+  
+  print_info "Benchmarking GPU layers for $model..."
+  log_info "GPU layer benchmark: model=$model, gpu_layers=${gpu_layers:-auto}"
+  
+  # Ensure model is loaded
+  if ! smart_load_model "$model" 0; then
+    log_warn "Model $model failed to load for benchmarking"
+  fi
+  
+  # Test prompt
+  local start_time
+  start_time=$(date +%s.%N 2>/dev/null || date +%s)
+  
+  # Build API request with GPU layer configuration if specified
+  local api_payload
+  if [[ -n "$gpu_layers" ]] && [[ "$gpu_layers" =~ ^[0-9]+$ ]]; then
+    api_payload="{\"model\": \"$model\", \"prompt\": \"$test_prompt\", \"stream\": false, \"options\": {\"num_gpu\": $gpu_layers}}"
+  else
+    api_payload="{\"model\": \"$model\", \"prompt\": \"$test_prompt\", \"stream\": false}"
+  fi
+  
+  local response
+  response=$(curl -s --max-time 60 -X POST http://localhost:11434/api/generate \
+    -H "Content-Type: application/json" \
+    -d "$api_payload" 2>/dev/null || echo "")
+  
+  local end_time
+  end_time=$(date +%s.%N 2>/dev/null || date +%s)
+  
+  # Calculate duration
+  local duration=0
+  if command -v bc &>/dev/null && [[ "$start_time" =~ \. ]] && [[ "$end_time" =~ \. ]]; then
+    duration=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "0")
+  else
+    local start_int=${start_time%%.*}
+    local end_int=${end_time%%.*}
+    duration=$((end_int - start_int))
+  fi
+  
+  # Extract response length for token estimation
+  local response_length=0
+  if command -v jq &>/dev/null; then
+    response_length=$(echo "$response" | jq -r '.response | length' 2>/dev/null || echo "0")
+  else
+    response_length=${#response}
+  fi
+  
+  # Estimate tokens (rough: ~4 chars per token)
+  local tokens=0
+  if [[ $response_length -gt 0 ]]; then
+    if command -v bc &>/dev/null; then
+      tokens=$(echo "$response_length / 4" | bc 2>/dev/null || echo "0")
+    else
+      tokens=$((response_length / 4))
+    fi
+  fi
+  
+  # Calculate tokens per second
+  local tokens_per_sec=0
+  if command -v bc &>/dev/null && [[ $(echo "$duration > 0" | bc 2>/dev/null || echo "0") -eq 1 ]] && [[ $tokens -gt 0 ]]; then
+    tokens_per_sec=$(echo "scale=2; $tokens / $duration" | bc 2>/dev/null || echo "0")
+  elif [[ ${duration%%.*} -gt 0 ]] && [[ $tokens -gt 0 ]]; then
+    local duration_int=${duration%%.*}
+    tokens_per_sec=$((tokens / duration_int))
+  fi
+  
+  # Store metrics
+  init_performance_metrics
+  local metrics_entry
+  if command -v jq &>/dev/null; then
+    local current_metrics
+    current_metrics=$(cat "$PERFORMANCE_METRICS_FILE" 2>/dev/null || echo '{}')
+    local timestamp=$(date +%s)
+    metrics_entry=$(echo "$current_metrics" | jq --arg model "$model" \
+      --arg gpu_layers "${gpu_layers:-auto}" \
+      --argjson duration "$duration" \
+      --argjson tokens "$tokens" \
+      --argjson tokens_per_sec "$tokens_per_sec" \
+      --argjson timestamp "$timestamp" \
+      '. + {($model): {gpu_layers: $gpu_layers, duration: $duration, tokens: $tokens, tokens_per_sec: $tokens_per_sec, timestamp: $timestamp}}' 2>/dev/null || echo '{}')
+    echo "$metrics_entry" > "$PERFORMANCE_METRICS_FILE"
+  fi
+  
+  # Display results
+  print_success "GPU layer benchmark complete"
+  print_info "  Model: $model"
+  print_info "  GPU layers: ${gpu_layers:-auto}"
+  print_info "  Duration: ${duration}s"
+  print_info "  Tokens/sec: ~${tokens_per_sec}"
+  
+  log_info "GPU benchmark: $model, layers=${gpu_layers:-auto}, duration=${duration}s, tokens/sec=${tokens_per_sec}"
+  
+  echo "$tokens_per_sec"
+}
+
+# Find optimal GPU layer configuration for a model
+optimize_gpu_layers() {
+  local model="$1"
+  local max_layers="${2:-99}"  # Maximum GPU layers to test (default: 99, which is effectively all)
+  
+  if [[ -z "$model" ]]; then
+    log_error "Model name required for GPU optimization"
+    return 1
+  fi
+  
+  print_header "🎮 Optimizing GPU Layers for $model"
+  
+  # Test different GPU layer configurations
+  # On Apple Silicon, we typically want to use all available layers
+  # But we can test a few configurations to find the sweet spot
+  
+  local best_layers="auto"
+  local best_performance=0
+  
+  # Test configurations: auto, then specific layer counts if needed
+  local test_configs=("auto")
+  
+  # For Apple Silicon, test a few specific configurations
+  # Most models benefit from using all GPU layers, but we can test
+  if [[ "$CPU_ARCH" == "arm64" ]]; then
+    # Test common configurations for Apple Silicon
+    # Note: Actual layer counts depend on model size
+    # We'll test a few reasonable values
+    local model_ram
+    model_ram=$(get_model_ram "$model")
+    local model_ram_int
+    model_ram_int=$(echo "$model_ram" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+    
+    # For larger models, test fewer GPU layers (may need CPU fallback)
+    if [[ $model_ram_int -gt 20 ]]; then
+      test_configs=("auto" "80" "60" "40")
+    elif [[ $model_ram_int -gt 10 ]]; then
+      test_configs=("auto" "60" "40" "20")
+    else
+      test_configs=("auto" "40" "20" "10")
+    fi
+  fi
+  
+  print_info "Testing GPU layer configurations..."
+  
+  for config in "${test_configs[@]}"; do
+    if [[ "$config" == "auto" ]] || [[ $config -le $max_layers ]]; then
+      print_info "Testing with ${config} GPU layers..."
+      local performance
+      performance=$(benchmark_gpu_layers "$model" "$config" 2>/dev/null || echo "0")
+      
+      # Convert to integer for comparison
+      local perf_int
+      perf_int=$(echo "$performance" | awk '{if ($1+0 == $1) printf "%.0f", $1; else print "0"}')
+      
+      if [[ "$perf_int" =~ ^[0-9]+$ ]] && [[ $perf_int -gt $best_performance ]]; then
+        best_performance=$perf_int
+        best_layers="$config"
+      fi
+      
+      # Small delay between tests
+      sleep 2
+    fi
+  done
+  
+  if [[ "$best_layers" != "auto" ]] && [[ $best_performance -gt 0 ]]; then
+    print_success "Optimal GPU layers: $best_layers (performance: ~${best_performance} tokens/sec)"
+    log_info "Optimal GPU layers for $model: $best_layers"
+    echo "$best_layers"
+  else
+    print_info "Auto GPU layer configuration is optimal"
+    log_info "Auto GPU layer configuration is optimal for $model"
+    echo "auto"
+  fi
+}
+
+# ============================================================================
+# Request Queuing
+# ============================================================================
+
+# Request queue state file
+REQUEST_QUEUE_FILE="$STATE_DIR/request_queue.json"
+REQUEST_QUEUE_LOCK="$STATE_DIR/request_queue.lock"
+
+# Initialize request queue
+init_request_queue() {
+  if [[ ! -f "$REQUEST_QUEUE_FILE" ]]; then
+    mkdir -p "$STATE_DIR"
+    echo '{"queue": [], "processing": []}' > "$REQUEST_QUEUE_FILE"
+    log_info "Initialized request queue"
+  fi
+}
+
+# Add request to queue
+queue_request() {
+  local prompt="$1"
+  local task_type="${2:-general}"
+  local priority="${3:-5}"  # Priority: 1 (highest) to 10 (lowest)
+  local role="${4:-coding}"
+  
+  if [[ -z "$prompt" ]]; then
+    log_error "Cannot queue empty prompt"
+    return 1
+  fi
+  
+  init_request_queue
+  
+  # Generate unique request ID
+  local request_id
+  if command -v uuidgen &>/dev/null; then
+    request_id=$(date +%s)-$(uuidgen 2>/dev/null | cut -d'-' -f1 || echo "$$")
+  else
+    # Fallback: use timestamp + process ID + random number
+    request_id=$(date +%s)-$$-$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ' || echo "$RANDOM")
+  fi
+  
+  local timestamp=$(date +%s)
+  
+  # Add to queue with priority
+  if command -v jq &>/dev/null; then
+    local current_queue
+    current_queue=$(cat "$REQUEST_QUEUE_FILE" 2>/dev/null || echo '{"queue": [], "processing": []}')
+    local updated_queue
+    updated_queue=$(echo "$current_queue" | jq --arg id "$request_id" \
+      --arg prompt "$prompt" \
+      --arg task_type "$task_type" \
+      --arg role "$role" \
+      --argjson priority "$priority" \
+      --argjson timestamp "$timestamp" \
+      '.queue += [{"id": $id, "prompt": $prompt, "task_type": $task_type, "role": $role, "priority": $priority, "timestamp": $timestamp}]' 2>/dev/null || echo "$current_queue")
+    echo "$updated_queue" > "$REQUEST_QUEUE_FILE"
+  else
+    # Fallback: simple text-based queue
+    echo "${request_id}|${priority}|${timestamp}|${task_type}|${role}|${prompt}" >> "$REQUEST_QUEUE_FILE"
+  fi
+  
+  log_info "Queued request: $request_id (priority: $priority, task_type: $task_type)"
+  echo "$request_id"
+}
+
+# Process queued requests (batch processing)
+process_request_queue() {
+  local batch_size="${1:-5}"  # Number of requests to process in batch
+  local max_wait="${2:-10}"  # Maximum seconds to wait for batch formation
+  
+  init_request_queue
+  
+  # Simple lock mechanism (file-based)
+  if [[ -f "$REQUEST_QUEUE_LOCK" ]]; then
+    local lock_age
+    lock_age=$(($(date +%s) - $(stat -f %m "$REQUEST_QUEUE_LOCK" 2>/dev/null || echo "0")))
+    # Remove stale locks (older than 5 minutes)
+    if [[ $lock_age -gt 300 ]]; then
+      rm -f "$REQUEST_QUEUE_LOCK"
+    else
+      log_info "Request queue is being processed by another process"
+      return 0
+    fi
+  fi
+  
+  touch "$REQUEST_QUEUE_LOCK"
+  
+  # Get queued requests
+  local requests_to_process=()
+  
+  if command -v jq &>/dev/null; then
+    local queue_data
+    queue_data=$(cat "$REQUEST_QUEUE_FILE" 2>/dev/null || echo '{"queue": [], "processing": []}')
+    local queue_length
+    queue_length=$(echo "$queue_data" | jq '.queue | length' 2>/dev/null || echo "0")
+    
+    if [[ $queue_length -eq 0 ]]; then
+      rm -f "$REQUEST_QUEUE_LOCK"
+      return 0  # No requests in queue
+    fi
+    
+    # Sort by priority (lower number = higher priority) and get top N
+    local sorted_requests
+    sorted_requests=$(echo "$queue_data" | jq -c '.queue | sort_by(.priority) | .[0:'$batch_size']' 2>/dev/null || echo "[]")
+    
+    # Process each request
+    echo "$sorted_requests" | jq -r '.[] | "\(.id)|\(.prompt)|\(.task_type)|\(.role)"' 2>/dev/null | while IFS='|' read -r id prompt task_type role; do
+      if [[ -n "$id" ]] && [[ -n "$prompt" ]]; then
+        # Execute request
+        local response
+        response=$(execute_task_with_routing "$task_type" "$prompt" "$role" 2>/dev/null || echo "")
+        
+        # Remove from queue
+        queue_data=$(echo "$queue_data" | jq --arg id "$id" '.queue = (.queue | map(select(.id != $id)))' 2>/dev/null || echo "$queue_data")
+        echo "$queue_data" > "$REQUEST_QUEUE_FILE"
+        
+        log_info "Processed queued request: $id"
+      fi
+    done
+  else
+    # Fallback: simple text-based processing
+    # Sort by priority and process
+    local sorted_requests
+    sorted_requests=$(grep -v "^$" "$REQUEST_QUEUE_FILE" 2>/dev/null | sort -t'|' -k2 -n | head -n "$batch_size" || echo "")
+    
+    while IFS='|' read -r id priority timestamp task_type role prompt; do
+      if [[ -n "$id" ]] && [[ -n "$prompt" ]]; then
+        execute_task_with_routing "$task_type" "$prompt" "$role" >/dev/null 2>&1
+        # Remove from queue (simple grep -v)
+        grep -v "^${id}|" "$REQUEST_QUEUE_FILE" > "${REQUEST_QUEUE_FILE}.tmp" 2>/dev/null && mv "${REQUEST_QUEUE_FILE}.tmp" "$REQUEST_QUEUE_FILE" 2>/dev/null || true
+        log_info "Processed queued request: $id"
+      fi
+    done <<< "$sorted_requests"
+  fi
+  
+  rm -f "$REQUEST_QUEUE_LOCK"
+  return 0
+}
+
+# Get queue status
+get_queue_status() {
+  init_request_queue
+  
+  if command -v jq &>/dev/null; then
+    local queue_data
+    queue_data=$(cat "$REQUEST_QUEUE_FILE" 2>/dev/null || echo '{"queue": [], "processing": []}')
+    local queue_length
+    queue_length=$(echo "$queue_data" | jq '.queue | length' 2>/dev/null || echo "0")
+    echo "$queue_length"
+  else
+    # Fallback: count lines
+    local queue_length
+    queue_length=$(grep -c "^[^|]*|" "$REQUEST_QUEUE_FILE" 2>/dev/null || echo "0")
+    echo "$queue_length"
+  fi
+}
+
+# ============================================================================
+# Performance Profiling
+# ============================================================================
+
+# Track performance metrics for a model request
+track_performance() {
+  local model="$1"
+  local task_type="${2:-general}"
+  local duration="${3:-0}"  # Duration in seconds
+  local tokens="${4:-0}"  # Number of tokens generated
+  local success="${5:-1}"  # 1 for success, 0 for failure
+  
+  init_performance_metrics
+  
+  local timestamp=$(date +%s)
+  local tokens_per_sec=0
+  
+  if command -v bc &>/dev/null && [[ $(echo "$duration > 0" | bc 2>/dev/null || echo "0") -eq 1 ]] && [[ $tokens -gt 0 ]]; then
+    tokens_per_sec=$(echo "scale=2; $tokens / $duration" | bc 2>/dev/null || echo "0")
+  elif [[ ${duration%%.*} -gt 0 ]] && [[ $tokens -gt 0 ]]; then
+    local duration_int=${duration%%.*}
+    tokens_per_sec=$((tokens / duration_int))
+  fi
+  
+  if command -v jq &>/dev/null; then
+    local current_metrics
+    current_metrics=$(cat "$PERFORMANCE_METRICS_FILE" 2>/dev/null || echo '{}')
+    local model_key="${model}_${task_type}"
+    local updated_metrics
+    updated_metrics=$(echo "$current_metrics" | jq --arg key "$model_key" \
+      --argjson duration "$duration" \
+      --argjson tokens "$tokens" \
+      --argjson tokens_per_sec "$tokens_per_sec" \
+      --argjson success "$success" \
+      --argjson timestamp "$timestamp" \
+      '. + {($key): {duration: $duration, tokens: $tokens, tokens_per_sec: $tokens_per_sec, success: ($success == 1), timestamp: $timestamp}}' 2>/dev/null || echo "$current_metrics")
+    echo "$updated_metrics" > "$PERFORMANCE_METRICS_FILE"
+  fi
+  
+  log_info "Performance tracked: $model, task=$task_type, duration=${duration}s, tokens/sec=${tokens_per_sec}"
+}
+
+# Get performance statistics for a model
+get_performance_stats() {
+  local model="${1:-}"
+  local task_type="${2:-}"
+  
+  init_performance_metrics
+  
+  if [[ ! -f "$PERFORMANCE_METRICS_FILE" ]]; then
+    echo "{}"
+    return 0
+  fi
+  
+  if command -v jq &>/dev/null; then
+    local metrics
+    metrics=$(cat "$PERFORMANCE_METRICS_FILE" 2>/dev/null || echo '{}')
+    
+    if [[ -n "$model" ]] && [[ -n "$task_type" ]]; then
+      # Get specific model+task stats
+      local key="${model}_${task_type}"
+      echo "$metrics" | jq --arg key "$key" '.[$key] // {}' 2>/dev/null || echo "{}"
+    elif [[ -n "$model" ]]; then
+      # Get all stats for a model
+      echo "$metrics" | jq --arg model "$model" 'to_entries | map(select(.key | startswith($model))) | from_entries' 2>/dev/null || echo "{}"
+    else
+      # Get all stats
+      echo "$metrics"
+    fi
+  else
+    # Fallback: return raw file
+    cat "$PERFORMANCE_METRICS_FILE" 2>/dev/null || echo "{}"
+  fi
+}
+
+# Generate performance report
+generate_performance_report() {
+  local output_file="${1:-$STATE_DIR/performance_report.txt}"
+  
+  print_header "📊 Performance Report"
+  
+  init_performance_metrics
+  
+  local report_content=""
+  report_content+="Performance Report - Generated: $(date)\n"
+  report_content+="==========================================\n\n"
+  
+  if command -v jq &>/dev/null; then
+    local metrics
+    metrics=$(cat "$PERFORMANCE_METRICS_FILE" 2>/dev/null || echo '{}')
+    
+    # Get all model-task combinations
+    echo "$metrics" | jq -r 'to_entries[] | "\(.key)|\(.value.duration // 0)|\(.value.tokens // 0)|\(.value.tokens_per_sec // 0)|\(.value.success // false)"' 2>/dev/null | while IFS='|' read -r key duration tokens tokens_per_sec success; do
+      if [[ -n "$key" ]]; then
+        report_content+="Model/Task: $key\n"
+        report_content+="  Duration: ${duration}s\n"
+        report_content+="  Tokens: $tokens\n"
+        report_content+="  Tokens/sec: ${tokens_per_sec}\n"
+        report_content+="  Success: $success\n\n"
+      fi
+    done
+  else
+    report_content+="Performance metrics available (jq required for detailed parsing)\n"
+  fi
+  
+  # Write to file
+  echo -e "$report_content" > "$output_file"
+  print_success "Performance report saved to: $output_file"
+  log_info "Performance report generated: $output_file"
+  
+  # Also display summary
+  echo -e "$report_content"
 }

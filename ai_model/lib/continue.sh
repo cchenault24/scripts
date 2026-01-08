@@ -104,6 +104,35 @@ generate_continue_config() {
     autocomplete_model_name="$default_model_name"
   fi
   
+  # Get optimized default parameters for default model
+  local tier="${HARDWARE_TIER:-B}"
+  local default_params
+  local default_temperature=0.7
+  local default_max_tokens=2048
+  
+  if [[ ${#coding_models[@]} -gt 0 ]] && command -v tune_model &>/dev/null; then
+    default_params=$(tune_model "${coding_models[0]}" "$tier" "coding" "1" "general" 0)
+    if command -v jq &>/dev/null; then
+      default_temperature=$(echo "$default_params" | jq -r '.temperature // 0.7')
+      default_max_tokens=$(echo "$default_params" | jq -r '.max_tokens // 2048')
+    else
+      default_temperature=$(echo "$default_params" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.7")
+      default_max_tokens=$(echo "$default_params" | grep -o '"max_tokens": [0-9]*' | grep -o '[0-9]*' || echo "2048")
+    fi
+  fi
+  
+  # Determine api_base (check if proxy is running - optimizations)
+  local api_base="http://localhost:11434"
+  if [[ -f "$HOME/.local-llm-setup/pids/ollama_proxy.pid" ]]; then
+    local proxy_pid
+    proxy_pid=$(cat "$HOME/.local-llm-setup/pids/ollama_proxy.pid" 2>/dev/null || echo "")
+    if [[ -n "$proxy_pid" ]] && kill -0 "$proxy_pid" 2>/dev/null; then
+      api_base="http://localhost:11435"
+      log_info "Using optimization proxy for Continue.dev config"
+      print_info "Optimizations enabled: Using proxy at $api_base"
+    fi
+  fi
+  
   # Start building config YAML
   local config_yaml=$(cat <<EOF
 name: Local Config
@@ -114,9 +143,10 @@ schema: v1
 defaultModel: $default_model_name
 
 # Default completion options (optimized for coding tasks)
+# These are overridden by model-specific settings above
 defaultCompletionOptions:
-  temperature: 0.7
-  maxTokens: 2048
+  temperature: $default_temperature
+  maxTokens: $default_max_tokens
 
 # Privacy: Disable telemetry for local-only setup
 allowAnonymousTelemetry: false
@@ -129,15 +159,62 @@ EOF
   for model in "${coding_models[@]}"; do
     local friendly_name=$(get_friendly_model_name "$model")
     
-    # Build roles list
+    # Get optimized parameters for this model (use coding role as default)
+    # tune_model will automatically use optimizations if available
+    local tier="${HARDWARE_TIER:-B}"
+    local model_params
+    if command -v tune_model &>/dev/null; then
+      # Use optimized tuning (default behavior)
+      model_params=$(tune_model "$model" "$tier" "coding" "1" "general" 0)
+    else
+      # Fallback to default values if tune_model not available
+      model_params='{"context_size": 16384, "max_tokens": 2048, "temperature": 0.7, "top_p": 0.9}'
+    fi
+    
+    # Extract parameters using jq if available, otherwise use defaults
+    local context_length max_tokens temperature top_p
+    if command -v jq &>/dev/null; then
+      context_length=$(echo "$model_params" | jq -r '.context_size // 16384')
+      max_tokens=$(echo "$model_params" | jq -r '.max_tokens // 2048')
+      temperature=$(echo "$model_params" | jq -r '.temperature // 0.7')
+      top_p=$(echo "$model_params" | jq -r '.top_p // 0.9')
+    else
+      # Fallback parsing (basic extraction)
+      context_length=$(echo "$model_params" | grep -o '"context_size": [0-9]*' | grep -o '[0-9]*' || echo "16384")
+      max_tokens=$(echo "$model_params" | grep -o '"max_tokens": [0-9]*' | grep -o '[0-9]*' || echo "2048")
+      temperature=$(echo "$model_params" | grep -o '"temperature": [0-9.]*' | grep -o '[0-9.]*' || echo "0.7")
+      top_p=$(echo "$model_params" | grep -o '"top_p": [0-9.]*' | grep -o '[0-9.]*' || echo "0.9")
+    fi
+    
+    # Build roles list with optimization mapping
+    # Map Continue.dev roles to task types for optimal routing
     local roles_yaml="      - chat
       - edit
       - apply"
     
-    # Add autocomplete role if this is the autocomplete model
+    # Determine task type based on model and role
+    # For autocomplete: use simple task type
+    # For chat/edit: use coding task type  
+    # For apply: use moderate task type
+    local task_type="general"
     if [[ "$model" == "$autocomplete_model" ]]; then
       roles_yaml="$roles_yaml
       - autocomplete"
+      task_type="simple"
+      # Use simpler task type for autocomplete (faster responses)
+      if command -v tune_model &>/dev/null; then
+        model_params=$(tune_model "$model" "$tier" "coding" "1" "simple" 0)
+        if command -v jq &>/dev/null; then
+          context_length=$(echo "$model_params" | jq -r '.context_size // 8192')
+          max_tokens=$(echo "$model_params" | jq -r '.max_tokens // 1024')
+        else
+          context_length=$(echo "$model_params" | grep -o '"context_size": [0-9]*' | grep -o '[0-9]*' || echo "8192")
+          max_tokens=$(echo "$model_params" | grep -o '"max_tokens": [0-9]*' | grep -o '[0-9]*' || echo "1024")
+        fi
+      fi
+    else
+      # For larger models, use coding task type
+      task_type="coding"
     fi
     
     config_yaml+=$(cat <<EOF
@@ -145,8 +222,11 @@ EOF
   - name: $friendly_name
     provider: ollama
     model: $model
-    apiBase: http://localhost:11434
-    contextLength: 16384
+    apiBase: $api_base
+    contextLength: $context_length
+    temperature: $temperature
+    topP: $top_p
+    maxTokens: $max_tokens
     roles:
 $roles_yaml
 EOF
@@ -154,13 +234,14 @@ EOF
   done
   
   # Add embeddings model (use found embedding model or default)
+  # api_base is already set above (shared with models)
   local embed_model_to_use="${embed_model:-nomic-embed-text:latest}"
   config_yaml+=$(cat <<EOF
 
   - name: Nomic Embed
     provider: ollama
     model: $embed_model_to_use
-    apiBase: http://localhost:11434
+    apiBase: $api_base
     roles:
       - embed
     embedOptions:
@@ -179,14 +260,14 @@ EOF
     )
   fi
   
-  # Add embeddings provider
+  # Add embeddings provider (use same api_base as models)
   config_yaml+=$(cat <<EOF
 
 # Embeddings provider for codebase search
 embeddingsProvider:
   provider: ollama
   model: $embed_model_to_use
-  apiBase: http://localhost:11434
+  apiBase: $api_base
 EOF
   )
   
