@@ -147,17 +147,59 @@ benchmark_model() {
   test_start=$(date +%s.%N 2>/dev/null || date +%s)
   
   # Use macOS-compatible timeout wrapper
-  if ! response=$(run_with_timeout 120 ollama run "$model" "$prompt" 2>&1); then
-    print_error "Benchmark failed for $model - ollama command failed"
+  # Note: run_with_timeout captures both stdout and stderr combined
+  local exit_code=0
+  response=$(run_with_timeout 120 ollama run "$model" "$prompt" 2>&1) || exit_code=$?
+  
+  test_end=$(date +%s.%N 2>/dev/null || date +%s)
+  
+  # Check for timeout
+  if [[ $exit_code -eq 124 ]]; then
+    print_error "Benchmark failed for $model - command timed out after 120 seconds"
+    echo -e "${YELLOW}  → The model may be too slow or unresponsive${NC}" >&2
+    if [[ -n "$response" ]]; then
+      echo -e "${YELLOW}  → Partial output received:${NC}" >&2
+      echo "${response:0:500}" >&2
+    fi
     return 1
   fi
   
-  test_end=$(date +%s.%N 2>/dev/null || date +%s)
+  # Check for other errors
+  if [[ $exit_code -ne 0 ]]; then
+    print_error "Benchmark failed for $model - ollama command failed (exit code: $exit_code)"
+    if [[ -n "$response" ]]; then
+      echo -e "${YELLOW}  → Output/Error received:${NC}" >&2
+      # Show first 20 lines or first 1000 chars, whichever is shorter
+      if [[ $(echo "$response" | wc -l) -le 20 ]]; then
+        echo "$response" >&2
+      else
+        echo "$response" | head -n 20 >&2
+        echo -e "${YELLOW}  ... (truncated)${NC}" >&2
+      fi
+    else
+      echo -e "${YELLOW}  → No output received at all${NC}" >&2
+    fi
+    echo -e "${YELLOW}  → Diagnostic: Try running manually:${NC}" >&2
+    echo -e "${YELLOW}     ollama run $model \"test\"${NC}" >&2
+    echo -e "${YELLOW}  → Check if model is loaded: ollama ps${NC}" >&2
+    return 1
+  fi
+  
   echo -e "${GREEN}  ✓ Response received${NC}" >&2
   
   # Validate we got a response (check for empty or whitespace-only)
   if [[ -z "${response// }" ]]; then
-    print_error "Benchmark failed for $model - no response received"
+    print_error "Benchmark failed for $model - no response received (empty or whitespace-only)"
+    echo -e "${YELLOW}  → The model may not have generated any output${NC}" >&2
+    return 1
+  fi
+  
+  # Check if response looks like an error message from ollama (common error patterns)
+  local first_line
+  first_line=$(echo "$response" | head -n 1 | tr '[:upper:]' '[:lower:]')
+  if [[ "$first_line" =~ ^(error|failed|cannot|unable|model.*not.*found|pull.*model) ]]; then
+    print_error "Benchmark failed for $model - received error message"
+    echo -e "${YELLOW}  → Error: $(echo "$response" | head -n 1)${NC}" >&2
     return 1
   fi
   
@@ -278,6 +320,16 @@ run_benchmark() {
     print_info "Install with: ollama pull $model"
     return 1
   fi
+  
+  # Quick connectivity test - verify ollama can respond
+  echo -e "${YELLOW}  → Verifying Ollama connectivity...${NC}" >&2
+  if ! curl -s --max-time 5 http://localhost:11434/api/tags &>/dev/null; then
+    print_error "Cannot connect to Ollama service"
+    print_info "Ensure Ollama is running: brew services start ollama"
+    return 1
+  fi
+  echo -e "${GREEN}  ✓ Ollama service is accessible${NC}" >&2
+  echo "" >&2
   
   print_info "This will take a few minutes..."
   echo ""
