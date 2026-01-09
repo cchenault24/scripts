@@ -166,6 +166,7 @@ def prompt_multi_choice(question: str, choices: List[str], min_selections: int =
 def run_command(cmd: List[str], capture: bool = True, timeout: int = 300, show_progress: bool = False) -> Tuple[int, str, str]:
     """Run a shell command and return (returncode, stdout, stderr).
     Uses aggressive timeout handling to prevent hanging."""
+    process = None
     try:
         # Use Popen for better timeout control
         process = subprocess.Popen(
@@ -180,31 +181,52 @@ def run_command(cmd: List[str], capture: bool = True, timeout: int = 300, show_p
             return process.returncode, stdout or "", stderr or ""
         except subprocess.TimeoutExpired:
             # Force kill the process aggressively
-            try:
-                process.kill()
-            except:
-                pass
-            # On Unix, try SIGTERM then SIGKILL
-            if platform.system() != "Windows" and process.pid:
+            if process is not None:
                 try:
-                    os.kill(process.pid, signal.SIGTERM)
-                    import time
-                    time.sleep(0.1)
-                except:
+                    process.kill()
+                except (OSError, ProcessLookupError):
                     pass
+                # On Unix, try SIGTERM then SIGKILL
+                if platform.system() != "Windows" and process.pid:
+                    try:
+                        os.kill(process.pid, signal.SIGTERM)
+                        import time
+                        time.sleep(0.1)
+                    except (OSError, ProcessLookupError):
+                        pass
+                    try:
+                        os.kill(process.pid, signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        pass
                 try:
-                    os.kill(process.pid, signal.SIGKILL)
-                except:
+                    process.wait(timeout=1)
+                except (subprocess.TimeoutExpired, OSError):
                     pass
-            try:
-                process.wait(timeout=1)
-            except:
-                pass
             return -1, "", "Command timed out"
     except FileNotFoundError:
         return -1, "", f"Command not found: {cmd[0]}"
     except Exception as e:
         return -1, "", str(e)
+    finally:
+        # Ensure process is cleaned up even if unexpected exception occurs
+        if process is not None:
+            try:
+                # Check if process is still running
+                if process.poll() is None:
+                    # Process is still running, terminate it
+                    try:
+                        process.terminate()
+                        process.wait(timeout=2)
+                    except (subprocess.TimeoutExpired, OSError, ProcessLookupError):
+                        # Force kill if it doesn't terminate gracefully
+                        try:
+                            process.kill()
+                            process.wait(timeout=1)
+                        except (subprocess.TimeoutExpired, OSError, ProcessLookupError):
+                            pass
+            except (OSError, ProcessLookupError):
+                # Process may already be terminated, ignore
+                pass
 
 
 def check_docker() -> Tuple[bool, str]:

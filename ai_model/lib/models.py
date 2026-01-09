@@ -6,7 +6,6 @@ Provides model information, catalog, discovery, selection, and pulling capabilit
 
 import json
 import re
-import ssl
 import subprocess
 import sys
 import threading
@@ -21,16 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import hardware
 from . import ui
 from . import utils
-
-# SSL context that skips certificate verification (equivalent to curl -k)
-# Needed for work machines with corporate proxies/interception
-try:
-    _UNVERIFIED_SSL_CONTEXT = ssl._create_unverified_context()
-except Exception:
-    # Fallback: create a default context and disable verification
-    _UNVERIFIED_SSL_CONTEXT = ssl.create_default_context()
-    _UNVERIFIED_SSL_CONTEXT.check_hostname = False
-    _UNVERIFIED_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+from .utils import get_unverified_ssl_context
 
 # Try to import rich for better progress bars (lazy import - only when needed)
 RICH_AVAILABLE = False
@@ -517,7 +507,7 @@ def fetch_with_retry(
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
             
-            with urllib.request.urlopen(req, timeout=timeout, context=_UNVERIFIED_SSL_CONTEXT) as response:
+            with urllib.request.urlopen(req, timeout=timeout, context=get_unverified_ssl_context()) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode('utf-8'))
                     return data
@@ -876,10 +866,19 @@ def discover_model_tags(
             if cache_key in hw_info.discovered_model_tags:
                 cached_data = hw_info.discovered_model_tags[cache_key]
                 if isinstance(cached_data, dict) and "tags" in cached_data and "timestamp" in cached_data:
-                    cache_age = datetime.now() - cached_data["timestamp"]
-                    if cache_age < timedelta(hours=1):
-                        # Cache is still valid (including empty results for models that don't exist)
-                        return cached_data["tags"]
+                    try:
+                        cache_age = datetime.now() - cached_data["timestamp"]
+                        # Use shorter TTL for empty results (failed requests) - 15 minutes
+                        # Longer TTL for successful results - 1 hour
+                        is_empty_result = len(cached_data.get("tags", [])) == 0
+                        ttl = timedelta(minutes=15) if is_empty_result else timedelta(hours=1)
+                        
+                        if cache_age < ttl:
+                            # Cache is still valid (including empty results for models that don't exist)
+                            return cached_data["tags"]
+                    except (TypeError, ValueError, AttributeError):
+                        # Cache corruption - invalidate this entry
+                        del hw_info.discovered_model_tags[cache_key]
     
     tags = []
     page = 1
@@ -896,14 +895,15 @@ def discover_model_tags(
             if page == 1:
                 if not silent:
                     ui.print_warning(f"Could not fetch tags for {base_name}")
-                # Cache the failure to avoid repeated attempts
+                # Cache the failure to avoid repeated attempts (shorter TTL - 15 minutes)
                 if hw_info:
                     if not hasattr(hw_info, 'discovered_model_tags'):
                         hw_info.discovered_model_tags = {}
                     cache_key = f"{base_name}_cache"
                     hw_info.discovered_model_tags[cache_key] = {
                         "tags": [],
-                        "timestamp": datetime.now()
+                        "timestamp": datetime.now(),
+                        "is_failure": True  # Mark as failure for shorter TTL
                     }
                 return []
             # If later page fails, return what we have
@@ -939,7 +939,8 @@ def discover_model_tags(
         cache_key = f"{base_name}_cache"
         hw_info.discovered_model_tags[cache_key] = {
             "tags": tags,
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(),
+            "is_failure": False  # Mark as successful for longer TTL
         }
         # Also store directly for backward compatibility
         hw_info.discovered_model_tags[base_name] = tags
@@ -1328,7 +1329,7 @@ def discover_huggingface_models(query: str = "llama", limit: int = 30) -> List[D
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
         
-        with urllib.request.urlopen(req, timeout=10, context=_UNVERIFIED_SSL_CONTEXT) as response:
+        with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
             data = json.loads(response.read())
             if isinstance(data, list):
                 for model in data[:limit]:
@@ -1599,7 +1600,7 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
             api_url = f"{hw_info.dmr_api_endpoint}/models"
             req = urllib.request.Request(api_url, method="GET")
             req.add_header("Content-Type", "application/json")
-            with urllib.request.urlopen(req, timeout=5, context=_UNVERIFIED_SSL_CONTEXT) as response:
+            with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
                 if response.status == 200:
                     data = json.loads(response.read().decode('utf-8'))
                     if "data" in data:
@@ -2087,8 +2088,9 @@ def validate_model_selection(
         try:
             req = urllib.request.Request("https://hub.docker.com")
             req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
-            urllib.request.urlopen(req, timeout=10, context=_UNVERIFIED_SSL_CONTEXT)
-            network_ok = True
+            with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
+                # Connection is properly closed when exiting the with block
+                network_ok = True
             break  # Success, no need to retry
         except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError):
             if attempt < 1:  # Not the last attempt
@@ -3349,6 +3351,7 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         # Initialize full_output for error handling
         full_output = []
         code = -1
+        process = None
         
         try:
             process = subprocess.Popen(
@@ -3455,12 +3458,31 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
             code = process.returncode
             
         except subprocess.TimeoutExpired:
-            process.kill()
+            if process is not None:
+                process.kill()
             ui.print_error("Download timed out after 1 hour")
             code = -1
         except Exception as e:
             ui.print_error(f"Error: {e}")
             code = -1
+        finally:
+            # Ensure process is always cleaned up, even if exception occurs during output streaming
+            if process is not None:
+                try:
+                    # Check if process is still running
+                    if process.poll() is None:
+                        # Process is still running, terminate it
+                        process.terminate()
+                        try:
+                            # Wait up to 5 seconds for graceful termination
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            # Force kill if it doesn't terminate gracefully
+                            process.kill()
+                            process.wait()
+                except Exception:
+                    # Ignore errors during cleanup - process may already be terminated
+                    pass
         
         if code == 0:
             # Verify the model was actually downloaded and check its parameters

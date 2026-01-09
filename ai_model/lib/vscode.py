@@ -6,7 +6,6 @@ Provides functions to install extensions, restart VS Code, and display next step
 
 import platform
 import shutil
-import ssl
 import subprocess
 import time
 import urllib.error
@@ -18,16 +17,7 @@ from . import hardware
 from . import models
 from . import ui
 from . import utils
-
-# SSL context that skips certificate verification (equivalent to curl -k)
-# Needed for work machines with corporate proxies/interception
-try:
-    _UNVERIFIED_SSL_CONTEXT = ssl._create_unverified_context()
-except Exception:
-    # Fallback: create a default context and disable verification
-    _UNVERIFIED_SSL_CONTEXT = ssl.create_default_context()
-    _UNVERIFIED_SSL_CONTEXT.check_hostname = False
-    _UNVERIFIED_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+from .utils import get_unverified_ssl_context
 
 
 def install_vscode_extension(extension_id: str) -> bool:
@@ -48,7 +38,22 @@ def install_vscode_extension(extension_id: str) -> bool:
 
 
 def start_model_server(model_name: str) -> Optional[subprocess.Popen]:
-    """Start the Docker Model Runner API server in the background."""
+    """
+    Start the Docker Model Runner API server in the background.
+    
+    Args:
+        model_name: Name of the model to run (e.g., "ai/llama3.2")
+    
+    Returns:
+        subprocess.Popen process object if successful, None otherwise.
+        The process runs in the background and should be managed by the caller.
+        
+    Note:
+        The returned process is meant to run indefinitely. If you need to stop it,
+        call process.terminate() or process.kill() on the returned process object.
+        The process will automatically clean up when the parent Python process exits.
+    """
+    process = None
     try:
         process = subprocess.Popen(
             ["docker", "model", "run", model_name],
@@ -62,8 +67,29 @@ def start_model_server(model_name: str) -> Optional[subprocess.Popen]:
         if process.poll() is None:
             return process
         else:
+            # Process failed immediately, clean it up
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except (subprocess.TimeoutExpired, Exception):
+                try:
+                    process.kill()
+                    process.wait()
+                except Exception:
+                    pass
             return None
     except Exception:
+        # Ensure cleanup if process was created but exception occurred
+        if process is not None:
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except (subprocess.TimeoutExpired, Exception):
+                try:
+                    process.kill()
+                    process.wait()
+                except Exception:
+                    pass
         return None
 
 
@@ -181,7 +207,7 @@ def show_next_steps(config_path: Path, model_list: List[models.ModelInfo], hw_in
             api_running = False
             try:
                 req = urllib.request.Request(f"{hw_info.dmr_api_endpoint}/models", method="GET")
-                with urllib.request.urlopen(req, timeout=2, context=_UNVERIFIED_SSL_CONTEXT) as response:
+                with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
                     if response.status == 200:
                         api_running = True
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):
