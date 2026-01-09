@@ -179,7 +179,7 @@ def main() -> int:
     
     # Step 13: Generate .continueignore
     print()
-    ignore_path = config.generate_continueignore(base_directory=ollama_dir)
+    ignore_path = config.generate_continueignore()
     
     # Step 14: Save setup summary
     print()

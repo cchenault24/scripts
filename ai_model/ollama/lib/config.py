@@ -497,25 +497,20 @@ def generate_continue_config(
 
 
 def generate_continueignore(
-    output_path: Optional[Path] = None,
-    base_directory: Optional[Path] = None
+    output_path: Optional[Path] = None
 ) -> Path:
     """
     Generate .continueignore file to ignore non-source code files and directories.
     
     Args:
-        output_path: Optional output path (default: base_directory/.continueignore)
-        base_directory: Optional base directory where .continueignore should be created
-                        (default: parent of lib/ directory, i.e., ai_model/ollama/)
+        output_path: Optional output path (default: ~/.continue/.continueignore)
     
     Returns:
         Path to saved .continueignore file
     """
     if output_path is None:
-        if base_directory is None:
-            # Default: assume config.py is in lib/, so go up one level to get ollama/ directory
-            base_directory = Path(__file__).resolve().parent.parent
-        output_path = base_directory / ".continueignore"
+        # Default to ~/.continue/.continueignore (Continue.dev configuration directory)
+        output_path = Path.home() / ".continue" / ".continueignore"
     
     # Create directory if needed
     output_path.parent.mkdir(parents=True, exist_ok=True)

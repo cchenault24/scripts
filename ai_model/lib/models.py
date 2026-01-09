@@ -122,7 +122,7 @@ def _ensure_rich_available():
 class ModelInfo:
     """Information about an LLM model."""
     name: str
-    ollama_name: str  # Name used in Ollama
+    docker_name: str  # Name used in Docker Model Runner
     description: str
     ram_gb: float
     context_length: int
@@ -133,18 +133,18 @@ class ModelInfo:
     selected_variant: Optional[str] = None  # Selected variant tag (e.g., "70B-Q4_K_M")
 
 
-# Model catalog for Ollama
-# Ollama uses model names without ai/ prefix for Ollama Library models
+# Model catalog for Docker Model Runner (DMR)
+# Docker Model Runner uses the namespace: ai/ for Docker Hub models
 # Models are optimized for Apple Silicon with Metal acceleration
-# Format: <model-name>:<tag> or <model-name> or ai/<model-name>:<tag>
-# Note: Legacy model formats have been removed - using Ollama-native naming conventions
+# Format: ai/<model-name> or ai/<model-name>:<tag>
+# Note: Legacy ai.docker.com/ format models have been removed as they don't exist in ai/ namespace
 MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     # Chat/Edit Models - Large (Tier S: 49GB+ RAM)
     # =========================================================================
     ModelInfo(
         name="Llama 3.3",
-        ollama_name="llama3.3",
+        docker_name="ai/llama3.3",
         description="Highest quality for complex refactoring - variant auto-selected based on hardware",
         ram_gb=35.0,  # Will be updated based on selected variant
         context_length=131072,
@@ -155,7 +155,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="Llama 3.1",
-        ollama_name="llama3.1",
+        docker_name="ai/llama3.1",
         description="Excellent for architecture and complex tasks - variant auto-selected based on hardware",
         ram_gb=35.0,  # Will be updated based on selected variant
         context_length=131072,
@@ -169,7 +169,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Granite 4.0 H-Small",
-        ollama_name="granite-code:latest",
+        docker_name="ai/granite-4.0-h-small",
         description="IBM's Granite 4.0 coding model (small variant) - State-of-the-art code generation",
         ram_gb=18.0,
         context_length=131072,
@@ -179,7 +179,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="Codestral",
-        ollama_name="codestral",
+        docker_name="ai/codestral",
         description="Mistral's Codestral code generation model - Excellent for code generation",
         ram_gb=12.0,
         context_length=32768,
@@ -189,7 +189,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="Devstral Small",
-        ollama_name="devstral",
+        docker_name="ai/devstral-small",
         description="Mistral's Devstral coding model (small variant) - Fast and capable",
         ram_gb=9.0,
         context_length=32768,
@@ -202,7 +202,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Phi-4",
-        ollama_name="phi4",
+        docker_name="ai/phi4",
         description="Microsoft's state-of-the-art reasoning model - variant auto-selected based on hardware",
         ram_gb=8.0,  # Will be updated based on selected variant
         context_length=16384,
@@ -213,7 +213,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="Granite 4.0 H-Micro",
-        ollama_name="granite-code:micro",
+        docker_name="ai/granite-4.0-h-micro",
         description="IBM's Granite 4.0 coding model (micro variant) - Strong coding with good performance",
         ram_gb=8.0,
         context_length=131072,
@@ -224,10 +224,22 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     # Chat/Edit Models - Small (All Tiers, optimized for Tier C: 16-24GB RAM)
     # =========================================================================
-    # Note: Llama 3.2 8B is NOT available in Ollama - only the 3B variant exists
+    # Note: Llama 3.2 8B is NOT available in Docker Model Runner
+    # Docker Model Runner only provides ai/llama3.2 which is the 3B variant
+    # Keeping this commented out to prevent confusion
+    # ModelInfo(
+    #     name="Llama 3.2 8B",
+    #     docker_name="ai.docker.com/meta/llama3.2:8b-instruct",
+    #     description="8B - Fast general-purpose assistant",
+    #     ram_gb=5.0,
+    #     context_length=131072,
+    #     roles=["chat", "edit", "autocomplete"],
+    #     tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
+    #     recommended_for=["All tiers", "Fast responses"]
+    # ),
     ModelInfo(
         name="Granite 4.0 H-Nano",
-        ollama_name="granite-code:nano",
+        docker_name="ai/granite-4.0-h-nano",
         description="IBM's Granite 4.0 coding model (nano variant) - Efficient coding model",
         ram_gb=4.0,
         context_length=131072,
@@ -240,7 +252,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Llama 3.2",
-        ollama_name="llama3.2",
+        docker_name="ai/llama3.2",
         description="Small and efficient general model - variant auto-selected based on hardware",
         ram_gb=1.8,  # Will be updated based on selected variant
         context_length=131072,
@@ -251,7 +263,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="Granite 4.0 H-Tiny",
-        ollama_name="granite-code:tiny",
+        docker_name="ai/granite-4.0-h-tiny",
         description="IBM's Granite 4.0 coding model (tiny variant) - Smallest coding model, very fast",
         ram_gb=1.0,
         context_length=131072,
@@ -264,18 +276,18 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Nomic Embed Text v1.5",
-        ollama_name="nomic-embed-text",
+        docker_name="ai/nomic-embed-text-v1.5",
         description="Best open embedding model for code indexing (8192 tokens)",
         ram_gb=0.3,
         context_length=8192,
         roles=["embed"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
         recommended_for=["Code indexing", "Semantic search"],
-        base_model_name="nomic-embed-text"  # Match ollama_name since this model doesn't have variants
+        base_model_name="nomic-embed-text-v1.5"
     ),
     ModelInfo(
         name="Granite Embedding Multilingual",
-        ollama_name="granite-embed",
+        docker_name="ai/granite-embedding-multilingual",
         description="IBM's Granite multilingual embedding model - Multi-lingual code and text embeddings",
         ram_gb=0.5,
         context_length=8192,
@@ -285,7 +297,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="MXBAI Embed Large",
-        ollama_name="mxbai-embed-large",
+        docker_name="ai/mxbai-embed-large",
         description="Mixedbread AI's large embedding model - High-quality embeddings for code",
         ram_gb=0.8,
         context_length=8192,
@@ -295,7 +307,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="All-MiniLM-L6-v2 (vLLM)",
-        ollama_name="all-minilm",
+        docker_name="ai/all-minilm-l6-v2-vllm",
         description="Lightweight embedding model optimized with vLLM - Minimal memory usage",
         ram_gb=0.1,
         context_length=512,
@@ -308,46 +320,44 @@ MODEL_CATALOG: List[ModelInfo] = [
 
 def discover_model_variants(base_model_name: str, hw_info: Optional[hardware.HardwareInfo] = None) -> List[str]:
     """
-    Discover available variants of a model by scraping Ollama Library.
+    Discover available variants of a model using docker search.
     
-    Uses curl to fetch available models from ollama.com/library and filters
-    for models matching the base name.
+    For example, searching for 'ai/phi4' might reveal that 'ai/phi4' exists,
+    which helps verify our catalog models match what's actually available.
     
-    Returns a list of found model names in Ollama format (e.g., "llama3.2", "phi4").
+    Returns a list of found model names in 'ai/namespace' format.
     """
     variants = []
     try:
-        # Extract base model name (remove any prefixes or tags)
-        search_base = base_model_name
-        if ":" in search_base:
-            search_base = search_base.split(":")[0]
-        if "/" in search_base:
-            search_base = search_base.split("/")[-1]
-        search_base_lower = search_base.lower()
+        # Extract just the model name part (e.g., 'phi4' from 'ai/phi4' or 'ai.docker.com/microsoft/phi4:14b')
+        search_query = base_model_name
+        if base_model_name.startswith("ai.docker.com/"):
+            # Extract model name from ai.docker.com format
+            remaining = base_model_name[len("ai.docker.com/"):]
+            parts = remaining.split("/")
+            if len(parts) > 1:
+                model_part = parts[1]
+            else:
+                model_part = parts[0]
+            if ":" in model_part:
+                model_part = model_part.split(":")[0]
+            search_query = f"ai/{model_part}"
+        elif not base_model_name.startswith("ai/"):
+            # If it's just a model name, add ai/ prefix
+            search_query = f"ai/{base_model_name}"
         
-        # Fetch available models from Ollama Library
-        # Using curl to scrape ollama.com/library
-        code, stdout, _ = utils.run_command(
-            ["curl", "-k", "-s", "https://ollama.com/library"],
-            timeout=15
-        )
+        # Use docker search to find variants
+        code, stdout, _ = utils.run_command(["docker", "search", search_query, "--limit", "25"], timeout=15)
         if code == 0:
-            # Parse HTML to find model links
-            # Look for href="/library/[model-name]" patterns
-            import re
-            pattern = r'href="/library/([^"]+)"'
-            found_models = re.findall(pattern, stdout)
-            
-            # Filter for models matching our search base
-            for model_name in found_models:
-                model_lower = model_name.lower()
-                # Check if the model name contains our search base or vice versa
-                if (search_base_lower in model_lower or 
-                    model_lower in search_base_lower or
-                    model_lower.startswith(search_base_lower) or
-                    search_base_lower.startswith(model_lower.split(":")[0])):
-                    if model_name not in variants:
-                        variants.append(model_name)
+            lines = stdout.strip().split("\n")
+            for line in lines[1:]:  # Skip header
+                if line.strip():
+                    parts = line.split()
+                    if parts:
+                        found_name = parts[0]
+                        # Only include models in ai/ namespace that match our base
+                        if found_name.startswith("ai/") and search_query.replace("ai/", "").lower() in found_name.lower():
+                            variants.append(found_name)
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
         # Silently fail - this is just for discovery
         pass
@@ -355,75 +365,86 @@ def discover_model_variants(base_model_name: str, hw_info: Optional[hardware.Har
     return variants
 
 
-def discover_ollama_library_models(query: str = "", limit: int = 50) -> List[Dict[str, Any]]:
-    """
-    Discover models from Ollama Library by scraping ollama.com/library.
-    
-    Uses curl to fetch available models and filters by query string.
-    """
+def discover_docker_hub_models(query: str = "ai/", limit: int = 50) -> List[Dict[str, Any]]:
+    """Discover models from Docker Hub."""
     models = []
     try:
-        ui.print_info(f"Searching Ollama Library for '{query or 'all models'}'...")
-        # Fetch available models from Ollama Library using curl
-        code, stdout, _ = utils.run_command(
-            ["curl", "-k", "-s", "https://ollama.com/library"],
-            timeout=30
-        )
+        ui.print_info(f"Searching Docker Hub for '{query}'...")
+        code, stdout, _ = utils.run_command(["docker", "search", query, "--limit", str(limit)], timeout=30)
         if code == 0:
-            # Parse HTML to find model links
-            # Look for href="/library/[model-name]" patterns
-            import re
-            pattern = r'href="/library/([^"]+)"'
-            found_models = re.findall(pattern, stdout)
-            
-            # Filter by query if provided
-            query_lower = query.lower() if query else ""
-            for model_name in found_models[:limit]:
-                if not query_lower or query_lower in model_name.lower():
-                    models.append({
-                        "name": model_name,
-                        "description": f"Model from Ollama Library: {model_name}",
-                        "source": "ollama_library",
-                        "stars": "0"  # Ollama Library doesn't have star ratings
-                    })
+            lines = stdout.strip().split("\n")
+            if len(lines) > 1:  # Has results (first line is header)
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.split()
+                        if parts:
+                            model_name = parts[0]
+                            description = " ".join(parts[1:]) if len(parts) > 1 else "No description"
+                            # Only include models in ai/ namespace
+                            if model_name.startswith("ai/"):
+                                models.append({
+                                    "name": model_name,
+                                    "description": description[:100],  # Limit description length
+                                    "source": "docker_hub",
+                                    "stars": parts[1] if len(parts) > 1 and parts[1].isdigit() else "0"
+                                })
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError) as e:
-        ui.print_warning(f"Could not search Ollama Library: {e}")
+        ui.print_warning(f"Could not search Docker Hub: {e}")
     
     return models
 
 
-def fetch_available_models_from_ollama_library() -> List[str]:
+def fetch_available_models_from_docker_hub(page_size: int = 100) -> List[str]:
     """
-    Fetch list of available models by scraping ollama.com/library.
+    Fetch list of available models from Docker Hub API.
     
-    Uses curl to scrape the Ollama library website and extract model names.
-    
-    Returns a list of model names in Ollama format (e.g., "llama3.2", "codestral").
+    Uses the Docker Hub v2 API to get all repositories in the 'ai' namespace.
+    Handles pagination to fetch all available models.
+    Returns a list of model names in format 'ai/model-name'.
     """
     available_models = []
+    page = 1
     
-    try:
-        # Scrape Ollama Library using curl
-        code, stdout, _ = utils.run_command(
-            ["curl", "-k", "-s", "https://ollama.com/library"],
-            timeout=15
-        )
-        if code == 0:
-            # Parse HTML to find model links
-            # Look for href="/library/[model-name]" patterns
-            pattern = r'href="/library/([^"]+)"'
-            found_models = re.findall(pattern, stdout)
+    # Fetch all pages
+    while True:
+        try:
+            url = f"https://hub.docker.com/v2/repositories/ai/?page={page}&page_size={page_size}"
             
-            # Extract base model names (remove tags/variants)
-            for model_name in found_models:
-                # Remove variant tags (e.g., "llama3.2:3b" -> "llama3.2")
-                base_name = model_name.split(":")[0]
-                if base_name and base_name not in available_models:
-                    available_models.append(base_name)
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
-        # Scraping failed - return empty list
-        # Models will be discovered from catalog instead
-        pass
+            data = fetch_with_retry(url, max_retries=3, timeout=15)
+            
+            if data is None:
+                # If first page fails, return empty list
+                if page == 1:
+                    ui.print_warning("Could not fetch models from Docker Hub API")
+                    return []
+                # If later page fails, return what we have
+                break
+            
+            if "results" in data:
+                page_models = data["results"]
+                if not page_models:
+                    # No more results
+                    break
+                
+                for repo in page_models:
+                    repo_name = repo.get("name", "")
+                    if repo_name:
+                        available_models.append(f"ai/{repo_name}")
+                
+                # Check if there are more pages
+                if "next" not in data or data.get("next") is None:
+                    break
+                
+                page += 1
+            else:
+                # No results field - stop
+                break
+                
+        except Exception as e:
+            ui.print_warning(f"Error fetching models from Docker Hub (page {page}): {e}")
+            if page == 1:
+                return []
+            break
     
     return available_models
 
@@ -455,7 +476,7 @@ def fetch_with_retry(
     for attempt in range(max_retries):
         try:
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "Ollama-Model-Runner-Setup/1.0")
+            req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
             
             with urllib.request.urlopen(req, timeout=timeout, context=get_unverified_ssl_context()) as response:
                 if response.status == 200:
@@ -697,7 +718,7 @@ def parse_tag_info(tag_name: str) -> Dict[str, Any]:
     Parse tag name to extract size, quantization, and other metadata.
     
     Args:
-        tag_name: Tag name from Ollama Library (e.g., "70B-Q4_K_M", "14B-F16", "32B", "latest")
+        tag_name: Tag name from Docker Hub (e.g., "70B-Q4_K_M", "14B-F16", "32B", "latest")
     
     Returns:
         Dictionary with:
@@ -783,199 +804,106 @@ def parse_tag_info(tag_name: str) -> Dict[str, Any]:
     }
 
 
-def discover_ollama_model_tags(
+def discover_model_tags(
     model_name: str, 
     hw_info: Optional[hardware.HardwareInfo] = None,
     use_cache: bool = True,
     silent: bool = False
 ) -> List[Dict[str, Any]]:
     """
-    Discover available tags/variants for a model from local Ollama API.
-    
-    Ollama models use tags like :3b, :7b, :13b, :70b to indicate size variants.
-    This function queries the local Ollama API to get available variants.
+    Discover available tags/variants for a model from Docker Hub API.
     
     Features:
+    - Pagination support (fetches all pages)
+    - Exponential backoff retry logic
     - Caching with 1hr TTL
-    - Parses Ollama model names to extract size variants
     
     Args:
-        model_name: Base model name (e.g., "llama3.2" or "llama3.2:3b")
+        model_name: Base model name (e.g., "llama3.3" or "ai/llama3.3")
         hw_info: Optional HardwareInfo for caching
         use_cache: Whether to use cached results (default: True)
     
     Returns:
         List of tag dictionaries with parsed metadata
     """
-    # Normalize model name (remove ai/ prefix if present, extract base name)
+    # Normalize model name (remove ai/ prefix if present)
     base_name = model_name.replace("ai/", "").strip()
-    # Remove tag if present (e.g., "llama3.2:3b" -> "llama3.2")
-    if ":" in base_name:
-        base_name = base_name.split(":")[0]
     
     # Check cache first (with TTL check)
-    # BUT: Don't trust empty cached results - always try to generate variants even if cache says empty
     if use_cache and hw_info:
         if hasattr(hw_info, 'discovered_model_tags'):
+            # Check if we have cached data with timestamp
             cache_key = f"{base_name}_cache"
             if cache_key in hw_info.discovered_model_tags:
                 cached_data = hw_info.discovered_model_tags[cache_key]
                 if isinstance(cached_data, dict) and "tags" in cached_data and "timestamp" in cached_data:
                     try:
                         cache_age = datetime.now() - cached_data["timestamp"]
+                        # Use shorter TTL for empty results (failed requests) - 15 minutes
+                        # Longer TTL for successful results - 1 hour
                         is_empty_result = len(cached_data.get("tags", [])) == 0
-                        # Use shorter TTL for empty results (2 min) vs successful results (1 hour)
-                        # Empty results are unreliable - models might not have been installed when cached
-                        ttl = timedelta(minutes=2) if is_empty_result else timedelta(hours=1)
+                        ttl = timedelta(minutes=15) if is_empty_result else timedelta(hours=1)
                         
-                        if cache_age < ttl and not is_empty_result:
-                            # Only return cached results if they're not empty
+                        if cache_age < ttl:
+                            # Cache is still valid (including empty results for models that don't exist)
                             return cached_data["tags"]
-                        elif is_empty_result:
-                            # Empty cached result - ignore it and try discovery again
-                            # Remove the empty cache entry so we can try again
-                            del hw_info.discovered_model_tags[cache_key]
-                        else:
-                            # Cache expired - remove it
-                            del hw_info.discovered_model_tags[cache_key]
                     except (TypeError, ValueError, AttributeError):
+                        # Cache corruption - invalidate this entry
                         del hw_info.discovered_model_tags[cache_key]
     
     tags = []
+    page = 1
+    page_size = 100
     
-    # First, try to scrape actual available tags from Ollama Library
-    # Use the comprehensive method: fetch the model's library page and extract all variants
-    # This matches the user's suggested approach using grep pattern matching
-    try:
-        library_url = f"https://ollama.com/library/{base_name}"
-        # Fetch the model's library page
-        code, stdout, _ = utils.run_command(
-            ["curl", "-k", "-s", library_url],
-            timeout=15
-        )
-        if code == 0:
-            # Use grep-style pattern matching to find all model:variant patterns
-            # Pattern: model-name:variant (e.g., "granite-code:3b", "granite-code:latest")
-            # This is more reliable than regex because it matches the exact format used in HTML
-            grep_pattern = rf'{re.escape(base_name)}:[a-zA-Z0-9._-]+'
-            found_full_tags = re.findall(grep_pattern, stdout)
-            
-            # Extract just the variant part from each found tag
-            all_found_tags = set()
-            for full_tag in found_full_tags:
-                # Extract variant part (everything after the colon)
-                if ":" in full_tag:
-                    variant = full_tag.split(":", 1)[1]
-                    all_found_tags.add(variant)
-            
-            # If no variants found with colon, check if model exists at all (might have :latest)
-            if not all_found_tags:
-                # Check if the model page exists (not 404)
-                if "404" not in stdout.lower() and "not found" not in stdout.lower():
-                    # Model exists but might only have :latest or no explicit variants
-                    all_found_tags.add("latest")
-            
-            # Convert found tags to tag_info format
-            for variant in all_found_tags:
-                tag_name = f"{base_name}:{variant}"
-                tag_info = parse_tag_info(tag_name)
-                # Include all variants, even if size parsing fails (for tags like "latest")
-                if not tag_info.get("size") and variant == "latest":
-                    # For "latest" tag, try to estimate size from model name
-                    # This is a fallback - actual size will be determined when pulled
-                    tag_info["size"] = None
-                    tag_info["estimated_ram_gb"] = 4.0  # Default estimate
-                tags.append(tag_info)
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError, re.error):
-        # Scraping failed - will fall back to other methods
-        pass
-    
-    # If we found tags from library scraping, use those
-    if tags:
-        # Cache and return the found tags
-        if hw_info:
-            if not hasattr(hw_info, 'discovered_model_tags'):
-                hw_info.discovered_model_tags = {}
-            cache_key = f"{base_name}_cache"
-            hw_info.discovered_model_tags[cache_key] = {
-                "tags": tags,
-                "timestamp": datetime.now(),
-                "is_failure": len(tags) == 0
-            }
-            hw_info.discovered_model_tags[base_name] = tags
-        return tags
-    
-    # Fallback: Query local Ollama API for model info
-    # Note: /api/show requires POST with JSON body, not GET
-    try:
-        api_url = "http://localhost:11434/api/show"
-        # Ollama /api/show requires POST with JSON body: {"name": "model-name"}
-        request_data = json.dumps({"name": base_name}).encode('utf-8')
-        req = urllib.request.Request(api_url, data=request_data, method="POST")
-        req.add_header("Content-Type", "application/json")
+    # Fetch all pages
+    while True:
+        url = f"https://hub.docker.com/v2/repositories/ai/{base_name}/tags/?page={page}&page_size={page_size}"
         
-        with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
-            if response.status == 200:
-                data = json.loads(response.read().decode('utf-8'))
-                # Model is installed - we can get info, but still generate common variants
-                # Ollama API returns model info, but doesn't list all variants
-                # We'll generate common variants based on the model name
-                # Common Ollama variants: :3b, :7b, :8b, :13b, :34b, :70b
-                common_variants = ["3b", "7b", "8b", "13b", "34b", "70b"]
-                for variant in common_variants:
-                    tag_name = f"{base_name}:{variant}"
+        data = fetch_with_retry(url, max_retries=3, timeout=15)
+        
+        if data is None:
+            # If first page fails, return empty list
+            if page == 1:
+                if not silent:
+                    ui.print_warning(f"Could not fetch tags for {base_name}")
+                # Cache the failure to avoid repeated attempts (shorter TTL - 15 minutes)
+                if hw_info:
+                    if not hasattr(hw_info, 'discovered_model_tags'):
+                        hw_info.discovered_model_tags = {}
+                    cache_key = f"{base_name}_cache"
+                    hw_info.discovered_model_tags[cache_key] = {
+                        "tags": [],
+                        "timestamp": datetime.now(),
+                        "is_failure": True  # Mark as failure for shorter TTL
+                    }
+                return []
+            # If later page fails, return what we have
+            break
+        
+        # Process results
+        if "results" in data:
+            page_tags = data["results"]
+            if not page_tags:
+                # No more results
+                break
+            
+            for tag_result in page_tags:
+                tag_name = tag_result.get("name", "")
+                if tag_name:
+                    # Parse tag info
                     tag_info = parse_tag_info(tag_name)
-                    if tag_info.get("size"):
-                        tags.append(tag_info)
-    except urllib.error.HTTPError as e:
-        # 404 is expected when model is not installed yet - still generate common variants
-        if e.code == 404:
-            # Model not installed - generate common variants anyway for discovery
-            common_variants = ["3b", "7b", "8b", "13b", "34b", "70b"]
-            for variant in common_variants:
-                tag_name = f"{base_name}:{variant}"
-                tag_info = parse_tag_info(tag_name)
-                if tag_info.get("size"):
                     tags.append(tag_info)
-        elif not silent:
-            ui.print_warning(f"Could not fetch tags for {base_name} from Ollama API: {e}")
-    except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        # Network/connection errors - still try to generate common variants
-        if not silent:
-            ui.print_warning(f"Could not fetch tags for {base_name} from Ollama API (model may not be installed yet)")
-        # Generate common variants even on network errors (for discovery)
-        common_variants = ["3b", "7b", "8b", "13b", "34b", "70b"]
-        for variant in common_variants:
-            tag_name = f"{base_name}:{variant}"
-            tag_info = parse_tag_info(tag_name)
-            if tag_info.get("size"):
-                tags.append(tag_info)
+            
+            # Check if there are more pages
+            if "next" not in data or data.get("next") is None:
+                break
+            
+            page += 1
+        else:
+            # No results field - stop
+            break
     
-    # Also check installed models for variants
-    try:
-        api_url = "http://localhost:11434/api/tags"
-        req = urllib.request.Request(api_url, method="GET")
-        req.add_header("Content-Type", "application/json")
-        
-        with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
-            if response.status == 200:
-                data = json.loads(response.read().decode('utf-8'))
-                if "models" in data:
-                    for model in data["models"]:
-                        installed_name = model.get("name", "")
-                        if installed_name.startswith(base_name):
-                            # Extract variant from installed name (e.g., "llama3.2:3b" -> "3b")
-                            if ":" in installed_name:
-                                variant = installed_name.split(":")[1]
-                                tag_name = f"{base_name}:{variant}"
-                                tag_info = parse_tag_info(tag_name)
-                                # Only add if not already in tags
-                                if tag_info.get("size") and not any(t.get("tag_name") == tag_name for t in tags):
-                                    tags.append(tag_info)
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
-        pass
-    
-    # Cache results
+    # Cache results with timestamp
     if hw_info:
         if not hasattr(hw_info, 'discovered_model_tags'):
             hw_info.discovered_model_tags = {}
@@ -983,8 +911,9 @@ def discover_ollama_model_tags(
         hw_info.discovered_model_tags[cache_key] = {
             "tags": tags,
             "timestamp": datetime.now(),
-            "is_failure": len(tags) == 0
+            "is_failure": False  # Mark as successful for longer TTL
         }
+        # Also store directly for backward compatibility
         hw_info.discovered_model_tags[base_name] = tags
     
     return tags
@@ -1055,7 +984,7 @@ def select_best_model_with_fallback(
         Tuple of (model_name, variant_tag) or None if no suitable model found
     """
     # Try primary model family first
-    tags = discover_ollama_model_tags(model_family, hw_info)
+    tags = discover_model_tags(model_family, hw_info)
     if tags:
         # Score all variants
         scored_variants = []
@@ -1076,7 +1005,7 @@ def select_best_model_with_fallback(
         if alt_family == model_family:
             continue  # Skip primary (already tried)
         
-        alt_tags = discover_ollama_model_tags(alt_family, hw_info)
+        alt_tags = discover_model_tags(alt_family, hw_info)
         if alt_tags:
             scored_variants = []
             for tag in alt_tags:
@@ -1203,7 +1132,6 @@ def discover_best_model_by_criteria(
 ) -> Optional[Tuple[str, str]]:
     """
     Discover the best model based on criteria rather than hardcoding model names.
-    First tries catalog models, then falls back to dynamic discovery.
     
     Args:
         target_size: Target model size in billions (e.g., 70.0, 34.0, 13.0, 7.0, 3.0, 1.0)
@@ -1215,105 +1143,14 @@ def discover_best_model_by_criteria(
     Returns:
         Tuple of (model_name, variant_tag) or None if no suitable model found
     """
-    # First, try to find models from catalog that match criteria
-    category_roles = {
-        "reasoning": ["chat", "edit", "agent"],
-        "coding": ["chat", "edit", "autocomplete"],
-        "general": ["chat", "edit"],
-        "multimodal": ["chat", "edit", "vision"],
-        "embedding": ["embed"]
-    }
-    
-    target_roles = category_roles.get(category.lower(), [])
-    if target_roles:
-        # Filter catalog models by category and tier
-        candidate_models = [
-            m for m in MODEL_CATALOG
-            if any(role in m.roles for role in target_roles)
-            and hw_info.tier in m.tiers
-            and m.ram_gb <= ram_budget
-        ]
-        
-        # If target_size specified, filter by approximate size (but be lenient)
-        if target_size is not None:
-            # Calculate approximate model size from RAM (rough estimate: RAM ≈ size * 0.5-0.7 for Q4)
-            filtered_models = []
-            for m in candidate_models:
-                size_estimate = m.ram_gb / 0.6  # Rough conversion
-                # Be lenient: accept models within 70% of target (allows for smaller models too)
-                if size_estimate >= target_size * 0.3 and size_estimate <= target_size * 1.5:
-                    filtered_models.append(m)
-            # If we filtered everything out, use original list (be lenient)
-            if filtered_models:
-                candidate_models = filtered_models
-        
-        # Sort by size match (if target specified) or RAM usage
-        if target_size is not None:
-            candidate_models.sort(key=lambda m: abs((m.ram_gb / 0.6) - target_size))
-        else:
-            candidate_models.sort(key=lambda m: m.ram_gb, reverse=True)  # Prefer larger models
-        
-        # Try each candidate from catalog
-        for model in candidate_models:
-            base_name = model.base_model_name or get_ollama_model_name(model.ollama_name)
-            if not base_name:
-                # If no base_name, try extracting from ollama_name
-                if ":" in model.ollama_name:
-                    base_name = model.ollama_name.split(":")[0]
-                else:
-                    base_name = model.ollama_name
-            
-            if not base_name:
-                continue
-            
-            # Try to discover variants for this model
-            tags = discover_ollama_model_tags(base_name, hw_info, use_cache=True, silent=True)
-            if tags:
-                # Find best variant that fits budget
-                # Filter out "latest" and invalid tags (no size) first
-                valid_tags = [t for t in tags if t.get("size") is not None]
-                if valid_tags:
-                    best_tag = None
-                    best_tag_score = -1
-                    for tag in valid_tags:
-                        size = tag.get("size")
-                        ram_needed = tag.get("estimated_ram_gb", 0)
-                        
-                        if ram_needed > ram_budget:
-                            continue
-                        
-                        if target_size is not None and size is not None and size > 0:
-                            size_diff = abs(size - target_size)
-                            if size < target_size * 0.5:  # Too small
-                                continue
-                            score = 1000000 / (1 + size_diff)  # Prefer closer to target
-                        else:
-                            score = size * 1000 if size is not None and size > 0 else 0  # Prefer larger models
-                        
-                        if score > best_tag_score:
-                            best_tag = tag
-                            best_tag_score = score
-                    
-                    if best_tag:
-                        return (base_name, best_tag.get("tag_name"))
-            
-            # If no variants found but model fits budget and matches size criteria, use base model
-            if model.ram_gb <= ram_budget:
-                # Check size match if target_size specified
-                if target_size is not None:
-                    size_estimate = model.ram_gb / 0.6
-                    if size_estimate >= target_size * 0.5:  # At least 50% of target
-                        return (base_name, None)
-                else:
-                    return (base_name, None)
-    
-    # Fallback to dynamic discovery with updated model names
+    # Define model families by category (prioritized order)
     category_families = {
-        "reasoning": ["llama3.3", "llama3.1", "llama3.2", "phi4", "mistral"],
-        "coding": ["granite-code", "codestral", "devstral", "codellama", "phi4"],
-        "general": ["llama3.3", "llama3.2", "llama3.1", "mistral"],
+        "reasoning": ["llama3.3", "llama3.1", "llama3.2", "phi4", "gpt-oss", "seed-oss", "mistral"],
+        "coding": ["granite-4.0-h-small", "granite-4.0-h-micro", "granite-4.0-h-nano", 
+                  "codestral", "devstral", "codellama", "phi4"],
+        "general": ["llama3.3", "llama3.2", "llama3.1", "mistral", "granite-4.0-h-small"],
         "multimodal": ["gemma3n", "moondream", "smolvlm", "llama3.2", "llama3.1"],
-        "embedding": ["nomic-embed-text", "mxbai-embed-large", "granite-embed"]
+        "embedding": ["nomic-embed-text-v1.5", "mxbai-embed-large", "granite-embedding-multilingual"]
     }
     
     families = category_families.get(category.lower(), [])
@@ -1328,15 +1165,18 @@ def discover_best_model_by_criteria(
     # Try each family in priority order
     for family in families:
         # Use silent=True to suppress warnings for models that may not exist
-        tags = discover_ollama_model_tags(family, hw_info, use_cache=True, silent=True)
+        tags = discover_model_tags(family, hw_info, use_cache=True, silent=True)
         if not tags:
             continue
         
+        # Filter out "latest" and invalid tags (no size) first
+        valid_tags = [t for t in tags if t.get("size") is not None]
+        if not valid_tags:
+            continue
+        
         # Score all variants
-        for tag in tags:
+        for tag in valid_tags:
             size = tag.get("size")
-            if size is None:
-                size = 0
             ram_needed = tag.get("estimated_ram_gb", 0)
             
             # Must fit in budget
@@ -1359,7 +1199,7 @@ def discover_best_model_by_criteria(
             # Heavily penalize models that are much smaller than target
             # Size match scores are multiplied by 100x to dominate over quality scores
             size_match_score = 0
-            if target_size is not None and size is not None and size > 0:
+            if target_size is not None:
                 size_diff = abs(size - target_size)
                 if size_diff == 0:
                     size_match_score = 1000000  # Exact match bonus (100x increase)
@@ -1382,8 +1222,7 @@ def discover_best_model_by_criteria(
                         size_match_score = 100000 - (size_diff * 5000)  # Much larger (100x)
             else:
                 # No target size - prefer larger models that fit
-                # Multiply by 1000 to ensure size dominates quality score (8B gets 8000 vs 4B gets 4000)
-                size_match_score = size * 1000 if size is not None and size > 0 else 0
+                size_match_score = size * 10 if size is not None and size > 0 else 0
             
             total_score = score + size_match_score
             
@@ -1392,9 +1231,9 @@ def discover_best_model_by_criteria(
             should_update = False
             if best_result is None:
                 should_update = True
-            elif target_size is not None and size is not None and size > 0:
+            elif target_size is not None:
                 # Models at or above target size get priority over smaller models
-                current_at_or_above = best_size >= target_size if best_size is not None else False
+                current_at_or_above = best_size >= target_size
                 candidate_at_or_above = size >= target_size
                 
                 # If candidate is at/above target and current is not, prefer candidate
@@ -1402,7 +1241,7 @@ def discover_best_model_by_criteria(
                     should_update = True
                 # If both are at/above target, prefer closer to target
                 elif candidate_at_or_above and current_at_or_above:
-                    current_diff = abs(best_size - target_size) if best_size is not None else float('inf')
+                    current_diff = abs(best_size - target_size)
                     candidate_diff = abs(size - target_size)
                     if candidate_diff < current_diff:
                         should_update = True
@@ -1410,9 +1249,9 @@ def discover_best_model_by_criteria(
                         should_update = True
                 # If both are below target, prefer larger (closer to target)
                 elif not candidate_at_or_above and not current_at_or_above:
-                    if size > (best_size if best_size is not None else 0):
+                    if size > best_size:
                         should_update = True
-                    elif size == (best_size if best_size is not None else 0) and total_score > best_score:
+                    elif size == best_size and total_score > best_score:
                         should_update = True
                 # If current is at/above but candidate is not, keep current (don't update)
             else:
@@ -1424,7 +1263,7 @@ def discover_best_model_by_criteria(
                 best_result = (family, tag.get("tag_name"))
                 best_score = total_score
                 best_size_match = size_match_score
-                best_size = size if size is not None else 0
+                best_size = size
     
     return best_result
 
@@ -1438,7 +1277,7 @@ def select_best_variant(
     Select best model variant tag based on hardware capabilities.
     
     Args:
-        available_tags: List of parsed tag dictionaries from discover_ollama_model_tags()
+        available_tags: List of parsed tag dictionaries from discover_model_tags()
         hw_info: Hardware information for tier and RAM constraints
         preferred_size: Optional preferred size (e.g., "70B", "14B") to prioritize
     
@@ -1521,39 +1360,27 @@ def select_best_variant(
         ram_headroom = 0
     
     # Sort tags by priority:
-    # 1. Size (largest first, but must fit in RAM) - multiplied by 1000 to dominate quantization
-    # 2. Quantization preference: Q4/Q5 preferred, Q8 when RAM allows, F16 when RAM > 10GB
+    # 1. Size (largest first, but must fit in RAM)
+    # 2. Quantization preference based on RAM headroom
     def tag_priority(tag):
         size = tag.get("size", 0)
         is_full = tag.get("is_full_precision", False)
-        quant = tag.get("quantization", "").upper()
+        quant = tag.get("quantization", "")
         ram = tag.get("estimated_ram_gb", 0)
         
-        # Size priority (larger is better, but must fit) - multiply by 1000 to ensure size dominates
-        size_score = size * 1000 if ram <= usable_ram else -1
+        # Size priority (larger is better, but must fit)
+        size_score = size if ram <= usable_ram else -1
         
-        # Quantization priority: Q4/Q5 preferred for best balance
-        # Q4/Q5/Q4_K_M/Q4_0 = 3 (highest - best balance of quality and size)
-        # Q8/Q8_0 = 2.5 (good quality, still quantized)
-        # F16 = 2 (when RAM > 10GB, otherwise 1) - full precision but larger
-        # Q2/Q3 = 1 (lower quality)
-        if quant in ["Q4", "Q4_K_M", "Q4_0", "Q5"]:
-            quant_score = 3
-        elif quant in ["Q8", "Q8_0"]:
-            quant_score = 2.5
-        elif is_full or quant == "F16":
-            # F16 gets score 2 when RAM allows, otherwise 1
-            quant_score = 2 if ram_headroom > 10 else 1
-        elif quant in ["Q2", "Q3"]:
-            quant_score = 1
+        # Quantization priority based on RAM headroom
+        if ram_headroom > 10:
+            # Plenty of RAM - prefer full precision
+            quant_score = 3 if is_full else (2 if quant == "Q4_K_M" else 1)
+        elif ram_headroom > 5:
+            # Moderate RAM - prefer Q4_K_M or full precision
+            quant_score = 3 if (is_full or quant == "Q4_K_M") else 1
         else:
-            # Unknown quantization - default based on RAM headroom
-            if ram_headroom > 10:
-                quant_score = 2 if is_full else 1
-            elif ram_headroom > 5:
-                quant_score = 1.5
-            else:
-                quant_score = 1
+            # Tight RAM - prefer quantized
+            quant_score = 2 if quant == "Q4_K_M" else (1 if quant else 0)
         
         return (size_score, quant_score)
     
@@ -1578,7 +1405,7 @@ def discover_huggingface_models(query: str = "llama", limit: int = 30) -> List[D
         ui.print_info(f"Searching Hugging Face for '{query}'...")
         url = f"https://huggingface.co/api/models?search={query}&filter=gguf&limit={limit}"
         req = urllib.request.Request(url)
-        req.add_header("User-Agent", "Ollama-Model-Runner-Setup/1.0")
+        req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
         
         with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
             data = json.loads(response.read())
@@ -1647,7 +1474,7 @@ def convert_discovered_to_modelinfo(discovered: Dict[str, Any], tier: hardware.H
     
     return ModelInfo(
         name=friendly_name,
-        ollama_name=model_name,
+        docker_name=model_name,
         description=discovered.get("description", "Discovered model"),
         ram_gb=ram_gb,
         context_length=32768,  # Default
@@ -1668,18 +1495,18 @@ def discover_and_select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo
     ui.print_info("Where would you like to search for models?")
     source_choice = ui.prompt_choice(
         "Select source:",
-        ["Ollama Library (ai/ namespace)", "Hugging Face (hf.co/)", "Both"],
+        ["Docker Hub (ai/ namespace)", "Hugging Face (hf.co/)", "Both"],
         default=0
     )
     
-    # Search Ollama Library
+    # Search Docker Hub
     if source_choice in [0, 2]:
         print()
-        search_query = input("Enter search query for Ollama Library (default: 'ai/'): ").strip() or "ai/"
-        ollama_models = discover_ollama_library_models(search_query)
-        all_discovered.extend(ollama_models)
-        if ollama_models:
-            ui.print_success(f"Found {len(ollama_models)} models on Ollama Library")
+        search_query = input("Enter search query for Docker Hub (default: 'ai/'): ").strip() or "ai/"
+        docker_models = discover_docker_hub_models(search_query)
+        all_discovered.extend(docker_models)
+        if docker_models:
+            ui.print_success(f"Found {len(docker_models)} models on Docker Hub")
     
     # Search Hugging Face
     if source_choice in [1, 2]:
@@ -1716,7 +1543,7 @@ def discover_and_select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo
     if chat_models:
         print()
         ui.print_subheader("Chat/Edit Models")
-        choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.ollama_name}", False) for m in chat_models]
+        choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.docker_name}", False) for m in chat_models]
         indices = ui.prompt_multi_choice("Select chat/edit model(s):", choices, min_selections=1)
         for i in indices:
             selected_models.append(chat_models[i])
@@ -1726,7 +1553,7 @@ def discover_and_select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo
         print()
         if ui.prompt_yes_no("Add a dedicated autocomplete model?", default=False):
             ui.print_subheader("Autocomplete Models")
-            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.ollama_name}", False) for m in auto_models]
+            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.docker_name}", False) for m in auto_models]
             indices = ui.prompt_multi_choice("Select autocomplete model:", choices, min_selections=1)
             for i in indices:
                 if auto_models[i] not in selected_models:
@@ -1737,7 +1564,7 @@ def discover_and_select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo
         print()
         if ui.prompt_yes_no("Add an embedding model for code indexing?", default=False):
             ui.print_subheader("Embedding Models")
-            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.ollama_name}", False) for m in embed_models]
+            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.docker_name}", False) for m in embed_models]
             indices = ui.prompt_multi_choice("Select embedding model:", choices, min_selections=1)
             for i in indices:
                 if embed_models[i] not in selected_models:
@@ -1757,7 +1584,7 @@ def is_restricted_model(model: ModelInfo) -> bool:
         "qwen", "deepseek", "deepcoder", "baai", "bge-", "yi", "baichuan",
         "chatglm", "glm", "internlm", "minicpm", "cogvlm", "qianwen", "tongyi"
     ]
-    model_lower = model.name.lower() + " " + model.ollama_name.lower()
+    model_lower = model.name.lower() + " " + model.docker_name.lower()
     return any(keyword in model_lower for keyword in restricted_keywords)
 
 
@@ -1770,11 +1597,11 @@ def is_restricted_model_name(model_name: str) -> bool:
     return any(keyword in model_name.lower() for keyword in restricted_keywords)
 
 
-def is_ollama_unavailable(model: ModelInfo) -> bool:
-    """Check if a model is not available in Ollama Library's ai/ namespace.
+def is_docker_hub_unavailable(model: ModelInfo) -> bool:
+    """Check if a model is not available in Docker Hub's ai/ namespace.
     These models would fail with 401 Unauthorized when trying to pull.
-    Only models confirmed to exist in Ollama Library's ai/ namespace are included."""
-    # Models that don't exist in Ollama Library's ai/ namespace (verified)
+    Only models confirmed to exist in Docker Hub's ai/ namespace are included."""
+    # Models that don't exist in Docker Hub's ai/ namespace (verified)
     unavailable_models = [
         "starcoder2",  # Not in ai/ namespace (401 error confirmed)
         "codegemma",  # Not in ai/ namespace (only in other namespaces)
@@ -1782,10 +1609,10 @@ def is_ollama_unavailable(model: ModelInfo) -> bool:
     ]
     
     # Extract base model name (remove ai/ prefix and any tag)
-    if not model.ollama_name.startswith("ai/"):
+    if not model.docker_name.startswith("ai/"):
         return False
     
-    model_name = model.ollama_name[3:]  # Remove "ai/" prefix
+    model_name = model.docker_name[3:]  # Remove "ai/" prefix
     if ":" in model_name:
         model_name = model_name.split(":")[0]  # Remove tag
     
@@ -1805,24 +1632,24 @@ def _extract_model_size(model_name: str) -> Optional[str]:
 
 def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> bool:
     """
-    Verify that a model actually exists and can be pulled from Ollama.
+    Verify that a model actually exists and can be pulled from Docker Model Runner.
     
     Checks in order:
-    1. Cached Ollama Library models list
+    1. Cached Docker Hub models list
     2. Cached API models list
     3. Direct API query
     4. Known working models
-    5. Ollama Library API fetch
-    6. Ollama Library web scraping fallback
+    5. Docker Hub API fetch
+    6. Docker search fallback
     """
-    # Convert to Ollama Library format
-    base_name = get_ollama_model_name(model.ollama_name)
+    # Convert to Docker Hub format
+    base_name = get_docker_hub_model_name(model.docker_name)
     base_name_lower = base_name.lower()
-    model_lower = model.ollama_name.lower()
+    model_lower = model.docker_name.lower()
     
-    # Check cached Ollama Library models
-    if hasattr(hw_info, 'available_ollama_library_models') and hw_info.available_ollama_library_models:
-        if any(base_name_lower == m.lower() for m in hw_info.available_ollama_library_models):
+    # Check cached Docker Hub models
+    if hasattr(hw_info, 'available_docker_hub_models') and hw_info.available_docker_hub_models:
+        if any(base_name_lower == m.lower() for m in hw_info.available_docker_hub_models):
             return True
     
     # Check cached API models
@@ -1832,9 +1659,9 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
             return True
     
     # Query API directly
-    if hw_info.ollama_available and hw_info.ollama_api_endpoint:
+    if hw_info.docker_model_runner_available and hw_info.dmr_api_endpoint:
         try:
-            api_url = f"{hw_info.ollama_api_endpoint}/models"
+            api_url = f"{hw_info.dmr_api_endpoint}/models"
             req = urllib.request.Request(api_url, method="GET")
             req.add_header("Content-Type", "application/json")
             with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
@@ -1866,15 +1693,15 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
                 return requested_size in [s.lower() if s else None for s in available_sizes]
             return len(available_sizes) > 0
     
-    # Fetch from Ollama Library API if not cached
-    if not hasattr(hw_info, 'available_ollama_library_models') or not hw_info.available_ollama_library_models:
-        ollama_library_models = fetch_available_models_from_ollama_library()
-        if any(base_name_lower == m.lower() for m in ollama_library_models):
+    # Fetch from Docker Hub API if not cached
+    if not hasattr(hw_info, 'available_docker_hub_models') or not hw_info.available_docker_hub_models:
+        docker_hub_models = fetch_available_models_from_docker_hub()
+        if any(base_name_lower == m.lower() for m in docker_hub_models):
             return True
     
-    # Last resort: Ollama Library web scraping
+    # Last resort: Docker search
     search_base = base_name.replace("ai/", "").split(":")[0].split("/")[-1]
-    variants = discover_model_variants(search_base, hw_info)
+    variants = discover_model_variants(f"ai/{search_base}", hw_info)
     if variants:
         return any(base_name_lower == v.lower() or search_base in v.lower().replace("ai/", "")
                    for v in variants)
@@ -1885,39 +1712,39 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
 def get_curated_top_models(tier: hardware.HardwareTier, limit: int = 10, hw_info: Optional[hardware.HardwareInfo] = None) -> List[ModelInfo]:
     """Get curated top models for a hardware tier, prioritizing quality and variety.
     Excludes models from restricted countries (China, Russia) due to political conflicts.
-    Only includes models that are verified to exist in Ollama.
+    Only includes models that are verified to exist in Docker Model Runner.
     If not enough models for the tier, includes models from higher tiers to reach the limit."""
     # Start with models for this tier
     tier_models = get_models_for_tier(tier)
     
-    # Filter out restricted models (Chinese/Russian) and models not available in Ollama Library
-    tier_models = [m for m in tier_models if not is_restricted_model(m) and not is_ollama_unavailable(m)]
+    # Filter out restricted models (Chinese/Russian) and models not available in Docker Hub
+    tier_models = [m for m in tier_models if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
     
-    # Verify models actually exist in Ollama (if hardware info provided)
-    if hw_info and hw_info.ollama_available:
-        ui.print_info("Verifying model availability in Ollama...")
+    # Verify models actually exist in Docker Model Runner (if hardware info provided)
+    if hw_info and hw_info.docker_model_runner_available:
+        ui.print_info("Verifying model availability in Docker Model Runner...")
         verified_models = []
         for model in tier_models:
             if verify_model_available(model, hw_info):
                 verified_models.append(model)
             else:
-                ui.print_warning(f"Skipping {model.name} - not available in Ollama")
+                ui.print_warning(f"Skipping {model.name} - not available in Docker Model Runner")
         tier_models = verified_models
         if tier_models:
             ui.print_success(f"Found {len(tier_models)} verified models for your tier")
     
     # If we don't have enough models, include models from all tiers (filtered)
     if len(tier_models) < limit:
-        all_models = [m for m in MODEL_CATALOG if not is_restricted_model(m) and not is_ollama_unavailable(m)]
+        all_models = [m for m in MODEL_CATALOG if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
         # Prioritize tier-compatible models, then add others
         available = tier_models.copy()
-        seen_names = {m.ollama_name for m in available}
+        seen_names = {m.docker_name for m in available}
         
         # Add models from other tiers that aren't already included
         for m in all_models:
-            if m.ollama_name not in seen_names and len(available) < limit:
+            if m.docker_name not in seen_names and len(available) < limit:
                 available.append(m)
-                seen_names.add(m.ollama_name)
+                seen_names.add(m.docker_name)
     else:
         available = tier_models
     
@@ -1942,85 +1769,100 @@ def get_curated_top_models(tier: hardware.HardwareTier, limit: int = 10, hw_info
     chat_models = [m for m in tier_compatible if ("chat" in m.roles or "edit" in m.roles) and "embed" not in m.roles]
     chat_models.sort(key=lambda m: m.ram_gb, reverse=True)
     for m in chat_models[:6]:
-        if m.ollama_name not in seen_names:
+        if m.docker_name not in seen_names:
             curated.append(m)
-            seen_names.add(m.ollama_name)
+            seen_names.add(m.docker_name)
     
     # 2. Coding-specific models from tier-compatible
-    coder_models = [m for m in tier_compatible if ("coder" in m.name.lower() or "code" in m.name.lower()) and m.ollama_name not in seen_names]
+    coder_models = [m for m in tier_compatible if ("coder" in m.name.lower() or "code" in m.name.lower()) and m.docker_name not in seen_names]
     coder_models.sort(key=lambda m: m.ram_gb, reverse=True)
     for m in coder_models:
         if len(curated) < limit:
             curated.append(m)
-            seen_names.add(m.ollama_name)
+            seen_names.add(m.docker_name)
     
     # 3. Fast autocomplete models from tier-compatible
-    auto_models = [m for m in tier_compatible if "autocomplete" in m.roles and m.ollama_name not in seen_names]
+    auto_models = [m for m in tier_compatible if "autocomplete" in m.roles and m.docker_name not in seen_names]
     auto_models.sort(key=lambda m: m.ram_gb)  # Smallest first
     for m in auto_models[:3]:
         if len(curated) < limit:
             curated.append(m)
-            seen_names.add(m.ollama_name)
+            seen_names.add(m.docker_name)
     
     # 4. Embedding models from tier-compatible
-    embed_models = [m for m in tier_compatible if "embed" in m.roles and m.ollama_name not in seen_names]
+    embed_models = [m for m in tier_compatible if "embed" in m.roles and m.docker_name not in seen_names]
     for m in embed_models[:2]:
         if len(curated) < limit:
             curated.append(m)
-            seen_names.add(m.ollama_name)
+            seen_names.add(m.docker_name)
     
     # 5. Fill remaining slots with other tier-compatible models
-    remaining_tier = [m for m in tier_compatible if m.ollama_name not in seen_names]
+    remaining_tier = [m for m in tier_compatible if m.docker_name not in seen_names]
     remaining_tier.sort(key=lambda m: m.ram_gb, reverse=True)
     for m in remaining_tier:
         if len(curated) >= limit:
             break
         curated.append(m)
-        seen_names.add(m.ollama_name)
+        seen_names.add(m.docker_name)
     
     # 6. If still not enough, add models from other tiers (prioritize smaller ones)
     if len(curated) < limit:
-        other_chat = [m for m in other_models if ("chat" in m.roles or "edit" in m.roles) and "embed" not in m.roles and m.ollama_name not in seen_names]
+        other_chat = [m for m in other_models if ("chat" in m.roles or "edit" in m.roles) and "embed" not in m.roles and m.docker_name not in seen_names]
         other_chat.sort(key=lambda m: m.ram_gb)  # Smaller first (more likely to work)
         for m in other_chat:
             if len(curated) >= limit:
                 break
             curated.append(m)
-            seen_names.add(m.ollama_name)
+            seen_names.add(m.docker_name)
     
     # 7. Fill any remaining slots
-    remaining_all = [m for m in other_models if m.ollama_name not in seen_names]
+    remaining_all = [m for m in other_models if m.docker_name not in seen_names]
     remaining_all.sort(key=lambda m: m.ram_gb)  # Smaller first
     for m in remaining_all:
         if len(curated) >= limit:
             break
         curated.append(m)
-        seen_names.add(m.ollama_name)
+        seen_names.add(m.docker_name)
     
     return curated[:limit]
 
 
-def get_ollama_model_name(ollama_name: str) -> str:
-    """Convert ollama_name to Ollama format (model-name or model-name:tag)."""
-    # Ollama names don't use ai/ prefix - return as-is or extract base
-    if ":" in ollama_name:
-        # Return base name without tag
-        return ollama_name.split(":")[0]
-    return ollama_name
+def get_docker_hub_model_name(docker_name: str) -> str:
+    """Convert docker_name to Docker Hub format (ai/model-name)."""
+    if docker_name.startswith("ai.docker.com/"):
+        # Convert ai.docker.com/org/model:tag -> ai/model
+        remaining = docker_name[len("ai.docker.com/"):]
+        parts = remaining.split("/")
+        if len(parts) > 1:
+            model_part = parts[1]
+        else:
+            model_part = parts[0]
+        # Remove tag
+        if ":" in model_part:
+            model_part = model_part.split(":")[0]
+        return f"ai/{model_part}"
+    elif docker_name.startswith("ai/"):
+        # Already in correct format, just remove tag if present
+        if ":" in docker_name:
+            return docker_name.split(":")[0]
+        return docker_name
+    else:
+        # Fallback: try to extract model name
+        return docker_name
 
 
-def find_modelinfo_by_ollama_name(ollama_name: str) -> Optional[ModelInfo]:
-    """Find ModelInfo object from catalog that matches an Ollama model name."""
-    name_lower = ollama_name.lower()
-    # Extract base name (e.g., "phi4" from "phi4:14b")
-    base_name = name_lower.split(":")[0]
+def find_modelinfo_by_docker_hub_name(docker_hub_name: str) -> Optional[ModelInfo]:
+    """Find ModelInfo object from catalog that matches a Docker Hub model name."""
+    hub_name_lower = docker_hub_name.lower()
+    # Extract base name (e.g., "phi4" from "ai/phi4")
+    base_name = hub_name_lower.replace("ai/", "").split(":")[0]
     
     for model in MODEL_CATALOG:
-        catalog_name = get_ollama_model_name(model.ollama_name).lower()
-        catalog_base = catalog_name.split(":")[0]
+        catalog_hub_name = get_docker_hub_model_name(model.docker_name).lower()
+        catalog_base = catalog_hub_name.replace("ai/", "").split(":")[0]
         
         # Try exact match first
-        if name_lower == catalog_name:
+        if hub_name_lower == catalog_hub_name:
             return model
         
         # Try base name match (e.g., "phi4" matches "phi4")
@@ -2039,18 +1881,18 @@ def get_recommended_models_by_category(hw_info: Optional[hardware.HardwareInfo] 
     Get recommended models organized by category, with role information and tier filtering.
     
     Returns a dictionary mapping category names to lists of model dicts with:
-    - name: Ollama Library model name (ai/model-name)
+    - name: Docker Hub model name (ai/model-name)
     - roles: List of roles this model supports
     - model_info: ModelInfo object if found in catalog (None if not in catalog)
     
     Limits to top 10 models per category and filters by hardware tier.
     """
-    # Fetch all available models from Ollama Library
-    ollama_library_models = []
-    if hw_info and hasattr(hw_info, 'available_ollama_library_models') and hw_info.available_ollama_library_models:
-        ollama_library_models = hw_info.available_ollama_library_models
+    # Fetch all available models from Docker Hub
+    docker_hub_models = []
+    if hw_info and hasattr(hw_info, 'available_docker_hub_models') and hw_info.available_docker_hub_models:
+        docker_hub_models = hw_info.available_docker_hub_models
     else:
-        ollama_library_models = fetch_available_models_from_ollama_library()
+        docker_hub_models = fetch_available_models_from_docker_hub()
     
     # Define category mappings based on model name patterns
     categories: Dict[str, List[Dict[str, Any]]] = {
@@ -2063,12 +1905,12 @@ def get_recommended_models_by_category(hw_info: Optional[hardware.HardwareInfo] 
         "Safety Models": []
     }
     
-    # Map models to categories based on Ollama Library names
+    # Map models to categories based on Docker Hub names
     # Order matters - check more specific categories first
     seen_models = set()
     tier = hw_info.tier if hw_info else hardware.HardwareTier.C
     
-    for model_name in ollama_library_models:
+    for model_name in docker_hub_models:
         if model_name in seen_models:
             continue
         
@@ -2079,7 +1921,7 @@ def get_recommended_models_by_category(hw_info: Optional[hardware.HardwareInfo] 
         model_lower = model_name.lower()
         
         # Find ModelInfo from catalog to get roles and tier info
-        model_info = find_modelinfo_by_ollama_name(model_name)
+        model_info = find_modelinfo_by_docker_hub_name(model_name)
         roles = model_info.roles if model_info else []
         
         # Skip if model_info indicates it's restricted
@@ -2219,7 +2061,7 @@ def validate_model_selection(
     - Total selection ≤85% available RAM
     - Minimum 2GB free RAM after load
     - Model diversity (max 1 per family)
-    - Ollama resources available
+    - Docker resources available
     - Disk space available
     - Network connectivity
     
@@ -2261,9 +2103,8 @@ def validate_model_selection(
     # Check: Model diversity
     families = {}
     for model in models:
-        # Ollama model names don't use prefixes - use as-is
-        ollama_name = model.ollama_name
-        base_family = ollama_name.split("/")[-1].split(":")[0].split("-")[0]
+        docker_name = model.docker_name.replace("ai/", "").replace("ai.docker.com/", "")
+        base_family = docker_name.split("/")[-1].split(":")[0].split("-")[0]
         
         # Normalize family
         if "llama" in base_family.lower():
@@ -2286,25 +2127,31 @@ def validate_model_selection(
     if not has_embed:
         warnings.append("No embedding model selected. Code indexing (@Codebase) will not work.")
     
-    # Check: Ollama resources
-    if hw_info.ollama_available:
-        # Estimate: each model is roughly 50% of its RAM size
-        estimated_download_size = sum(m.ram_gb * 0.5 for m in models)
-        if estimated_download_size > 50:  # Warn if >50GB total download
-            warnings.append(
-                f"Estimated download size: ~{estimated_download_size:.1f}GB. "
-                f"Ensure sufficient disk space and bandwidth."
-            )
+    # Check: Docker resources
+    if hw_info.docker_model_runner_available:
+        # Check Docker disk space (rough estimate)
+        docker_info_code, docker_info_out, _ = utils.run_command(["docker", "system", "df"])
+        if docker_info_code == 0:
+            # Parse Docker disk usage
+            lines = docker_info_out.strip().split("\n")
+            if len(lines) > 1:
+                # Estimate: each model is roughly 50% of its RAM size
+                estimated_download_size = sum(m.ram_gb * 0.5 for m in models)
+                if estimated_download_size > 50:  # Warn if >50GB total download
+                    warnings.append(
+                        f"Estimated download size: ~{estimated_download_size:.1f}GB. "
+                        f"Ensure sufficient disk space and bandwidth."
+                    )
     else:
-        warnings.append("Ollama not available. Models cannot be downloaded.")
+        warnings.append("Docker Model Runner not available. Models cannot be downloaded.")
     
     # Check: Network connectivity (basic check with retries)
     # This is a non-blocking check - failures only generate warnings
     network_ok = False
     for attempt in range(2):  # Try twice before giving up
         try:
-            req = urllib.request.Request("https://ollama.com")
-            req.add_header("User-Agent", "Ollama-LLM-Setup/1.0")
+            req = urllib.request.Request("https://hub.docker.com")
+            req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
             with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
                 # Connection is properly closed when exiting the with block
                 network_ok = True
@@ -2321,14 +2168,14 @@ def validate_model_selection(
             break
     
     if not network_ok:
-        warnings.append("Cannot reach Ollama. Model downloads may fail. (You can proceed if models are already cached)")
+        warnings.append("Cannot reach Docker Hub. Model downloads may fail. (You can proceed if models are already cached)")
     
     # Determine if valid (warnings are non-critical, errors would be critical)
-    # Only block on actual critical issues: system instability or Ollama not available
+    # Only block on actual critical issues: system instability or Docker not available
     critical_warnings = [
         w for w in warnings 
         if "may become unstable" in w.lower() 
-        or ("cannot" in w.lower() and "ollama" in w.lower() and "not available" in w.lower())
+        or ("cannot" in w.lower() and "docker model runner" in w.lower() and "not available" in w.lower())
     ]
     is_valid = len(critical_warnings) == 0
     
@@ -2415,7 +2262,7 @@ def fetch_model_tags_concurrent(
     Features:
     - Parallel API calls (max 5 workers for rate limiting)
     - Caching results in hw_info
-    - Rate limiting to avoid overwhelming Ollama Library API
+    - Rate limiting to avoid overwhelming Docker Hub API
     
     Args:
         model_names: List of model names to fetch tags for
@@ -2454,7 +2301,7 @@ def fetch_model_tags_concurrent(
     def fetch_single_model(model_name: str) -> Tuple[str, List[Dict[str, Any]]]:
         """Fetch tags for a single model."""
         try:
-            tags = discover_ollama_model_tags(model_name, hw_info, use_cache=False)
+            tags = discover_model_tags(model_name, hw_info, use_cache=False)
             return (model_name, tags)
         except Exception as e:
             ui.print_warning(f"Error fetching tags for {model_name}: {e}")
@@ -2553,9 +2400,8 @@ def ensure_model_diversity(selected_models: List[ModelInfo]) -> List[ModelInfo]:
     
     for model in selected_models:
         # Extract family name (e.g., "llama" from "llama3.3")
-        # Ollama model names don't use prefixes - use as-is
-        ollama_model_name = model.ollama_name
-        base_family = ollama_model_name.split("/")[-1].split(":")[0].split("-")[0]
+        docker_name = model.docker_name.replace("ai/", "").replace("ai.docker.com/", "")
+        base_family = docker_name.split("/")[-1].split(":")[0].split("-")[0]
         
         # Normalize family names
         if "llama" in base_family.lower():
@@ -2640,7 +2486,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = primary_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "reasoning", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="34B reasoning model",
                 ram_gb=calculate_model_ram(34.0, "Q4"),
                 context_length=131072,
@@ -2657,7 +2503,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = coding_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="22B coding model",
                 ram_gb=calculate_model_ram(22.0, "Q5"),
                 context_length=131072,
@@ -2674,7 +2520,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = multimodal_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "multimodal", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="13B multimodal model",
                 ram_gb=calculate_model_ram(13.0, "Q5"),
                 context_length=131072,
@@ -2692,7 +2538,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = primary_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "reasoning", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="34B reasoning model",
                 ram_gb=calculate_model_ram(34.0, "Q4"),
                 context_length=131072,
@@ -2708,7 +2554,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = coding_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="13B coding model",
                 ram_gb=calculate_model_ram(13.0, "Q5"),
                 context_length=131072,
@@ -2724,7 +2570,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = multimodal_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "multimodal", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="7B multimodal model",
                 ram_gb=calculate_model_ram(7.0, "Q4"),
                 context_length=16384,
@@ -2742,7 +2588,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = primary_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "general", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="13B general model",
                 ram_gb=calculate_model_ram(13.0, "Q4"),
                 context_length=131072,
@@ -2758,7 +2604,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = coding_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="7B coding model",
                 ram_gb=calculate_model_ram(7.0, "Q4"),
                 context_length=16384,
@@ -2774,7 +2620,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = multimodal_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "multimodal", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="3B multimodal model",
                 ram_gb=calculate_model_ram(3.0, "Q4"),
                 context_length=32768,
@@ -2792,7 +2638,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = primary_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "general", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="7B general model",
                 ram_gb=calculate_model_ram(7.0, "Q4"),
                 context_length=131072,
@@ -2808,7 +2654,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = coding_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="3B coding model",
                 ram_gb=calculate_model_ram(3.0, "Q4"),
                 context_length=32768,
@@ -2819,18 +2665,12 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             )
             recommended.append(model_info)
         
-        # Utility model: Try to find a small model (1B or similar)
-        # Use a more generous budget (utility + some reserve) since 1B models need ~0.6-0.7GB
-        utility_budget_extended = utility_budget + (usable_ram * 0.05)  # Add 5% from reserve
-        utility_result = discover_best_model_by_criteria(1.0, "general", utility_budget_extended, hw_info)
-        if not utility_result:
-            # Fallback: try with no size constraint but still within extended budget
-            utility_result = discover_best_model_by_criteria(None, "general", utility_budget_extended, hw_info)
+        utility_result = discover_best_model_by_criteria(1.0, "coding", utility_budget, hw_info)
         if utility_result:
             model_name, variant = utility_result
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "utility", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="1B utility model",
                 ram_gb=calculate_model_ram(1.0, "Q4"),
                 context_length=2048,
@@ -2865,7 +2705,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             model_name, variant = embed_result
             embed_model = ModelInfo(
                 name=get_display_name_from_model(model_name, "embedding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
+                docker_name=f"ai/{model_name}",
                 description="Embedding model",
                 ram_gb=calculate_model_ram(0.3, "Q4"),  # Small embedding model
                 context_length=8192,
@@ -2879,7 +2719,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         # Create a copy to avoid modifying the catalog
         embed_info = ModelInfo(
             name=embed_model.name,
-            ollama_name=embed_model.ollama_name,
+            docker_name=embed_model.docker_name,
             description=embed_model.description,
             ram_gb=embed_model.ram_gb,
             context_length=embed_model.context_length,
@@ -2896,7 +2736,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
     # Update RAM estimates based on actual selected variants
     for model in recommended:
         if model.selected_variant and model.base_model_name:
-            tags = discover_ollama_model_tags(model.base_model_name, hw_info, use_cache=True)
+            tags = discover_model_tags(model.base_model_name, hw_info, use_cache=True)
             for tag in tags:
                 if tag.get("tag_name") == model.selected_variant:
                     model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
@@ -2909,7 +2749,7 @@ def get_tier_optimized_recommendation(hw_info: hardware.HardwareInfo) -> Dict[st
     """
     Get tier-optimized recommendation - best model from each relevant category.
     
-    Returns a dictionary mapping category names to Ollama Library model names (ai/model-name).
+    Returns a dictionary mapping category names to Docker Hub model names (ai/model-name).
     Selects one model from each relevant category based on hardware tier and RAM constraints.
     """
     categories = get_recommended_models_by_category(hw_info)
@@ -3166,10 +3006,10 @@ def customize_from_categories(hw_info: hardware.HardwareInfo) -> List[ModelInfo]
                 # If we have ModelInfo, use it; otherwise create a basic one
                 if model_info:
                     # Check if this is a base model that needs variant selection
-                    base_name = model_info.base_model_name or get_ollama_model_name(model_info.ollama_name).replace("ai/", "")
+                    base_name = model_info.base_model_name or get_docker_hub_model_name(model_info.docker_name).replace("ai/", "")
                     if not model_info.selected_variant and base_name:
                         # Discover and select best variant
-                        tags = discover_ollama_model_tags(base_name, hw_info)
+                        tags = discover_model_tags(base_name, hw_info)
                         if tags:
                             selected_tag = select_best_variant(tags, hw_info)
                             if selected_tag:
@@ -3181,16 +3021,16 @@ def customize_from_categories(hw_info: hardware.HardwareInfo) -> List[ModelInfo]
                                         model_info.ram_gb = tag.get("estimated_ram_gb", model_info.ram_gb)
                                         break
                     
-                    if model_info.ollama_name not in seen_names:
+                    if model_info.docker_name not in seen_names:
                         selected_models.append(model_info)
-                        seen_names.add(model_info.ollama_name)
+                        seen_names.add(model_info.docker_name)
                 else:
                     # Create a basic ModelInfo for models not in catalog
-                    hub_name = get_ollama_model_name(model_name)
+                    hub_name = get_docker_hub_model_name(model_name)
                     base_name = hub_name.replace("ai/", "")
                     
                     # Discover and select best variant
-                    tags = discover_ollama_model_tags(base_name, hw_info)
+                    tags = discover_model_tags(base_name, hw_info)
                     selected_tag = None
                     estimated_ram = 4.0
                     if tags:
@@ -3203,8 +3043,8 @@ def customize_from_categories(hw_info: hardware.HardwareInfo) -> List[ModelInfo]
                     
                     basic_model = ModelInfo(
                         name=model_name.replace("ai/", "").replace("-", " ").title(),
-                        ollama_name=hub_name,
-                        description=f"Ollama Library model: {model_name}",
+                        docker_name=hub_name,
+                        description=f"Docker Hub model: {model_name}",
                         ram_gb=estimated_ram,
                         context_length=8192,
                         roles=model_dict.get("roles", ["chat"]),
@@ -3212,9 +3052,9 @@ def customize_from_categories(hw_info: hardware.HardwareInfo) -> List[ModelInfo]
                         base_model_name=base_name,
                         selected_variant=selected_tag
                     )
-                    if basic_model.ollama_name not in seen_names:
+                    if basic_model.docker_name not in seen_names:
                         selected_models.append(basic_model)
-                        seen_names.add(basic_model.ollama_name)
+                        seen_names.add(basic_model.docker_name)
         
         print()
     
@@ -3228,15 +3068,15 @@ def get_top_models_by_role(tier: hardware.HardwareTier, hw_info: Optional[hardwa
     Returns a dictionary mapping role names to lists of models, sorted by quality within each role.
     Automatically picks the best size variant (3B, 8B, 14B, 70B, etc.) for the tier.
     
-    Uses ollama search to discover available variants and verify models exist.
+    Uses docker search to discover available variants and verify models exist.
     """
     # Get all models for this tier
     available = get_models_for_tier(tier)
     
     # Filter out restricted models and unavailable models
-    available = [m for m in available if not is_restricted_model(m) and not is_ollama_unavailable(m)]
+    available = [m for m in available if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
     
-    # Verify models exist using multiple methods (Ollama Library API, ollama search, etc.)
+    # Verify models exist using multiple methods (Docker Hub API, docker search, etc.)
     if hw_info:
         verified_available = []
         ui.print_info("Verifying model availability and discovering variants...")
@@ -3245,7 +3085,7 @@ def get_top_models_by_role(tier: hardware.HardwareTier, hw_info: Optional[hardwa
                 verified_available.append(model)
             else:
                 # Try variant discovery as a fallback
-                variants = discover_model_variants(model.ollama_name, hw_info)
+                variants = discover_model_variants(model.docker_name, hw_info)
                 if variants:
                     # Model exists in some form, keep it
                     verified_available.append(model)
@@ -3279,17 +3119,17 @@ def get_top_models_by_role(tier: hardware.HardwareTier, hw_info: Optional[hardwa
 def get_recommended_models(tier: hardware.HardwareTier, hw_info: Optional[hardware.HardwareInfo] = None) -> Dict[str, ModelInfo]:
     """Get recommended models for each role based on tier and chip capabilities.
     Excludes models from restricted countries (China, Russia) due to political conflicts.
-    Only includes models verified to exist in Ollama.
+    Only includes models verified to exist in Docker Model Runner.
     Enhanced to consider chip performance for better recommendations."""
     recommendations: Dict[str, ModelInfo] = {}
     
     available = get_models_for_tier(tier)
     
-    # Filter out restricted models (Chinese/Russian) and models not available in Ollama Library
-    available = [m for m in available if not is_restricted_model(m) and not is_ollama_unavailable(m)]
+    # Filter out restricted models (Chinese/Russian) and models not available in Docker Hub
+    available = [m for m in available if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
     
-    # Verify models actually exist in Ollama (if hardware info provided)
-    if hw_info and hw_info.ollama_available:
+    # Verify models actually exist in Docker Model Runner (if hardware info provided)
+    if hw_info and hw_info.docker_model_runner_available:
         verified_available = []
         for model in available:
             if verify_model_available(model, hw_info):
@@ -3407,8 +3247,8 @@ def select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
         return []
 
 
-def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
-    """Pull selected models using Ollama."""
+def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
+    """Pull selected models using Docker Model Runner."""
     # Input validation
     if not model_list:
         ui.print_warning("No models provided to pull")
@@ -3416,15 +3256,15 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
     if not hw_info:
         raise ValueError("hw_info is required")
     
-    ui.print_header("📥 Downloading Models via Ollama")
+    ui.print_header("📥 Downloading Models via Docker Model Runner")
     
-    if not hw_info.ollama_available:
-        ui.print_warning("Ollama not available. Skipping model download.")
+    if not hw_info.docker_model_runner_available:
+        ui.print_warning("Docker Model Runner not available. Skipping model download.")
         ui.print_info("Models will be downloaded when you first use them in Continue.dev.")
         print()
         ui.print_info("To manually pull models later, run:")
         for model in model_list:
-            print(ui.colorize(f"    ollama pull {model.ollama_name}", ui.Colors.CYAN))
+            print(ui.colorize(f"    docker model pull {model.docker_name}", ui.Colors.CYAN))
         return model_list
     
     successfully_pulled: List[ModelInfo] = []
@@ -3437,168 +3277,111 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
     
     for i, model in enumerate(model_list, 1):
         ui.print_step(i, len(model_list), f"Pulling {model.name}...")
-        ui.print_info(f"Model: {model.ollama_name}")
+        ui.print_info(f"Model: {model.docker_name}")
         ui.print_info(f"Estimated download: ~{model.ram_gb * 0.5:.1f}GB")
         ui.print_info(f"Memory required: ~{model.ram_gb:.1f}GB")
         print()
         
-        # Determine model name format for Ollama
-        # Ollama uses format: model-name or model-name:tag (e.g., "llama3.2:3b")
-        model_name_to_pull = model.ollama_name
+        # Determine model name format and handle legacy ai.docker.com format
+        # Docker Model Runner supports:
+        # - Docker Hub: ai/model-name (e.g., ai/llama3.2)
+        # - Hugging Face: hf.co/username/model-name
+        # Legacy format: ai.docker.com/org/model:tag (convert directly to ai/model-name)
+        model_name_to_pull = model.docker_name
         
         # Check if we have a selected variant that needs to be applied
         base_model_name = None
         if model.selected_variant:
             # We have a selected variant, use it
-            base_model_name = model.base_model_name or model.ollama_name.split(":")[0]
+            base_model_name = model.base_model_name or get_docker_hub_model_name(model.docker_name).replace("ai/", "").split(":")[0]
             if base_model_name:
-                # Extract variant part - selected_variant might be full format (model:tag) or just tag
-                variant_part = model.selected_variant
-                if ":" in variant_part:
-                    # If it contains ":", check if it starts with base_model_name
-                    if variant_part.startswith(f"{base_model_name}:"):
-                        # Full format like "granite-code:latest" - extract just the tag part
-                        variant_part = variant_part.split(":", 1)[1]
-                    else:
-                        # Different format, use the part after the last ":"
-                        variant_part = variant_part.split(":")[-1]
-                # Ollama variant format: model-name:tag (e.g., "llama3.2:3b")
-                model_name_to_pull = f"{base_model_name}:{variant_part}"
+                model_name_to_pull = f"ai/{base_model_name}:{model.selected_variant}"
         elif model.base_model_name:
             # We have a base model name but no variant selected yet - discover and select
             base_model_name = model.base_model_name
             ui.print_info(f"Discovering variants for {model.name}...")
-            tags = discover_ollama_model_tags(base_model_name, hw_info)
+            tags = discover_model_tags(base_model_name, hw_info)
             if tags:
                 selected_tag = select_best_variant(tags, hw_info)
                 if selected_tag:
                     model.selected_variant = selected_tag
-                    # Extract just the variant part (e.g., "3b" from "llama3.2:3b" or "latest" from "granite-code:latest")
-                    variant_part = selected_tag
-                    if ":" in variant_part:
-                        # If it contains ":", check if it starts with base_model_name
-                        if variant_part.startswith(f"{base_model_name}:"):
-                            # Full format like "granite-code:latest" - extract just the tag part
-                            variant_part = variant_part.split(":", 1)[1]
-                        else:
-                            # Different format, use the part after the last ":"
-                            variant_part = variant_part.split(":")[-1]
-                    model_name_to_pull = f"{base_model_name}:{variant_part}"
-                    ui.print_success(f"Auto-selected variant: {variant_part} (best for your hardware)")
+                    model_name_to_pull = f"ai/{base_model_name}:{selected_tag}"
+                    ui.print_success(f"Auto-selected variant: {selected_tag} (best for your hardware)")
                     # Update RAM estimate
                     for tag in tags:
-                        tag_name = tag.get("tag_name", "")
-                        if variant_part in tag_name or selected_tag in tag_name:
+                        if tag.get("tag_name") == selected_tag:
                             model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
                             break
                 else:
                     ui.print_warning(f"Could not select variant for {model.name}, using base model")
-                    # Fall back to ollama_name if base_model_name looks incorrect
-                    if base_model_name != model.ollama_name and ":" not in model.ollama_name:
-                        model_name_to_pull = model.ollama_name
-                    else:
-                        model_name_to_pull = base_model_name
+                    model_name_to_pull = f"ai/{base_model_name}"
             else:
                 ui.print_warning(f"Could not discover variants for {model.name}, using base model")
-                # Fall back to ollama_name if base_model_name looks incorrect or doesn't match
-                # This handles cases where base_model_name is set incorrectly (e.g., "nomic-embed-text-v1.5" vs "nomic-embed-text")
-                if base_model_name != model.ollama_name and ":" not in model.ollama_name:
-                    model_name_to_pull = model.ollama_name
-                else:
-                    model_name_to_pull = base_model_name
+                model_name_to_pull = f"ai/{base_model_name}"
         else:
-            # Extract base name if it has a tag
-            if ":" in model.ollama_name:
-                base_model_name = model.ollama_name.split(":")[0]
-            else:
-                base_model_name = model.ollama_name
+            # Try to extract base name from docker_name if it's in ai/ format
+            if model.docker_name.startswith("ai/"):
+                base_model_name = model.docker_name.replace("ai/", "").split(":")[0]
+                # Only try variant discovery if it looks like a base model (no size variant in name)
+                if not re.search(r'[0-9]+\s*b', base_model_name, re.IGNORECASE):
+                    ui.print_info(f"Discovering variants for {model.name}...")
+                    tags = discover_model_tags(base_model_name, hw_info)
+                    if tags:
+                        selected_tag = select_best_variant(tags, hw_info)
+                        if selected_tag:
+                            model.selected_variant = selected_tag
+                            model.base_model_name = base_model_name
+                            model_name_to_pull = f"ai/{base_model_name}:{selected_tag}"
+                            ui.print_success(f"Auto-selected variant: {selected_tag} (best for your hardware)")
+                            # Update RAM estimate
+                            for tag in tags:
+                                if tag.get("tag_name") == selected_tag:
+                                    model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
+                                    break
+        
+        # Convert legacy ai.docker.com format directly to Docker Hub format
+        # No DNS check needed - ai.docker.com doesn't exist, always convert
+        if model_name_to_pull.startswith("ai.docker.com/"):
+            # Convert to Docker Hub format
+            # ai.docker.com/org/model:tag -> ai/model-name
+            # Remove ai.docker.com/ prefix
+            remaining = model_name_to_pull[len("ai.docker.com/"):]
             
-            # Only try variant discovery if it looks like a base model (no size variant in name)
-            if not re.search(r'[0-9]+\s*b', base_model_name, re.IGNORECASE):
-                ui.print_info(f"Discovering variants for {model.name}...")
-                tags = discover_ollama_model_tags(base_model_name, hw_info)
-                if tags:
-                    selected_tag = select_best_variant(tags, hw_info)
-                    if selected_tag:
-                        model.selected_variant = selected_tag
-                        model.base_model_name = base_model_name
-                        # Extract variant part (e.g., "3b" from "llama3.2:3b" or "8b" from "granite-code:8b")
-                        variant_part = selected_tag
-                        if ":" in variant_part:
-                            # If it contains ":", check if it starts with base_model_name
-                            if variant_part.startswith(f"{base_model_name}:"):
-                                # Full format like "granite-code:8b" - extract just the tag part
-                                variant_part = variant_part.split(":", 1)[1]
-                            else:
-                                # Different format, use the part after the last ":"
-                                variant_part = variant_part.split(":")[-1]
-                        model_name_to_pull = f"{base_model_name}:{variant_part}"
-                        ui.print_success(f"Auto-selected variant: {variant_part} (best for your hardware)")
-                        # Update RAM estimate
-                        for tag in tags:
-                            tag_name = tag.get("tag_name", "")
-                            if variant_part in tag_name or selected_tag in tag_name:
-                                model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
-                                break
-                    else:
-                        # select_best_variant returned None - check if we have quantized variants available
-                        # Filter out "latest" and find the largest quantized variant that fits
-                        quantized_tags = [t for t in tags if t.get("size") is not None and t.get("quantization")]
-                        if quantized_tags:
-                            # Sort by size (largest first) and quantization (Q4/Q5 preferred)
-                            def quantized_priority(tag):
-                                size = tag.get("size", 0)
-                                quant = (tag.get("quantization") or "").upper()
-                                # Size first (multiply by 1000), then quantization preference
-                                size_score = size * 1000
-                                if quant in ["Q4", "Q4_K_M", "Q4_0", "Q5"]:
-                                    quant_score = 3
-                                elif quant in ["Q8", "Q8_0"]:
-                                    quant_score = 2.5
-                                elif quant == "F16":
-                                    quant_score = 2
-                                else:
-                                    quant_score = 1
-                                return (size_score, quant_score)
-                            
-                            quantized_tags.sort(key=quantized_priority, reverse=True)
-                            # Filter by RAM fit
-                            usable_ram = hw_info.get_estimated_model_memory()
-                            fitting_quantized = [t for t in quantized_tags if t.get("estimated_ram_gb", 0) <= usable_ram]
-                            
-                            if fitting_quantized:
-                                best_quantized = fitting_quantized[0]
-                                selected_tag = best_quantized.get("tag_name")
-                                model.selected_variant = selected_tag
-                                model.base_model_name = base_model_name
-                                # Extract variant part
-                                variant_part = selected_tag
-                                if ":" in variant_part:
-                                    if variant_part.startswith(f"{base_model_name}:"):
-                                        variant_part = variant_part.split(":", 1)[1]
-                                    else:
-                                        variant_part = variant_part.split(":")[-1]
-                                model_name_to_pull = f"{base_model_name}:{variant_part}"
-                                ui.print_success(f"Auto-selected quantized variant: {variant_part} (best for your hardware)")
-                                # Update RAM estimate
-                                model.ram_gb = best_quantized.get("estimated_ram_gb", model.ram_gb)
-                            else:
-                                # No quantized variants fit - fall back to original ollama_name (might be :latest)
-                                ui.print_warning(f"No quantized variants fit in available RAM, using {model.ollama_name}")
-                        else:
-                            # No quantized variants found - fall back to original ollama_name
-                            ui.print_warning(f"No quantized variants found for {base_model_name}, using {model.ollama_name}")
+            # Remove organization prefix (meta/, mistral/, microsoft/, etc.)
+            parts = remaining.split("/")
+            if len(parts) > 1:
+                # Has org prefix, remove it
+                model_part = parts[1]
+            else:
+                model_part = parts[0]
+            
+            # Special handling for nomic-embed-text: version is part of model name, not a tag
+            # ai.docker.com/nomic/nomic-embed-text:v1.5 -> ai/nomic-embed-text-v1.5
+            if "nomic-embed-text" in model_part.lower():
+                # Extract version from tag and append to model name
+                if ":" in model_part:
+                    model_base, version = model_part.split(":", 1)
+                    # Convert v1.5 -> v1.5, or just use as-is
+                    model_part = f"{model_base}-{version}"
+                model_name_to_pull = f"ai/{model_part}"
+            else:
+                # For other models, remove tag (everything after :)
+                if ":" in model_part:
+                    model_part = model_part.split(":")[0]
+                
+                # Convert to Docker Hub format: ai/modelname
+                model_name_to_pull = f"ai/{model_part}"
         
         # Log the actual command being executed
         variant_info = ""
         if model.selected_variant:
             variant_info = f" ({model.selected_variant} variant)"
-        ui.print_info(f"Command: {ui.colorize(f'ollama pull {model_name_to_pull}', ui.Colors.CYAN)}")
+        ui.print_info(f"Command: {ui.colorize(f'docker model pull {model_name_to_pull}', ui.Colors.CYAN)}")
         if variant_info:
             ui.print_info(f"Selected variant{variant_info} based on your hardware ({hw_info.ram_gb:.1f}GB RAM)")
         print()
         
-        # Run ollama pull
+        # Run docker model pull
         # We don't capture output so user can see download progress
         
         # Initialize full_output for error handling
@@ -3608,7 +3391,7 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         
         try:
             process = subprocess.Popen(
-                ["ollama", "pull", model_name_to_pull],
+                ["docker", "model", "pull", model_name_to_pull],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -3625,152 +3408,56 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                     progress_bar = None
                     task_id = None
                     
-                    # Parse Ollama output for progress information
-                    # Ollama outputs JSON lines with status updates OR text format with progress bars
+                    # Parse Docker output for progress information
                     for line in process.stdout:
                         line = line.strip()
                         if line:
                             full_output.append(line)
                             
-                            # Try to parse as JSON first (Ollama outputs JSON lines)
-                            try:
-                                progress_data = json.loads(line)
-                                status = progress_data.get("status", "")
-                                completed = progress_data.get("completed", 0)
-                                total = progress_data.get("total", 0)
+                            # Try to extract progress from Docker output
+                            # Format: "Downloaded X of Y" or "Downloaded X/Y"
+                            progress_match = re.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re.IGNORECASE)
+                            if progress_match:
+                                downloaded_val = float(progress_match.group(1))
+                                downloaded_unit = (progress_match.group(2) or progress_match.group(4) or "B").upper()
+                                total_val = float(progress_match.group(3))
+                                total_unit = (progress_match.group(4) or "B").upper()
                                 
-                                if status == "downloading" and total > 0:
-                                    # Initialize progress bar on first download status with total
-                                    if progress_bar is None:
-                                        progress_bar = Progress(
-                                            SpinnerColumn(),
-                                            TextColumn("[progress.description]{task.description}"),
-                                            BarColumn(),
-                                            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                                            DownloadColumn(),
-                                            TransferSpeedColumn(),
-                                            TimeRemainingColumn(),
-                                            console=console
-                                        )
-                                        progress_bar.start()
-                                        task_id = progress_bar.add_task(
-                                            f"[cyan]Downloading {model.name}...",
-                                            total=total
-                                        )
-                                    
-                                    # Update progress bar
-                                    if progress_bar and task_id is not None:
-                                        progress_bar.update(task_id, completed=completed)
-                                elif status == "pulling manifest":
-                                    # Show manifest pulling status
-                                    if progress_bar is None:
-                                        # Initialize progress bar even without total yet
-                                        progress_bar = Progress(
-                                            SpinnerColumn(),
-                                            TextColumn("[progress.description]{task.description}"),
-                                            console=console
-                                        )
-                                        progress_bar.start()
-                                        task_id = progress_bar.add_task(
-                                            f"[cyan]Pulling manifest for {model.name}...",
-                                            total=None  # Indeterminate
-                                        )
-                                elif status == "success" or status == "pulled":
-                                    # Download complete
-                                    if progress_bar:
-                                        progress_bar.stop()
-                                    console.print(f"[green]✓ {model.name} downloaded successfully[/green]")
-                                elif status == "error":
-                                    # Error occurred
-                                    if progress_bar:
-                                        progress_bar.stop()
-                                    error_msg = progress_data.get("error", "Unknown error")
-                                    console.print(f"[red]✗ Error: {error_msg}[/red]")
-                            except (json.JSONDecodeError, ValueError, KeyError):
-                                # Fall back to text parsing for non-JSON lines
-                                # Ollama outputs text format: "pulling <hash>: <percent>% <bar> <downloaded> <unit>/<total> <unit> <speed> <time>"
-                                # Or: "pulling manifest", "verifying sha256", etc.
-                                # Downloaded can be in KB, MB, or GB; total is usually in GB
+                                # Convert to bytes for consistent calculation
+                                unit_multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+                                downloaded_bytes = downloaded_val * unit_multipliers.get(downloaded_unit, 1)
+                                total_bytes = total_val * unit_multipliers.get(total_unit, 1)
                                 
-                                # Try to parse Ollama's text progress format
-                                # Format: "pulling <hash>: <percent>% ... <downloaded> <unit>/<total> <unit>"
-                                # Match: "pulling <hash>: <percent>% ... <downloaded> <KB|MB|GB>/<total> <KB|MB|GB>"
-                                ollama_progress_match = re.search(r'pulling\s+\w+:\s*(\d+)%\s+.*?(\d+\.?\d*)\s*(KB|MB|GB)/(\d+\.?\d*)\s*(KB|MB|GB)', line, re.IGNORECASE)
-                                if ollama_progress_match:
-                                    percent = int(ollama_progress_match.group(1))
-                                    downloaded_val = float(ollama_progress_match.group(2))
-                                    downloaded_unit = ollama_progress_match.group(3).upper()
-                                    total_val = float(ollama_progress_match.group(4))
-                                    total_unit = ollama_progress_match.group(5).upper()
-                                    
-                                    # Convert to bytes
-                                    unit_multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
-                                    downloaded_bytes = downloaded_val * unit_multipliers.get(downloaded_unit, 1)
-                                    total_bytes = total_val * unit_multipliers.get(total_unit, 1)
-                                    
-                                    if total_bytes > 0 and progress_bar is None:
-                                        # Initialize progress bar on first progress update
-                                        progress_bar = Progress(
-                                            SpinnerColumn(),
-                                            TextColumn("[progress.description]{task.description}"),
-                                            BarColumn(),
-                                            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                                            DownloadColumn(),
-                                            TransferSpeedColumn(),
-                                            TimeRemainingColumn(),
-                                            console=console
-                                        )
-                                        progress_bar.start()
-                                        task_id = progress_bar.add_task(
-                                            f"[cyan]Downloading {model.name}...",
-                                            total=total_bytes
-                                        )
-                                    
-                                    if progress_bar and task_id is not None:
-                                        progress_bar.update(task_id, completed=downloaded_bytes)
-                                # Try legacy format: "Downloaded X of Y"
-                                elif re.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re.IGNORECASE):
-                                    progress_match = re.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re.IGNORECASE)
-                                    downloaded_val = float(progress_match.group(1))
-                                    downloaded_unit = (progress_match.group(2) or progress_match.group(4) or "B").upper()
-                                    total_val = float(progress_match.group(3))
-                                    total_unit = (progress_match.group(4) or "B").upper()
-                                    
-                                    # Convert to bytes for consistent calculation
-                                    unit_multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
-                                    downloaded_bytes = downloaded_val * unit_multipliers.get(downloaded_unit, 1)
-                                    total_bytes = total_val * unit_multipliers.get(total_unit, 1)
-                                    
-                                    if total_bytes > 0 and progress_bar is None:
-                                        # Initialize progress bar on first progress update
-                                        progress_bar = Progress(
-                                            SpinnerColumn(),
-                                            TextColumn("[progress.description]{task.description}"),
-                                            BarColumn(),
-                                            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                                            DownloadColumn(),
-                                            TransferSpeedColumn(),
-                                            TimeRemainingColumn(),
-                                            console=console
-                                        )
-                                        progress_bar.start()
-                                        task_id = progress_bar.add_task(
-                                            f"[cyan]Downloading {model.name}...",
-                                            total=total_bytes
-                                        )
-                                    
-                                    if progress_bar and task_id is not None:
-                                        progress_bar.update(task_id, completed=downloaded_bytes)
-                                # Check for completion keywords
-                                elif "complete" in line.lower() or "done" in line.lower() or "pulled" in line.lower() or "success" in line.lower():
-                                    if progress_bar:
-                                        progress_bar.stop()
-                                    console.print(f"[green]✓ {model.name} downloaded successfully[/green]")
-                                # Check for errors
-                                elif "error" in line.lower() or "failed" in line.lower() or "file does not exist" in line.lower():
-                                    if progress_bar:
-                                        progress_bar.stop()
-                                    console.print(f"[red]✗ {line}[/red]")
+                                if total_bytes > 0 and progress_bar is None:
+                                    # Initialize progress bar on first progress update
+                                    progress_bar = Progress(
+                                        SpinnerColumn(),
+                                        TextColumn("[progress.description]{task.description}"),
+                                        BarColumn(),
+                                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                                        DownloadColumn(),
+                                        TransferSpeedColumn(),
+                                        TimeRemainingColumn(),
+                                        console=console
+                                    )
+                                    progress_bar.start()
+                                    task_id = progress_bar.add_task(
+                                        f"[cyan]Downloading {model.name}...",
+                                        total=total_bytes
+                                    )
+                                
+                                if progress_bar and task_id is not None:
+                                    progress_bar.update(task_id, completed=downloaded_bytes)
+                            elif "complete" in line.lower() or "done" in line.lower() or "pulled" in line.lower():
+                                if progress_bar:
+                                    progress_bar.stop()
+                                    console.print(f"[green]✓ {line}[/green]")
+                                else:
+                                    console.print(f"[green]✓ {line}[/green]")
+                            elif "error" in line.lower() or "failed" in line.lower():
+                                if progress_bar:
+                                    progress_bar.stop()
+                                console.print(f"[red]✗ {line}[/red]")
                     
                     # Clean up progress bar if still running
                     if progress_bar:
@@ -3834,27 +3521,50 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                     pass
         
         if code == 0:
-            # Verify the model was actually downloaded
-            verify_code, verify_out, _ = utils.run_command(["ollama", "list"])
+            # Verify the model was actually downloaded and check its parameters
+            verify_code, verify_out, _ = utils.run_command(["docker", "model", "list"])
             model_found = False
+            actual_params = None
             
             if verify_code == 0:
-                # Check if the model appears in the list
-                model_name_simple = model_name_to_pull.split(":")[0]  # Remove tag for matching
+                # Check if the model appears in the list (by name or converted name)
+                model_name_simple = model_name_to_pull.split("/")[-1].split(":")[0]
                 for line in verify_out.split("\n"):
-                    if model_name_simple.lower() in line.lower():
+                    if model_name_simple in line.lower() or "llama3.2" in line.lower():
                         model_found = True
+                        # Extract parameters from the line
+                        param_match = re.search(r'(\d+\.?\d*)\s*B', line)
+                        if param_match:
+                            actual_params = float(param_match.group(1))
                         break
+                
+                # Also try to inspect the model to get exact parameters
+                if model_found:
+                    inspect_code, inspect_out, _ = utils.run_command(["docker", "model", "inspect", model_name_simple], timeout=10)
+                    if inspect_code == 0:
+                        try:
+                            inspect_data = json.loads(inspect_out)
+                            actual_params_str = inspect_data.get("config", {}).get("parameters", "")
+                            if actual_params_str:
+                                param_match = re.search(r'(\d+\.?\d*)', actual_params_str)
+                                if param_match:
+                                    actual_params = float(param_match.group(1))
+                        except (json.JSONDecodeError, KeyError, ValueError):
+                            pass
             
             if model_found:
-                ui.print_success(f"{model.name} downloaded successfully")
+                # Report success with parameter count if available
+                # Note: We don't validate parameter count against RAM size because they are different metrics
+                # (parameter count vs memory usage). The model was successfully downloaded, which is what matters.
+                if actual_params:
+                    ui.print_success(f"{model.name} downloaded successfully ({actual_params}B parameters)")
+                else:
+                    ui.print_success(f"{model.name} downloaded successfully")
                 successfully_pulled.append(model)
-                ui.print_info("Model verified in Ollama")
+                ui.print_info("Model verified in Docker Model Runner")
             else:
-                ui.print_warning(f"Download completed but model '{model.name}' not found in Ollama list")
+                ui.print_warning(f"Download completed but model '{model.name}' not found in Docker Model Runner list")
                 ui.print_info("The model may have been downloaded with a different name")
-                # Still add to successfully_pulled since the pull command succeeded
-                successfully_pulled.append(model)
         else:
             ui.print_error(f"Failed to pull {model.name}")
             
@@ -3864,18 +3574,18 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                 is_unauthorized = any("401" in line or "unauthorized" in line.lower() for line in full_output)
             
             if is_unauthorized:
-                ui.print_warning("Model not found in Ollama Library (401 Unauthorized)")
+                ui.print_warning("Model not found in Docker Hub (401 Unauthorized)")
                 ui.print_info("This model may not be available in the 'ai/' namespace.")
                 ui.print_info("You can try:")
-                ui.print_info("  1. Check if the model exists: ollama search ai/<model-name>")
-                ui.print_info("  2. Search for alternatives: ollama search <model-name>")
+                ui.print_info("  1. Check if the model exists: docker search ai/<model-name>")
+                ui.print_info("  2. Search for alternatives: docker search <model-name>")
             else:
                 ui.print_info("You can try pulling manually later with:")
-                if model_name_to_pull != model.ollama_name:
-                    print(ui.colorize(f"    ollama pull {model_name_to_pull}", ui.Colors.CYAN))
-                    ui.print_info(f"    (Original format: {model.ollama_name})")
+                if model_name_to_pull != model.docker_name:
+                    print(ui.colorize(f"    docker model pull {model_name_to_pull}", ui.Colors.CYAN))
+                    ui.print_info(f"    (Original format: {model.docker_name})")
                 else:
-                    print(ui.colorize(f"    ollama pull {model.ollama_name}", ui.Colors.CYAN))
+                    print(ui.colorize(f"    docker model pull {model.docker_name}", ui.Colors.CYAN))
             
             if len(model_list) > i and ui.prompt_yes_no("Continue with remaining models?", default=True):
                 continue
@@ -3893,21 +3603,21 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
 
 def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInfo] = None) -> str:
     """
-    Convert Ollama model name to Continue.dev compatible format.
+    Convert Docker Model Runner model name to Continue.dev compatible format.
     
-    Ollama API returns models as: llama3.2:3b or llama3.2
-    The model catalog uses: llama3.2 (base name)
+    Docker Model Runner API returns models as: ai/llama3.2:latest
+    The model catalog uses: ai.docker.com/meta/llama3.2:3b-instruct
     
     This function converts to the actual API model ID format.
     Preserves variant tags if selected.
     """
     # Input validation - accept either ModelInfo or string for backward compatibility
     if isinstance(model, str):
-        ollama_name = model
+        docker_name = model
         selected_variant = None
         base_model_name = None
     elif isinstance(model, ModelInfo):
-        ollama_name = model.ollama_name
+        docker_name = model.docker_name
         selected_variant = model.selected_variant
         base_model_name = model.base_model_name
     else:
@@ -3915,34 +3625,60 @@ def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInf
     
     # If we have a selected variant, use it
     if selected_variant and base_model_name:
-        # Format: base_model_name:variant (e.g., "llama3.2:3b")
-        # Extract variant part if it includes model name
-        if ":" in selected_variant:
-            variant_part = selected_variant.split(":")[1]
-        else:
-            variant_part = selected_variant
-        return f"{base_model_name}:{variant_part}"
+        # Format: ai/base_model_name:variant_tag
+        return f"ai/{base_model_name}:{selected_variant}"
     
     # First, check if we can get the actual model ID from the API
     if hw_info and hasattr(hw_info, 'available_api_models') and hw_info.available_api_models:
         # Try to match the model name to an API model ID
-        model_lower = ollama_name.lower()
+        model_lower = docker_name.lower()
         
-        # Check for matching models in API
-        for api_model_id in hw_info.available_api_models:
-            api_lower = api_model_id.lower()
-            # Check if base names match
-            base_ollama = ollama_name.split(":")[0].lower()
-            base_api = api_model_id.split(":")[0].lower()
-            if base_ollama == base_api or base_ollama in api_lower:
-                return api_model_id  # Return the actual API model ID
+        # Check for llama3.2 variants
+        if "llama3.2" in model_lower or "llama3.2" in docker_name.lower():
+            for api_model_id in hw_info.available_api_models:
+                if "llama3.2" in api_model_id.lower():
+                    return api_model_id  # Return the actual API model ID
+        
+        # Check for nomic-embed variants
+        if "nomic" in model_lower or "embed" in model_lower:
+            for api_model_id in hw_info.available_api_models:
+                if "nomic" in api_model_id.lower() or "embed" in api_model_id.lower():
+                    return api_model_id
     
-    # Fallback: Use the ollama_name as-is, or add variant if available
-    model_id = ollama_name
+    # Fallback: Convert from catalog format to Docker Hub format
+    model_id = docker_name
     
-    # If it doesn't have a tag and we have a base_model_name, use that
-    if ":" not in model_id and base_model_name:
-        model_id = base_model_name
+    # Remove the ai.docker.com/ prefix if present
+    if model_id.startswith("ai.docker.com/"):
+        remaining = model_id[len("ai.docker.com/"):]
+        parts = remaining.split("/")
+        if len(parts) > 1:
+            # Has org prefix (meta/, mistral/, etc.), remove it
+            model_part = parts[1]
+        else:
+            model_part = parts[0]
+        
+        # Preserve variant tag if present (e.g., :70B-Q4_K_M)
+        variant_tag = None
+        if ":" in model_part:
+            model_part, variant_tag = model_part.split(":", 1)
+        
+        # Remove size indicators (3b, 8b, etc.) from model name only if no variant tag
+        if not variant_tag:
+            model_part = re.sub(r'[-_]?[0-9]+b', '', model_part, flags=re.IGNORECASE)
+        
+        # Convert to Docker Hub format: ai/modelname
+        model_id = f"ai/{model_part}"
+        
+        # Add variant tag or :latest
+        if variant_tag:
+            model_id = f"{model_id}:{variant_tag}"
+        elif ":" not in model_id:
+            model_id = f"{model_id}:latest"
     
-    # Ollama model names don't need ai/ prefix - return as-is
+    # If it already starts with ai/, preserve existing tag or add :latest
+    elif model_id.startswith("ai/"):
+        if ":" not in model_id:
+            model_id = f"{model_id}:latest"
+    
     return model_id
