@@ -1663,12 +1663,22 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
             else:
                 model_part = parts[0]
             
-            # Remove tag (everything after :)
-            if ":" in model_part:
-                model_part = model_part.split(":")[0]
-            
-            # Convert to Docker Hub format: ai/modelname
-            model_name_to_pull = f"ai/{model_part}"
+            # Special handling for nomic-embed-text: version is part of model name, not a tag
+            # ai.docker.com/nomic/nomic-embed-text:v1.5 -> ai/nomic-embed-text-v1.5
+            if "nomic-embed-text" in model_part.lower():
+                # Extract version from tag and append to model name
+                if ":" in model_part:
+                    model_base, version = model_part.split(":", 1)
+                    # Convert v1.5 -> v1.5, or just use as-is
+                    model_part = f"{model_base}-{version}"
+                model_name_to_pull = f"ai/{model_part}"
+            else:
+                # For other models, remove tag (everything after :)
+                if ":" in model_part:
+                    model_part = model_part.split(":")[0]
+                
+                # Convert to Docker Hub format: ai/modelname
+                model_name_to_pull = f"ai/{model_part}"
         
         # Run docker model pull
         # We don't capture output so user can see download progress
@@ -1883,6 +1893,18 @@ def generate_continue_config(
     api_base = hardware.dmr_api_endpoint
     print_info(f"Using API endpoint: {api_base}")
     
+    # Ensure apiBase doesn't have trailing slash and includes /v1 for OpenAI-compatible API
+    # Continue.dev expects the full base URL including /v1 for OpenAI-compatible APIs
+    api_base_clean = api_base.rstrip('/')
+    # Ensure it includes /v1 if not already present
+    if '/v1' not in api_base_clean:
+        # If the endpoint doesn't have /v1, we need to determine the correct base
+        # For Docker Model Runner, the API is typically at /v1
+        if api_base_clean.endswith(':12434') or api_base_clean.endswith(':8080'):
+            api_base_clean = f"{api_base_clean}/v1"
+        elif 'model-runner.docker.internal' in api_base_clean:
+            api_base_clean = f"{api_base_clean}/v1" if not api_base_clean.endswith('/v1') else api_base_clean
+    
     # Build config with comments and required fields
     yaml_lines = [
         "# Continue.dev Configuration for Docker Model Runner",
@@ -1915,8 +1937,6 @@ def generate_continue_config(
     
     for i, model in enumerate(chat_models):
         model_id = get_model_id_for_continue(model.docker_name, hardware)
-        # Ensure apiBase doesn't have trailing slash
-        api_base_clean = api_base.rstrip('/')
         yaml_lines.extend([
             f"  - name: {model.name}",
             f"    provider: openai",
@@ -1948,7 +1968,6 @@ def generate_continue_config(
     
     # Add autocomplete model (if different from chat models)
     autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
-    api_base_clean = api_base.rstrip('/')
     for model in autocomplete_only:
         model_id = get_model_id_for_continue(model.docker_name, hardware)
         yaml_lines.extend([
@@ -2037,7 +2056,6 @@ def generate_continue_config(
     # Build JSON config
     json_config: Dict[str, Any] = {"models": []}
     
-    api_base_clean = api_base.rstrip('/')
     for model in chat_models:
         model_id = get_model_id_for_continue(model.docker_name, hardware)
         json_config["models"].append({
