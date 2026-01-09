@@ -24,8 +24,13 @@ This setup provides a seamless "zero to productive" local AI coding experience i
 1. **Run the setup script:**
    ```bash
    cd ai_model
-   chmod +x setup-local-llm.sh
-   ./setup-local-llm.sh
+   python3 docker-llm-setup.py
+   ```
+   
+   Or make it executable and run directly:
+   ```bash
+   chmod +x docker-llm-setup.py
+   ./docker-llm-setup.py
    ```
 
 2. **Follow the interactive prompts:**
@@ -68,7 +73,8 @@ This setup provides a seamless "zero to productive" local AI coding experience i
 
 ```
 ai_model/
-├── setup-local-llm.sh          # Main setup script
+├── docker-llm-setup.py         # Main setup script (Python)
+├── docker-llm-uninstall.py     # Uninstall script (Python)
 ├── tools/                      # Utility scripts
 │   ├── diagnose.sh             # Health checks and diagnostics
 │   ├── benchmark.sh           # Model performance testing

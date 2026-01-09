@@ -27,9 +27,12 @@ import os
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -243,6 +246,7 @@ class HardwareInfo:
     docker_version: str = ""
     docker_model_runner_available: bool = False
     dmr_api_endpoint: str = DMR_API_BASE
+    available_api_models: List[str] = field(default_factory=list)  # Models available via API
     tier: HardwareTier = HardwareTier.C
     
     def get_tier_label(self) -> str:
@@ -403,16 +407,19 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     # Chat/Edit Models - Small (All Tiers, optimized for Tier C: <17GB RAM)
     # =========================================================================
-    ModelInfo(
-        name="Llama 3.2 8B",
-        docker_name="ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M",
-        description="8B - Fast general-purpose assistant",
-        ram_gb=5.0,
-        context_length=131072,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
-        recommended_for=["All tiers", "Fast responses"]
-    ),
+    # Note: Llama 3.2 8B is NOT available in Docker Model Runner
+    # Docker Model Runner only provides ai/llama3.2 which is the 3B variant
+    # Keeping this commented out to prevent confusion
+    # ModelInfo(
+    #     name="Llama 3.2 8B",
+    #     docker_name="ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M",
+    #     description="8B - Fast general-purpose assistant",
+    #     ram_gb=5.0,
+    #     context_length=131072,
+    #     roles=["chat", "edit", "autocomplete"],
+    #     tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
+    #     recommended_for=["All tiers", "Fast responses"]
+    # ),
     ModelInfo(
         name="Qwen 2.5 Coder 7B",
         docker_name="ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M",
@@ -449,12 +456,12 @@ MODEL_CATALOG: List[ModelInfo] = [
     ModelInfo(
         name="Llama 3.2 3B",
         docker_name="ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M",
-        description="3B - Small and efficient general model",
+        description="3B - Small and efficient general model (available in Docker Model Runner as ai/llama3.2)",
         ram_gb=1.8,
         context_length=131072,
-        roles=["chat", "autocomplete"],
+        roles=["chat", "edit", "autocomplete"],  # Added "edit" since 8B is not available
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
-        recommended_for=["Quick edits", "Low memory"]
+        recommended_for=["All tiers", "Quick edits", "Low memory", "Fast responses"]
     ),
     ModelInfo(
         name="Qwen 2.5 Coder 1.5B",
@@ -782,12 +789,43 @@ def check_docker() -> Tuple[bool, str]:
     return True, version
 
 
+def fetch_available_models_from_api(endpoint: str) -> List[str]:
+    """
+    Fetch list of available models from Docker Model Runner API.
+    According to docs: https://docs.docker.com/ai/model-runner/api-reference/
+    The API exposes OpenAI-compatible endpoints including /models
+    """
+    available_models = []
+    try:
+        import urllib.request
+        import json
+        import urllib.error
+        
+        api_url = f"{endpoint}/models"
+        req = urllib.request.Request(api_url, method="GET")
+        req.add_header("Content-Type", "application/json")
+        
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode('utf-8'))
+                if "data" in data:
+                    for model in data["data"]:
+                        model_id = model.get("id", "")
+                        if model_id:
+                            available_models.append(model_id)
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
+        pass
+    
+    return available_models
+
+
 def check_docker_model_runner(hardware: HardwareInfo) -> bool:
     """Check if Docker Model Runner is available."""
     print_subheader("Checking Docker Model Runner (DMR)")
     
     # Docker Model Runner was introduced in Docker Desktop 4.40+
     # It uses the 'docker model' command namespace
+    # Docs: https://docs.docker.com/ai/model-runner/
     code, stdout, stderr = run_command(["docker", "model", "list"])
     
     if code == 0:
@@ -803,6 +841,7 @@ def check_docker_model_runner(hardware: HardwareInfo) -> bool:
         import urllib.error
         
         api_reachable = False
+        available_api_models = []
         for endpoint in [DMR_API_BASE, DMR_SOCKET_ENDPOINT, "http://localhost:8080/v1"]:
             try:
                 req = urllib.request.Request(f"{endpoint}/models", method="GET")
@@ -812,6 +851,10 @@ def check_docker_model_runner(hardware: HardwareInfo) -> bool:
                         hardware.dmr_api_endpoint = endpoint
                         api_reachable = True
                         print_info(f"API endpoint: {endpoint}")
+                        # Fetch available models from API
+                        available_api_models = fetch_available_models_from_api(endpoint)
+                        if available_api_models:
+                            print_info(f"Found {len(available_api_models)} model(s) via API")
                         break
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):
                 continue
@@ -819,6 +862,9 @@ def check_docker_model_runner(hardware: HardwareInfo) -> bool:
         if not api_reachable:
             print_info(f"API endpoint (default): {hardware.dmr_api_endpoint}")
             print_warning("Could not verify API endpoint - it may start when a model runs")
+        
+        # Store available models for later verification
+        hardware.available_api_models = available_api_models
         
         # Check for existing models
         lines = stdout.strip().split("\n")
@@ -874,16 +920,535 @@ def check_docker_model_runner(hardware: HardwareInfo) -> bool:
     return False
 
 
+def discover_docker_hub_models(query: str = "ai/", limit: int = 50) -> List[Dict[str, Any]]:
+    """Discover models from Docker Hub."""
+    models = []
+    try:
+        print_info(f"Searching Docker Hub for '{query}'...")
+        code, stdout, _ = run_command(["docker", "search", query, "--limit", str(limit)], timeout=30)
+        if code == 0:
+            lines = stdout.strip().split("\n")
+            if len(lines) > 1:  # Has results (first line is header)
+                for line in lines[1:]:
+                    if line.strip():
+                        parts = line.split()
+                        if parts:
+                            model_name = parts[0]
+                            description = " ".join(parts[1:]) if len(parts) > 1 else "No description"
+                            # Only include models in ai/ namespace
+                            if model_name.startswith("ai/"):
+                                models.append({
+                                    "name": model_name,
+                                    "description": description[:100],  # Limit description length
+                                    "source": "docker_hub",
+                                    "stars": parts[1] if len(parts) > 1 and parts[1].isdigit() else "0"
+                                })
+    except Exception as e:
+        print_warning(f"Could not search Docker Hub: {e}")
+    
+    return models
+
+
+def discover_huggingface_models(query: str = "llama", limit: int = 30) -> List[Dict[str, Any]]:
+    """Discover models from Hugging Face (GGUF format)."""
+    models = []
+    try:
+        print_info(f"Searching Hugging Face for '{query}'...")
+        url = f"https://huggingface.co/api/models?search={query}&filter=gguf&limit={limit}"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read())
+            if isinstance(data, list):
+                for model in data[:limit]:
+                    model_id = model.get("id", "")
+                    if model_id:
+                        models.append({
+                            "name": f"hf.co/{model_id}",
+                            "description": model.get("pipeline_tag", "GGUF model"),
+                            "source": "huggingface",
+                            "downloads": model.get("downloads", 0)
+                        })
+    except urllib.error.URLError as e:
+        print_warning(f"Could not search Hugging Face: {e}")
+    except Exception as e:
+        print_warning(f"Error searching Hugging Face: {e}")
+    
+    return models
+
+
+def convert_discovered_to_modelinfo(discovered: Dict[str, Any], hardware: HardwareTier) -> ModelInfo:
+    """Convert a discovered model to ModelInfo format."""
+    model_name = discovered["name"]
+    # Extract a friendly name
+    friendly_name = model_name.split("/")[-1].replace("-", " ").replace("_", " ").title()
+    
+    # Estimate RAM based on model name patterns
+    ram_gb = 8.0  # Default
+    if "70b" in model_name.lower() or "70B" in model_name.lower():
+        ram_gb = 35.0
+    elif "32b" in model_name.lower() or "32B" in model_name.lower():
+        ram_gb = 18.0
+    elif "22b" in model_name.lower() or "22B" in model_name.lower():
+        ram_gb = 12.0
+    elif "14b" in model_name.lower() or "14B" in model_name.lower():
+        ram_gb = 8.0
+    elif "8b" in model_name.lower() or "8B" in model_name.lower():
+        ram_gb = 5.0
+    elif "7b" in model_name.lower() or "7B" in model_name.lower():
+        ram_gb = 4.0
+    elif "3b" in model_name.lower() or "3B" in model_name.lower():
+        ram_gb = 2.0
+    elif "1.5b" in model_name.lower() or "1.5B" in model_name.lower():
+        ram_gb = 1.0
+    
+    # Determine roles based on name
+    roles = ["chat", "edit"]
+    if "embed" in model_name.lower():
+        roles = ["embed"]
+    elif "coder" in model_name.lower() or "code" in model_name.lower():
+        roles = ["chat", "edit", "autocomplete"]
+    
+    # Determine tier
+    tiers = [HardwareTier.C]
+    if ram_gb >= 35:
+        tiers = [HardwareTier.S]
+    elif ram_gb >= 18:
+        tiers = [HardwareTier.S, HardwareTier.A]
+    elif ram_gb >= 12:
+        tiers = [HardwareTier.A, HardwareTier.S]
+    elif ram_gb >= 8:
+        tiers = [HardwareTier.B, HardwareTier.A, HardwareTier.S]
+    else:
+        tiers = [HardwareTier.C, HardwareTier.B, HardwareTier.A, HardwareTier.S]
+    
+    return ModelInfo(
+        name=friendly_name,
+        docker_name=model_name,
+        description=discovered.get("description", "Discovered model"),
+        ram_gb=ram_gb,
+        context_length=32768,  # Default
+        roles=roles,
+        tiers=tiers,
+        recommended_for=[]
+    )
+
+
+def discover_and_select_models(hardware: HardwareInfo) -> List[ModelInfo]:
+    """Discover available models and let user select interactively."""
+    print_header("🔍 Model Discovery & Selection")
+    
+    selected_models: List[ModelInfo] = []
+    all_discovered: List[Dict[str, Any]] = []
+    
+    # Ask which source to search
+    print_info("Where would you like to search for models?")
+    source_choice = prompt_choice(
+        "Select source:",
+        ["Docker Hub (ai/ namespace)", "Hugging Face (hf.co/)", "Both"],
+        default=0
+    )
+    
+    # Search Docker Hub
+    if source_choice in [0, 2]:
+        print()
+        search_query = input("Enter search query for Docker Hub (default: 'ai/'): ").strip() or "ai/"
+        docker_models = discover_docker_hub_models(search_query)
+        all_discovered.extend(docker_models)
+        if docker_models:
+            print_success(f"Found {len(docker_models)} models on Docker Hub")
+    
+    # Search Hugging Face
+    if source_choice in [1, 2]:
+        print()
+        search_query = input("Enter search query for Hugging Face (default: 'llama'): ").strip() or "llama"
+        hf_models = discover_huggingface_models(search_query)
+        all_discovered.extend(hf_models)
+        if hf_models:
+            print_success(f"Found {len(hf_models)} models on Hugging Face")
+    
+    if not all_discovered:
+        print_warning("No models found. Try a different search query.")
+        return []
+    
+    # Convert to ModelInfo and display
+    print()
+    print_subheader("Discovered Models")
+    model_infos = [convert_discovered_to_modelinfo(m, hardware.tier) for m in all_discovered]
+    
+    # Filter by hardware tier
+    available_models = [m for m in model_infos if hardware.tier in m.tiers]
+    
+    if not available_models:
+        print_warning(f"No models found compatible with your hardware tier ({hardware.tier.value})")
+        print_info("Showing all models anyway...")
+        available_models = model_infos
+    
+    # Group by role
+    chat_models = [m for m in available_models if "chat" in m.roles or "edit" in m.roles]
+    auto_models = [m for m in available_models if "autocomplete" in m.roles]
+    embed_models = [m for m in available_models if "embed" in m.roles]
+    
+    # Select chat/edit models
+    if chat_models:
+        print()
+        print_subheader("Chat/Edit Models")
+        choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.docker_name}", False) for m in chat_models]
+        indices = prompt_multi_choice("Select chat/edit model(s):", choices, min_selections=1)
+        for i in indices:
+            selected_models.append(chat_models[i])
+    
+    # Select autocomplete models
+    if auto_models:
+        print()
+        if prompt_yes_no("Add a dedicated autocomplete model?", default=False):
+            print_subheader("Autocomplete Models")
+            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.docker_name}", False) for m in auto_models]
+            indices = prompt_multi_choice("Select autocomplete model:", choices, min_selections=1)
+            for i in indices:
+                if auto_models[i] not in selected_models:
+                    selected_models.append(auto_models[i])
+    
+    # Select embedding models
+    if embed_models:
+        print()
+        if prompt_yes_no("Add an embedding model for code indexing?", default=False):
+            print_subheader("Embedding Models")
+            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB) - {m.docker_name}", False) for m in embed_models]
+            indices = prompt_multi_choice("Select embedding model:", choices, min_selections=1)
+            for i in indices:
+                if embed_models[i] not in selected_models:
+                    selected_models.append(embed_models[i])
+    
+    return selected_models
+
+
 def get_models_for_tier(tier: HardwareTier) -> List[ModelInfo]:
     """Get models available for a specific hardware tier."""
     return [m for m in MODEL_CATALOG if tier in m.tiers]
 
 
-def get_recommended_models(tier: HardwareTier) -> Dict[str, ModelInfo]:
-    """Get recommended models for each role based on tier."""
+def is_restricted_model(model: ModelInfo) -> bool:
+    """Check if a model is from restricted countries (China, Russia) due to political conflicts."""
+    restricted_keywords = [
+        "qwen",  # Chinese (Alibaba)
+        "deepseek",  # Chinese
+        "baai",  # Chinese (Beijing Academy of Artificial Intelligence)
+        "bge-",  # Chinese (BAAI models)
+    ]
+    model_lower = model.name.lower() + " " + model.docker_name.lower()
+    return any(keyword in model_lower for keyword in restricted_keywords)
+
+
+def is_docker_hub_unavailable(model: ModelInfo) -> bool:
+    """Check if a model is not available in Docker Hub's ai/ namespace.
+    These models would fail with 401 Unauthorized when trying to pull.
+    Only models confirmed to exist in Docker Hub's ai/ namespace are included."""
+    # Models that don't exist in Docker Hub's ai/ namespace (verified)
+    # These models are not available and will fail with 401 Unauthorized
+    unavailable_models = [
+        "starcoder2",  # Not in ai/ namespace (401 error confirmed)
+        "codestral",  # Not in ai/ namespace
+        "codegemma",  # Not in ai/ namespace (only in other namespaces)
+        "codellama",  # Not in ai/ namespace
+        # Note: nomic-embed-text exists as ai/nomic-embed-text-v1.5, but our format is different
+        # Keeping it filtered since the exact name doesn't match
+    ]
+    
+    # Convert model name to what it would be in Docker Hub format
+    if model.docker_name.startswith("ai.docker.com/"):
+        remaining = model.docker_name[len("ai.docker.com/"):]
+        parts = remaining.split("/")
+        if len(parts) > 1:
+            model_part = parts[1]
+        else:
+            model_part = parts[0]
+        if ":" in model_part:
+            model_part = model_part.split(":")[0]
+    else:
+        # Already in Docker Hub format or other format
+        if model.docker_name.startswith("ai/"):
+            model_part = model.docker_name[3:]
+            if ":" in model_part:
+                model_part = model_part.split(":")[0]
+        else:
+            return False
+    
+    model_lower = model_part.lower()
+    return any(unavailable in model_lower for unavailable in unavailable_models)
+
+
+def verify_model_available(model: ModelInfo, hardware: HardwareInfo) -> bool:
+    """
+    Verify that a model actually exists and can be pulled from Docker Model Runner.
+    
+    According to Docker Model Runner docs (https://docs.docker.com/ai/model-runner/):
+    - Models are pulled from Docker Hub and stored locally
+    - The API exposes OpenAI-compatible endpoints
+    - Models can be checked via the API or docker search
+    
+    This function checks:
+    1. Docker Model Runner API (if available) - most accurate
+    2. Known working models with size variants
+    3. Docker Hub search as fallback
+    """
+    # Convert model name to Docker Hub format for checking
+    model_name_to_check = model.docker_name
+    
+    if model.docker_name.startswith("ai.docker.com/"):
+        # Convert to Docker Hub format
+        remaining = model.docker_name[len("ai.docker.com/"):]
+        parts = remaining.split("/")
+        if len(parts) > 1:
+            model_part = parts[1]
+        else:
+            model_part = parts[0]
+        
+        # Remove tag (everything after :)
+        if ":" in model_part:
+            model_part = model_part.split(":")[0]
+        
+        # Convert to Docker Hub format: ai/modelname
+        model_name_to_check = f"ai/{model_part}"
+    
+    model_lower = model_name_to_check.lower()
+    base_name = model_name_to_check.split(":")[0] if ":" in model_name_to_check else model_name_to_check
+    
+    # First, try to use cached API models list (fetched during DMR check)
+    # According to docs: https://docs.docker.com/ai/model-runner/api-reference/
+    if hasattr(hardware, 'available_api_models') and hardware.available_api_models:
+        for api_model_id in hardware.available_api_models:
+            api_model_lower = api_model_id.lower()
+            # Check if our model matches (with or without tag)
+            if base_name.lower() in api_model_lower or api_model_lower in base_name.lower():
+                return True
+    
+    # If no cached list, try to query the API directly
+    if hardware.docker_model_runner_available and hardware.dmr_api_endpoint:
+        try:
+            import urllib.request
+            import json
+            import urllib.error
+            
+            # Try to get available models from the API
+            api_url = f"{hardware.dmr_api_endpoint}/models"
+            req = urllib.request.Request(api_url, method="GET")
+            req.add_header("Content-Type", "application/json")
+            
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    # Check if model is in the API response
+                    if "data" in data:
+                        for api_model in data["data"]:
+                            model_id = api_model.get("id", "").lower()
+                            # Check if our model matches (with or without tag)
+                            if base_name.lower() in model_id or model_id in base_name.lower():
+                                return True
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
+            # API not available or error, fall through to other checks
+            pass
+    
+    # Known working models in Docker Model Runner (from official docs and testing)
+    # Format: (base_name, available_size_variants)
+    # Based on: https://docs.docker.com/ai/model-runner/
+    known_working_models = {
+        "ai/llama3.2": ["3b"],  # Only 3B variant exists in Docker Model Runner, not 8B
+        "ai/llama3.3": ["70b"],  # Only 70B variant exists
+        "ai/llama3.1": ["70b"],  # Only 70B variant exists
+        "ai/nomic-embed-text-v1.5": [None],  # No size variant
+        "ai/qwen2.5-coder": ["7b"],  # Only 7B variant exists
+        "ai/phi4": ["14b"],  # Only 14B variant exists
+    }
+    
+    # Check if base model is known
+    for known_base, available_sizes in known_working_models.items():
+        if base_name.lower() == known_base.lower():
+            # Check size variant if specified
+            if None in available_sizes:
+                # No size variant needed
+                return True
+            
+            # Check if requested size matches available sizes
+            requested_size = None
+            if "8b" in model_lower or ":8b" in model_lower or "-8b" in model_lower:
+                requested_size = "8b"
+            elif "3b" in model_lower or ":3b" in model_lower or "-3b" in model_lower:
+                requested_size = "3b"
+            elif "7b" in model_lower or ":7b" in model_lower or "-7b" in model_lower:
+                requested_size = "7b"
+            elif "14b" in model_lower or ":14b" in model_lower or "-14b" in model_lower:
+                requested_size = "14b"
+            elif "70b" in model_lower or ":70b" in model_lower or "-70b" in model_lower:
+                requested_size = "70b"
+            
+            if requested_size:
+                # Check if requested size is available
+                size_list = [s.lower() if s else None for s in available_sizes]
+                return requested_size in size_list
+            else:
+                # No specific size requested, check if any variant exists
+                return len(available_sizes) > 0
+    
+    # For unknown models, try to search Docker Hub
+    # This is slower but more accurate for models not in our known list
+    try:
+        search_name = base_name.replace("ai/", "")
+        code, stdout, _ = run_command(["docker", "search", base_name, "--limit", "10"], timeout=15)
+        if code == 0:
+            lines = stdout.strip().split("\n")
+            for line in lines[1:]:  # Skip header
+                if line.strip():
+                    parts = line.split()
+                    if parts and base_name.lower() in parts[0].lower():
+                        # Found in search - model exists in Docker Hub
+                        # Note: We can't verify size variants via search, so return True
+                        # The actual pull will fail if the size variant doesn't exist
+                        return True
+    except Exception:
+        pass
+    
+    # Model not found in API, known list, or search
+    return False
+
+
+def get_curated_top_models(tier: HardwareTier, limit: int = 10, hardware: Optional[HardwareInfo] = None) -> List[ModelInfo]:
+    """Get curated top models for a hardware tier, prioritizing quality and variety.
+    Excludes models from restricted countries (China, Russia) due to political conflicts.
+    Only includes models that are verified to exist in Docker Model Runner.
+    If not enough models for the tier, includes models from higher tiers to reach the limit."""
+    # Start with models for this tier
+    tier_models = get_models_for_tier(tier)
+    
+    # Filter out restricted models (Chinese/Russian) and models not available in Docker Hub
+    tier_models = [m for m in tier_models if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
+    
+    # Verify models actually exist in Docker Model Runner (if hardware info provided)
+    if hardware and hardware.docker_model_runner_available:
+        print_info("Verifying model availability in Docker Model Runner...")
+        verified_models = []
+        for model in tier_models:
+            if verify_model_available(model, hardware):
+                verified_models.append(model)
+            else:
+                print_warning(f"Skipping {model.name} - not available in Docker Model Runner")
+        tier_models = verified_models
+        if tier_models:
+            print_success(f"Found {len(tier_models)} verified models for your tier")
+    
+    # If we don't have enough models, include models from all tiers (filtered)
+    if len(tier_models) < limit:
+        all_models = [m for m in MODEL_CATALOG if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
+        # Prioritize tier-compatible models, then add others
+        available = tier_models.copy()
+        seen_names = {m.docker_name for m in available}
+        
+        # Add models from other tiers that aren't already included
+        for m in all_models:
+            if m.docker_name not in seen_names and len(available) < limit:
+                available.append(m)
+                seen_names.add(m.docker_name)
+    else:
+        available = tier_models
+    
+    if not available:
+        return []
+    
+    # Prioritize models by:
+    # 1. Tier-compatible models first
+    # 2. Chat/Edit models (sorted by quality/RAM descending)
+    # 3. Coding-specific models (coder, code-focused)
+    # 4. Autocomplete models (for speed)
+    # 5. Embedding models
+    
+    curated = []
+    seen_names = set()
+    
+    # Separate tier-compatible from others
+    tier_compatible = [m for m in available if tier in m.tiers]
+    other_models = [m for m in available if tier not in m.tiers]
+    
+    # 1. Top chat/edit models from tier-compatible (best quality first)
+    chat_models = [m for m in tier_compatible if ("chat" in m.roles or "edit" in m.roles) and "embed" not in m.roles]
+    chat_models.sort(key=lambda m: m.ram_gb, reverse=True)
+    for m in chat_models[:6]:
+        if m.docker_name not in seen_names:
+            curated.append(m)
+            seen_names.add(m.docker_name)
+    
+    # 2. Coding-specific models from tier-compatible
+    coder_models = [m for m in tier_compatible if ("coder" in m.name.lower() or "code" in m.name.lower()) and m.docker_name not in seen_names]
+    coder_models.sort(key=lambda m: m.ram_gb, reverse=True)
+    for m in coder_models:
+        if len(curated) < limit:
+            curated.append(m)
+            seen_names.add(m.docker_name)
+    
+    # 3. Fast autocomplete models from tier-compatible
+    auto_models = [m for m in tier_compatible if "autocomplete" in m.roles and m.docker_name not in seen_names]
+    auto_models.sort(key=lambda m: m.ram_gb)  # Smallest first
+    for m in auto_models[:3]:
+        if len(curated) < limit:
+            curated.append(m)
+            seen_names.add(m.docker_name)
+    
+    # 4. Embedding models from tier-compatible
+    embed_models = [m for m in tier_compatible if "embed" in m.roles and m.docker_name not in seen_names]
+    for m in embed_models[:2]:
+        if len(curated) < limit:
+            curated.append(m)
+            seen_names.add(m.docker_name)
+    
+    # 5. Fill remaining slots with other tier-compatible models
+    remaining_tier = [m for m in tier_compatible if m.docker_name not in seen_names]
+    remaining_tier.sort(key=lambda m: m.ram_gb, reverse=True)
+    for m in remaining_tier:
+        if len(curated) >= limit:
+            break
+        curated.append(m)
+        seen_names.add(m.docker_name)
+    
+    # 6. If still not enough, add models from other tiers (prioritize smaller ones)
+    if len(curated) < limit:
+        other_chat = [m for m in other_models if ("chat" in m.roles or "edit" in m.roles) and "embed" not in m.roles and m.docker_name not in seen_names]
+        other_chat.sort(key=lambda m: m.ram_gb)  # Smaller first (more likely to work)
+        for m in other_chat:
+            if len(curated) >= limit:
+                break
+            curated.append(m)
+            seen_names.add(m.docker_name)
+    
+    # 7. Fill any remaining slots
+    remaining_all = [m for m in other_models if m.docker_name not in seen_names]
+    remaining_all.sort(key=lambda m: m.ram_gb)  # Smaller first
+    for m in remaining_all:
+        if len(curated) >= limit:
+            break
+        curated.append(m)
+        seen_names.add(m.docker_name)
+    
+    return curated[:limit]
+
+
+def get_recommended_models(tier: HardwareTier, hardware: Optional[HardwareInfo] = None) -> Dict[str, ModelInfo]:
+    """Get recommended models for each role based on tier.
+    Excludes models from restricted countries (China, Russia) due to political conflicts.
+    Only includes models verified to exist in Docker Model Runner."""
     recommendations: Dict[str, ModelInfo] = {}
     
     available = get_models_for_tier(tier)
+    
+    # Filter out restricted models (Chinese/Russian) and models not available in Docker Hub
+    available = [m for m in available if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
+    
+    # Verify models actually exist in Docker Model Runner (if hardware info provided)
+    if hardware and hardware.docker_model_runner_available:
+        verified_available = []
+        for model in available:
+            if verify_model_available(model, hardware):
+                verified_available.append(model)
+        available = verified_available
     
     # Chat/Edit model (primary)
     chat_models = [m for m in available if "chat" in m.roles or "edit" in m.roles]
@@ -899,7 +1464,7 @@ def get_recommended_models(tier: HardwareTier) -> Dict[str, ModelInfo]:
         auto_models.sort(key=lambda m: m.ram_gb)
         recommendations["autocomplete"] = auto_models[0]
     
-    # Embedding model
+    # Embedding model (excluding restricted ones)
     embed_models = [m for m in available if "embed" in m.roles]
     if embed_models:
         recommendations["embed"] = embed_models[0]
@@ -908,91 +1473,91 @@ def get_recommended_models(tier: HardwareTier) -> Dict[str, ModelInfo]:
 
 
 def select_models(hardware: HardwareInfo) -> List[ModelInfo]:
-    """Interactive model selection based on hardware tier."""
+    """Interactive model selection from curated top models based on hardware tier."""
     print_header("🤖 Model Selection")
     
-    print_info(f"Based on your hardware tier ({hardware.tier.value}), here are the available models:")
+    print_info(f"Hardware Tier: {colorize(hardware.tier.value, Colors.GREEN + Colors.BOLD)}")
+    print_info(f"Available RAM: ~{hardware.ram_gb:.1f}GB")
     print()
     
-    available_models = get_models_for_tier(hardware.tier)
-    recommendations = get_recommended_models(hardware.tier)
+    # Get curated top 10 models for this tier (with verification)
+    curated_models = get_curated_top_models(hardware.tier, limit=10, hardware=hardware)
     
-    # Show recommendations first
-    print(colorize("  Recommended Configuration:", Colors.GREEN + Colors.BOLD))
-    total_ram = 0.0
-    for role, model in recommendations.items():
-        print(f"    • {role.capitalize()}: {model.name} (~{model.ram_gb}GB)")
-        total_ram += model.ram_gb
-    print(f"    Total RAM: ~{total_ram:.1f}GB")
+    if not curated_models:
+        print_error("No verified models available for your hardware tier.")
+        print_info("This may mean Docker Model Runner doesn't have models compatible with your tier.")
+        print_info("You can try the model discovery feature to search for available models.")
+        if prompt_yes_no("Would you like to search for available models?", default=False):
+            return discover_and_select_models(hardware)
+        return []
+    
+    # Show recommended configuration first (with verification)
+    recommendations = get_recommended_models(hardware.tier, hardware=hardware)
+    if recommendations:
+        print(colorize("  Recommended Configuration:", Colors.GREEN + Colors.BOLD))
+        total_ram = 0.0
+        for role, model in recommendations.items():
+            print(f"    • {role.capitalize()}: {model.name} (~{model.ram_gb}GB)")
+            total_ram += model.ram_gb
+        print(f"    Total RAM: ~{total_ram:.1f}GB")
+        print()
+        
+        # Quick option to use recommended
+        if prompt_yes_no("Use recommended configuration?", default=True):
+            selected = list(recommendations.values())
+            # Remove duplicates
+            unique = []
+            seen_names = set()
+            for m in selected:
+                if m.docker_name not in seen_names:
+                    unique.append(m)
+                    seen_names.add(m.docker_name)
+            return unique
+    
+    # Show curated top models
+    print_subheader("Top 10 Models for Your Hardware")
+    print_info("Select from the best models optimized for your system:")
+    if len(curated_models) < 10:
+        print_info(f"(Showing {len(curated_models)} available models for your tier)")
     print()
     
-    # Ask if user wants to use recommended config
-    if prompt_yes_no("Use recommended configuration?", default=True):
-        selected = list(recommendations.values())
-        # Remove duplicates (same model for multiple roles)
-        unique = []
-        seen_names = set()
-        for m in selected:
-            if m.docker_name not in seen_names:
-                unique.append(m)
-                seen_names.add(m.docker_name)
-        return unique
-    
-    # Manual selection
-    print()
-    print_info("Select models manually. Models are grouped by role.")
-    
-    selected_models: List[ModelInfo] = []
-    
-    # Select chat/edit model
-    chat_models = [m for m in available_models if "chat" in m.roles or "edit" in m.roles]
-    if chat_models:
-        print_subheader("Chat/Edit Model (Primary)")
-        choices = [(m.name, f"{m.description} (~{m.ram_gb}GB)", False) for m in chat_models]
-        # Set recommended as default
-        if recommendations.get("chat"):
-            for i, m in enumerate(chat_models):
-                if m.docker_name == recommendations["chat"].docker_name:
-                    choices[i] = (m.name, f"{m.description} (~{m.ram_gb}GB)", True)
+    # Prepare choices with role indicators
+    choices = []
+    for m in curated_models:
+        # Build description with role info
+        roles_str = ", ".join(m.roles)
         
-        indices = prompt_multi_choice("Select chat/edit model(s):", choices, min_selections=1)
-        for i in indices:
-            selected_models.append(chat_models[i])
-    
-    # Select autocomplete model
-    auto_models = [m for m in available_models if "autocomplete" in m.roles]
-    if auto_models:
-        print_subheader("Autocomplete Model (Fast)")
-        choices = [(m.name, f"{m.description} (~{m.ram_gb}GB)", False) for m in auto_models]
-        # Set recommended as default
-        if recommendations.get("autocomplete"):
-            for i, m in enumerate(auto_models):
-                if m.docker_name == recommendations["autocomplete"].docker_name:
-                    choices[i] = (m.name, f"{m.description} (~{m.ram_gb}GB)", True)
+        # Indicate if model is compatible with current tier
+        tier_indicator = ""
+        if hardware.tier in m.tiers:
+            tier_indicator = "✓ Tier compatible"
+        else:
+            tier_indicator = "⚠ Higher tier (may be slow)"
         
-        if prompt_yes_no("Add a dedicated autocomplete model?", default=True):
-            indices = prompt_multi_choice("Select autocomplete model:", choices, min_selections=1)
-            for i in indices:
-                if auto_models[i] not in selected_models:
-                    selected_models.append(auto_models[i])
-    
-    # Select embedding model
-    embed_models = [m for m in available_models if "embed" in m.roles]
-    if embed_models:
-        print_subheader("Embedding Model (Code Indexing)")
-        print_info("Embedding models enable semantic code search in Continue.dev")
+        desc = f"{m.description} | {roles_str} | ~{m.ram_gb}GB RAM | {tier_indicator}"
         
-        if prompt_yes_no("Add an embedding model for code indexing?", default=True):
-            choices = [(m.name, f"{m.description} (~{m.ram_gb}GB)", False) for m in embed_models]
-            if recommendations.get("embed"):
-                for i, m in enumerate(embed_models):
-                    if m.docker_name == recommendations["embed"].docker_name:
-                        choices[i] = (m.name, f"{m.description} (~{m.ram_gb}GB)", True)
-            
-            indices = prompt_multi_choice("Select embedding model:", choices, min_selections=1)
-            for i in indices:
-                if embed_models[i] not in selected_models:
-                    selected_models.append(embed_models[i])
+        # Mark recommended models
+        is_recommended = any(m.docker_name == rec.docker_name for rec in recommendations.values())
+        choices.append((m.name, desc, is_recommended))
+    
+    # Let user select
+    indices = prompt_multi_choice(
+        "Select models to install (comma-separated numbers, or 'a' for all):",
+        choices,
+        min_selections=1
+    )
+    
+    selected_models = [curated_models[i] for i in indices]
+    
+    # Show summary
+    if selected_models:
+        print()
+        print_success(f"Selected {len(selected_models)} model(s):")
+        total_ram = 0.0
+        for m in selected_models:
+            print(f"  • {m.name} (~{m.ram_gb}GB)")
+            total_ram += m.ram_gb
+        print(f"  Total RAM required: ~{total_ram:.1f}GB")
     
     return selected_models
 
@@ -1025,22 +1590,122 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
         print_info(f"Memory required: ~{model.ram_gb:.1f}GB")
         print()
         
+        # #region agent log
+        log_path = "/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log"
+        try:
+            with open(log_path, "a") as f:
+                import json
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "docker-llm-setup.py:1021", "message": "Starting model pull", "data": {"model_name": model.name, "docker_name": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except: pass
+        # #endregion
+        
+        # Determine model name format and handle legacy ai.docker.com format
+        # Docker Model Runner supports:
+        # - Docker Hub: ai/model-name (e.g., ai/llama3.2)
+        # - Hugging Face: hf.co/username/model-name
+        # Legacy format: ai.docker.com/org/model:tag (convert directly to ai/model-name)
+        # #region agent log
+        model_name_to_pull = model.docker_name
+        
+        # Convert legacy ai.docker.com format directly to Docker Hub format
+        # No DNS check needed - ai.docker.com doesn't exist, always convert
+        if model.docker_name.startswith("ai.docker.com/"):
+            # Convert to Docker Hub format
+            # ai.docker.com/org/model:tag -> ai/model-name
+            # Remove ai.docker.com/ prefix
+            remaining = model.docker_name[len("ai.docker.com/"):]
+            
+            # Remove organization prefix (meta/, mistral/, microsoft/, etc.)
+            parts = remaining.split("/")
+            if len(parts) > 1:
+                # Has org prefix, remove it
+                model_part = parts[1]
+            else:
+                model_part = parts[0]
+            
+            # Remove tag (everything after :)
+            if ":" in model_part:
+                model_part = model_part.split(":")[0]
+            
+            # Convert to Docker Hub format: ai/modelname
+            model_name_to_pull = f"ai/{model_part}"
+        
+        try:
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "docker-llm-setup.py:1035", "message": "Model name format conversion", "data": {"original_name": model.docker_name, "final_name": model_name_to_pull}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except: pass
+        # #endregion
+        
+        # Hypothesis B: Check Docker DNS configuration
+        # #region agent log
+        try:
+            docker_info_code, docker_info_out, docker_info_err = run_command(["docker", "info"], timeout=10)
+            docker_dns_info = ""
+            if docker_info_code == 0:
+                for line in docker_info_out.split("\n"):
+                    if "dns" in line.lower() or "nameserver" in line.lower():
+                        docker_dns_info += line + "; "
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "docker-llm-setup.py:1048", "message": "Docker DNS configuration", "data": {"docker_info_code": docker_info_code, "dns_info": docker_dns_info[:200]}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except Exception as e:
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "docker-llm-setup.py:1051", "message": "Docker info check exception", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
+        # #endregion
+        
+        # Hypothesis C: Check network connectivity
+        # #region agent log
+        try:
+            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_socket.settimeout(5)
+            connectivity_test = test_socket.connect_ex(("8.8.8.8", 53))
+            test_socket.close()
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "docker-llm-setup.py:1060", "message": "Network connectivity test", "data": {"connectivity_result": connectivity_test, "test_target": "8.8.8.8:53"}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except Exception as e:
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "docker-llm-setup.py:1063", "message": "Connectivity test exception", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
+        # #endregion
+        
+        # Hypothesis E: Check Docker Desktop network/proxy settings
+        # #region agent log
+        try:
+            docker_version_code, docker_version_out, _ = run_command(["docker", "version", "--format", "{{.Server.Version}}"], timeout=10)
+            docker_network_code, docker_network_out, _ = run_command(["docker", "network", "ls"], timeout=10)
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "docker-llm-setup.py:1070", "message": "Docker network/proxy check", "data": {"docker_version_code": docker_version_code, "docker_network_code": docker_network_code, "has_network_access": docker_network_code == 0}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except Exception as e:
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "docker-llm-setup.py:1073", "message": "Docker network check exception", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
+        # #endregion
+        
         # Run docker model pull
         # We don't capture output so user can see download progress
+        # #region agent log
+        try:
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "docker-llm-setup.py:1070", "message": "Before docker model pull", "data": {"command": ["docker", "model", "pull", model_name_to_pull], "original_name": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except: pass
+        # #endregion
+        
+        # Initialize full_output for error handling
+        full_output = []
+        code = -1
+        
         try:
             process = subprocess.Popen(
-                ["docker", "model", "pull", model.docker_name],
+                ["docker", "model", "pull", model_name_to_pull],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1
             )
             
-            # Stream output in real-time
+            # Stream output in real-time and capture for analysis
             if process.stdout:
                 for line in process.stdout:
                     line = line.strip()
                     if line:
+                        full_output.append(line)
                         # Show progress lines
                         if "pulling" in line.lower() or "download" in line.lower() or "%" in line:
                             print(f"    {line}")
@@ -1050,26 +1715,105 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
             process.wait(timeout=3600)  # 1 hour timeout
             code = process.returncode
             
+            # #region agent log
+            try:
+                error_lines = [l for l in full_output if "error" in l.lower() or "failed" in l.lower() or "no such host" in l.lower() or "dns" in l.lower() or "unauthorized" in l.lower()]
+                with open(log_path, "a") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "D", "location": "docker-llm-setup.py:1095", "message": "After docker model pull", "data": {"returncode": code, "model_name_used": model_name_to_pull, "original_name": model.docker_name, "error_lines": error_lines[:5], "output_lines_count": len(full_output)}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except: pass
+            # #endregion
+            
         except subprocess.TimeoutExpired:
             process.kill()
             print_error("Download timed out after 1 hour")
             code = -1
+            # #region agent log
+            try:
+                with open(log_path, "a") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "docker-llm-setup.py:1104", "message": "Docker pull timeout", "data": {"model": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except: pass
+            # #endregion
         except Exception as e:
             print_error(f"Error: {e}")
             code = -1
+            # #region agent log
+            try:
+                with open(log_path, "a") as f:
+                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "docker-llm-setup.py:1109", "message": "Docker pull exception", "data": {"error": str(e), "model": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
+            except: pass
+            # #endregion
         
         if code == 0:
-            print_success(f"{model.name} downloaded successfully")
-            successfully_pulled.append(model)
-            
-            # Verify the model is listed
+            # Verify the model was actually downloaded and check its parameters
             verify_code, verify_out, _ = run_command(["docker", "model", "list"])
-            if verify_code == 0 and model.docker_name in verify_out:
+            model_found = False
+            actual_params = None
+            
+            if verify_code == 0:
+                # Check if the model appears in the list (by name or converted name)
+                model_name_simple = model_name_to_pull.split("/")[-1].split(":")[0]
+                for line in verify_out.split("\n"):
+                    if model_name_simple in line.lower() or "llama3.2" in line.lower():
+                        model_found = True
+                        # Extract parameters from the line
+                        import re
+                        param_match = re.search(r'(\d+\.?\d*)\s*B', line)
+                        if param_match:
+                            actual_params = float(param_match.group(1))
+                        break
+                
+                # Also try to inspect the model to get exact parameters
+                if model_found:
+                    inspect_code, inspect_out, _ = run_command(["docker", "model", "inspect", model_name_simple], timeout=10)
+                    if inspect_code == 0:
+                        try:
+                            import json
+                            inspect_data = json.loads(inspect_out)
+                            actual_params_str = inspect_data.get("config", {}).get("parameters", "")
+                            if actual_params_str:
+                                param_match = re.search(r'(\d+\.?\d*)', actual_params_str)
+                                if param_match:
+                                    actual_params = float(param_match.group(1))
+                        except:
+                            pass
+            
+            if model_found:
+                # Check if parameters match expected (allow some tolerance)
+                expected_params = model.ram_gb  # Rough estimate: 8B model ~5GB, 3B model ~2GB
+                if actual_params:
+                    if abs(actual_params - expected_params) > 2.0:  # More than 2GB difference
+                        print_warning(f"{model.name} downloaded, but got {actual_params}B model instead of expected ~{expected_params}GB model")
+                        print_info(f"Actual model: {actual_params}B parameters")
+                    else:
+                        print_success(f"{model.name} downloaded successfully ({actual_params}B parameters)")
+                else:
+                    print_success(f"{model.name} downloaded successfully")
+                successfully_pulled.append(model)
                 print_info("Model verified in Docker Model Runner")
+            else:
+                print_warning(f"Download completed but model '{model.name}' not found in Docker Model Runner list")
+                print_info("The model may have been downloaded with a different name")
         else:
             print_error(f"Failed to pull {model.name}")
-            print_info("You can try pulling manually later with:")
-            print(colorize(f"    docker model pull {model.docker_name}", Colors.CYAN))
+            
+            # Check if it was a 401 Unauthorized error
+            is_unauthorized = False
+            if 'full_output' in locals() and isinstance(full_output, list):
+                is_unauthorized = any("401" in line or "unauthorized" in line.lower() for line in full_output)
+            
+            if is_unauthorized:
+                print_warning("Model not found in Docker Hub (401 Unauthorized)")
+                print_info("This model may not be available in the 'ai/' namespace.")
+                print_info("You can try:")
+                print_info("  1. Check if the model exists: docker search ai/<model-name>")
+                print_info("  2. Search for alternatives: docker search <model-name>")
+            else:
+                print_info("You can try pulling manually later with:")
+                if model_name_to_pull != model.docker_name:
+                    print(colorize(f"    docker model pull {model_name_to_pull}", Colors.CYAN))
+                    print_info(f"    (Original format: {model.docker_name})")
+                else:
+                    print(colorize(f"    docker model pull {model.docker_name}", Colors.CYAN))
             
             if len(models) > i and prompt_yes_no("Continue with remaining models?", default=True):
                 continue
@@ -1085,18 +1829,66 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
     return successfully_pulled if successfully_pulled else models
 
 
-def get_model_id_for_continue(docker_name: str) -> str:
+def get_model_id_for_continue(docker_name: str, hardware: Optional[HardwareInfo] = None) -> str:
     """
     Convert Docker Model Runner model name to Continue.dev compatible format.
-    Docker Model Runner uses: ai.docker.com/<org>/<model>:<tag>
-    Continue.dev expects just the model identifier.
+    
+    Docker Model Runner API returns models as: ai/llama3.2:latest
+    The model catalog uses: ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M
+    
+    This function converts to the actual API model ID format.
     """
-    # Remove the ai.docker.com/ prefix if present
+    # First, check if we can get the actual model ID from the API
+    if hardware and hasattr(hardware, 'available_api_models') and hardware.available_api_models:
+        # Try to match the model name to an API model ID
+        model_lower = docker_name.lower()
+        
+        # Check for llama3.2 variants
+        if "llama3.2" in model_lower or "llama3.2" in docker_name.lower():
+            for api_model_id in hardware.available_api_models:
+                if "llama3.2" in api_model_id.lower():
+                    return api_model_id  # Return the actual API model ID
+        
+        # Check for nomic-embed variants
+        if "nomic" in model_lower or "embed" in model_lower:
+            for api_model_id in hardware.available_api_models:
+                if "nomic" in api_model_id.lower() or "embed" in api_model_id.lower():
+                    return api_model_id
+    
+    # Fallback: Convert from catalog format to Docker Hub format
     model_id = docker_name
+    
+    # Remove the ai.docker.com/ prefix if present
     if model_id.startswith("ai.docker.com/"):
-        model_id = model_id[len("ai.docker.com/"):]
-    if model_id.startswith("ai/"):
-        model_id = model_id[len("ai/"):]
+        remaining = model_id[len("ai.docker.com/"):]
+        parts = remaining.split("/")
+        if len(parts) > 1:
+            # Has org prefix (meta/, qwen/, etc.), remove it
+            model_part = parts[1]
+        else:
+            model_part = parts[0]
+        
+        # Remove size/tag variants and convert to base model name
+        # ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M -> ai/llama3.2
+        if ":" in model_part:
+            model_part = model_part.split(":")[0]
+        
+        # Remove size indicators (3b, 8b, etc.) from model name
+        import re
+        model_part = re.sub(r'[-_]?[0-9]+b', '', model_part, flags=re.IGNORECASE)
+        model_part = re.sub(r'[-_]?instruct[-_]?q[0-9]_[KM]', '', model_part, flags=re.IGNORECASE)
+        
+        # Convert to Docker Hub format: ai/modelname
+        model_id = f"ai/{model_part}"
+        
+        # Add :latest tag (Docker Model Runner uses this)
+        if ":" not in model_id:
+            model_id = f"{model_id}:latest"
+    
+    # If it already starts with ai/, ensure it has :latest tag
+    elif model_id.startswith("ai/"):
+        if ":" not in model_id:
+            model_id = f"{model_id}:latest"
     
     return model_id
 
@@ -1125,7 +1917,7 @@ def generate_continue_config(
     api_base = hardware.dmr_api_endpoint
     print_info(f"Using API endpoint: {api_base}")
     
-    # Build config with comments
+    # Build config with comments and required fields
     yaml_lines = [
         "# Continue.dev Configuration for Docker Model Runner",
         "# Generated by docker-llm-setup.py",
@@ -1133,6 +1925,11 @@ def generate_continue_config(
         f"# RAM: {hardware.ram_gb:.0f}GB | Tier: {hardware.tier.value}",
         "#",
         "# Documentation: https://docs.continue.dev/yaml-reference",
+        "",
+        "# Required fields",
+        "name: Docker Model Runner Local LLM",
+        "version: 1.0.0",
+        "schema: v1",
         "",
     ]
     
@@ -1151,12 +1948,14 @@ def generate_continue_config(
     yaml_lines.append("models:")
     
     for i, model in enumerate(chat_models):
-        model_id = get_model_id_for_continue(model.docker_name)
+        model_id = get_model_id_for_continue(model.docker_name, hardware)
+        # Ensure apiBase doesn't have trailing slash
+        api_base_clean = api_base.rstrip('/')
         yaml_lines.extend([
             f"  - name: {model.name}",
             f"    provider: openai",
             f"    model: {model_id}",
-            f"    apiBase: {api_base}",
+            f"    apiBase: {api_base_clean}",
             f"    contextLength: {model.context_length}",
         ])
         
@@ -1183,13 +1982,14 @@ def generate_continue_config(
     
     # Add autocomplete model (if different from chat models)
     autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
+    api_base_clean = api_base.rstrip('/')
     for model in autocomplete_only:
-        model_id = get_model_id_for_continue(model.docker_name)
+        model_id = get_model_id_for_continue(model.docker_name, hardware)
         yaml_lines.extend([
             f"  - name: {model.name} (Autocomplete)",
             f"    provider: openai",
             f"    model: {model_id}",
-            f"    apiBase: {api_base}",
+            f"    apiBase: {api_base_clean}",
             "    roles:",
             "      - autocomplete",
             "",
@@ -1198,26 +1998,26 @@ def generate_continue_config(
     # Tab autocomplete configuration
     if autocomplete_models:
         auto_model = autocomplete_models[0]
-        model_id = get_model_id_for_continue(auto_model.docker_name)
+        model_id = get_model_id_for_continue(auto_model.docker_name, hardware)
         yaml_lines.extend([
             "# Tab autocomplete settings",
             "tabAutocompleteModel:",
             f"  provider: openai",
             f"  model: {model_id}",
-            f"  apiBase: {api_base}",
+            f"  apiBase: {api_base_clean}",
             "",
         ])
     
     # Embeddings configuration
     if embed_models:
         embed_model = embed_models[0]
-        model_id = get_model_id_for_continue(embed_model.docker_name)
+        model_id = get_model_id_for_continue(embed_model.docker_name, hardware)
         yaml_lines.extend([
             "# Embeddings for semantic code search (@Codebase)",
             "embeddingsProvider:",
             f"  provider: openai",
             f"  model: {model_id}",
-            f"  apiBase: {api_base}",
+            f"  apiBase: {api_base_clean}",
             "",
         ])
     
@@ -1271,43 +2071,44 @@ def generate_continue_config(
     # Build JSON config
     json_config: Dict[str, Any] = {"models": []}
     
+    api_base_clean = api_base.rstrip('/')
     for model in chat_models:
-        model_id = get_model_id_for_continue(model.docker_name)
+        model_id = get_model_id_for_continue(model.docker_name, hardware)
         json_config["models"].append({
             "name": model.name,
             "provider": "openai",
             "model": model_id,
-            "apiBase": api_base,
+            "apiBase": api_base_clean,
             "contextLength": model.context_length,
             "roles": ["chat", "edit", "apply"] + (["agent"] if "agent" in model.roles else []),
         })
     
     for model in autocomplete_only:
-        model_id = get_model_id_for_continue(model.docker_name)
+        model_id = get_model_id_for_continue(model.docker_name, hardware)
         json_config["models"].append({
             "name": f"{model.name} (Autocomplete)",
             "provider": "openai", 
             "model": model_id,
-            "apiBase": api_base,
+            "apiBase": api_base_clean,
             "roles": ["autocomplete"],
         })
     
     if autocomplete_models:
         auto_model = autocomplete_models[0]
-        model_id = get_model_id_for_continue(auto_model.docker_name)
+        model_id = get_model_id_for_continue(auto_model.docker_name, hardware)
         json_config["tabAutocompleteModel"] = {
             "provider": "openai",
             "model": model_id,
-            "apiBase": api_base,
+            "apiBase": api_base_clean,
         }
     
     if embed_models:
         embed_model = embed_models[0]
-        model_id = get_model_id_for_continue(embed_model.docker_name)
+        model_id = get_model_id_for_continue(embed_model.docker_name, hardware)
         json_config["embeddingsProvider"] = {
             "provider": "openai",
             "model": model_id,
-            "apiBase": api_base,
+            "apiBase": api_base_clean,
         }
     
     json_config["contextProviders"] = [
@@ -1388,6 +2189,59 @@ def format_yaml_value(value: Any) -> str:
     return str(value)
 
 
+def install_vscode_extension(extension_id: str) -> bool:
+    """Install a VS Code extension using the CLI."""
+    # Check if VS Code CLI is available
+    code_path = shutil.which("code")
+    if not code_path:
+        return False
+    
+    # Check if extension is already installed
+    code, stdout, _ = run_command(["code", "--list-extensions"], timeout=10)
+    if code == 0 and extension_id in stdout:
+        return True  # Already installed
+    
+    # Install the extension
+    code, stdout, stderr = run_command(["code", "--install-extension", extension_id], timeout=60)
+    return code == 0
+
+
+def start_model_server(model_name: str) -> Optional[subprocess.Popen]:
+    """Start the Docker Model Runner API server in the background."""
+    try:
+        process = subprocess.Popen(
+            ["docker", "model", "run", model_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        # Give it a moment to start
+        time.sleep(2)
+        # Check if it's still running (didn't immediately fail)
+        if process.poll() is None:
+            return process
+        else:
+            return None
+    except Exception:
+        return None
+
+
+def restart_vscode() -> bool:
+    """Restart VS Code (macOS only for now)."""
+    if platform.system() != "Darwin":
+        return False
+    
+    try:
+        # Quit VS Code
+        run_command(["killall", "Visual Studio Code"], timeout=5)
+        time.sleep(1)
+        # Reopen VS Code
+        run_command(["open", "-a", "Visual Studio Code"], timeout=5)
+        return True
+    except Exception:
+        return False
+
+
 def show_next_steps(config_path: Path, models: List[ModelInfo], hardware: HardwareInfo) -> None:
     """Display next steps after setup."""
     print_header("✅ Setup Complete!")
@@ -1414,16 +2268,46 @@ def show_next_steps(config_path: Path, models: List[ModelInfo], hardware: Hardwa
     
     step = 1
     
-    # Step 1: Install Continue.dev
+    # Step 1: Install Continue.dev (automated if possible)
     print(f"  {step}. Install Continue.dev extension in VS Code:")
-    if hardware.os_name == "Darwin":
-        print(colorize("     • Open VS Code", Colors.DIM))
-        print(colorize("     • Press Cmd+Shift+X to open Extensions", Colors.DIM))
-        print(colorize("     • Search for 'Continue' and install 'Continue - Codestral, GPT-4, etc.'", Colors.DIM))
+    
+    # Check if VS Code CLI is available
+    vscode_available = shutil.which("code") is not None
+    
+    if vscode_available:
+        # Check if already installed
+        code, stdout, _ = run_command(["code", "--list-extensions"], timeout=10)
+        already_installed = code == 0 and "Continue.continue" in stdout
+        
+        if already_installed:
+            print_success("Continue.dev extension is already installed")
+        else:
+            if prompt_yes_no("    Install Continue.dev extension automatically?", default=True):
+                print_info("    Installing Continue.dev extension...")
+                if install_vscode_extension("Continue.continue"):
+                    print_success("    Continue.dev extension installed successfully")
+                else:
+                    print_warning("    Failed to install automatically. Please install manually:")
+                    if hardware.os_name == "Darwin":
+                        print(colorize("       • Press Cmd+Shift+X → Search 'Continue' → Install", Colors.DIM))
+                    else:
+                        print(colorize("       • Press Ctrl+Shift+X → Search 'Continue' → Install", Colors.DIM))
+            else:
+                print_info("    Skipping automatic installation.")
+                if hardware.os_name == "Darwin":
+                    print(colorize("     • Press Cmd+Shift+X to open Extensions", Colors.DIM))
+                    print(colorize("     • Search for 'Continue' and install", Colors.DIM))
+                else:
+                    print(colorize("     • Press Ctrl+Shift+X to open Extensions", Colors.DIM))
+                    print(colorize("     • Search for 'Continue' and install", Colors.DIM))
     else:
-        print(colorize("     • Open VS Code", Colors.DIM))
-        print(colorize("     • Press Ctrl+Shift+X to open Extensions", Colors.DIM))
-        print(colorize("     • Search for 'Continue' and install", Colors.DIM))
+        print_info("    VS Code CLI not found. Please install manually:")
+        if hardware.os_name == "Darwin":
+            print(colorize("     • Press Cmd+Shift+X to open Extensions", Colors.DIM))
+            print(colorize("     • Search for 'Continue' and install", Colors.DIM))
+        else:
+            print(colorize("     • Press Ctrl+Shift+X to open Extensions", Colors.DIM))
+            print(colorize("     • Search for 'Continue' and install", Colors.DIM))
     print()
     step += 1
     
@@ -1438,8 +2322,46 @@ def show_next_steps(config_path: Path, models: List[ModelInfo], hardware: Hardwa
         chat_models = [m for m in models if "chat" in m.roles]
         if chat_models:
             print(f"  {step}. Start the model server (if not already running):")
-            print(colorize(f"     docker model run {chat_models[0].docker_name}", Colors.CYAN))
-            print(colorize("     (This starts the API server for Continue.dev to connect)", Colors.DIM))
+            
+            # Convert model name for Docker Hub format
+            model_to_run = chat_models[0].docker_name
+            if model_to_run.startswith("ai.docker.com/"):
+                remaining = model_to_run[len("ai.docker.com/"):]
+                parts = remaining.split("/")
+                if len(parts) > 1:
+                    model_part = parts[1]
+                else:
+                    model_part = parts[0]
+                if ":" in model_part:
+                    model_part = model_part.split(":")[0]
+                model_to_run = f"ai/{model_part}"
+            
+            # Check if API is already running
+            import urllib.request
+            api_running = False
+            try:
+                req = urllib.request.Request(f"{hardware.dmr_api_endpoint}/models", method="GET")
+                with urllib.request.urlopen(req, timeout=2) as response:
+                    if response.status == 200:
+                        api_running = True
+            except:
+                pass
+            
+            if api_running:
+                print_success("    Model server is already running")
+            else:
+                if prompt_yes_no("    Start the model server now?", default=True):
+                    print_info("    Starting model server in background...")
+                    process = start_model_server(model_to_run)
+                    if process:
+                        print_success("    Model server started")
+                        print_info("    (Server is running in background)")
+                    else:
+                        print_warning("    Failed to start automatically. Start manually with:")
+                        print(colorize(f"       docker model run {model_to_run}", Colors.CYAN))
+                else:
+                    print_info("    Start manually with:")
+                    print(colorize(f"       docker model run {model_to_run}", Colors.CYAN))
             print()
             step += 1
     else:
@@ -1466,13 +2388,47 @@ def show_next_steps(config_path: Path, models: List[ModelInfo], hardware: Hardwa
         print()
         step += 1
     
-    # Step: Restart VS Code
+    # Step: Restart VS Code (automated if possible)
     print(f"  {step}. Restart VS Code:")
+    
+    # Check if VS Code is running
+    vscode_running = False
     if hardware.os_name == "Darwin":
-        print(colorize("     • Quit VS Code completely (Cmd+Q)", Colors.DIM))
+        code, _, _ = run_command(["pgrep", "-f", "Visual Studio Code"], timeout=5)
+        vscode_running = code == 0
     else:
-        print(colorize("     • Close all VS Code windows", Colors.DIM))
-    print(colorize("     • Reopen VS Code", Colors.DIM))
+        code, _, _ = run_command(["pgrep", "-f", "code"], timeout=5)
+        vscode_running = code == 0
+    
+    if vscode_running:
+        if prompt_yes_no("    Restart VS Code automatically now?", default=False):
+            print_warning("    This will close all VS Code windows. Make sure you've saved your work!")
+            if prompt_yes_no("    Continue with restart?", default=False):
+                if restart_vscode():
+                    print_success("    VS Code restarted")
+                else:
+                    print_warning("    Failed to restart automatically. Please restart manually:")
+                    if hardware.os_name == "Darwin":
+                        print(colorize("       • Quit VS Code completely (Cmd+Q)", Colors.DIM))
+                    else:
+                        print(colorize("       • Close all VS Code windows", Colors.DIM))
+                    print(colorize("       • Reopen VS Code", Colors.DIM))
+            else:
+                print_info("    Skipping automatic restart.")
+                if hardware.os_name == "Darwin":
+                    print(colorize("     • Quit VS Code completely (Cmd+Q)", Colors.DIM))
+                else:
+                    print(colorize("     • Close all VS Code windows", Colors.DIM))
+                print(colorize("     • Reopen VS Code", Colors.DIM))
+        else:
+            print_info("    Please restart VS Code manually:")
+            if hardware.os_name == "Darwin":
+                print(colorize("     • Quit VS Code completely (Cmd+Q)", Colors.DIM))
+            else:
+                print(colorize("     • Close all VS Code windows", Colors.DIM))
+            print(colorize("     • Reopen VS Code", Colors.DIM))
+    else:
+        print_info("    VS Code is not running. Open VS Code when ready.")
     print()
     step += 1
     
