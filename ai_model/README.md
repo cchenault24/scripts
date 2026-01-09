@@ -398,15 +398,23 @@ The script automatically backs up existing configs to:
 
 ## 🖥️ Hardware Tiers
 
-The script classifies hardware into tiers based on total RAM:
+The script classifies hardware into tiers based on total RAM. Model selections are conservative to ensure proper headroom for OS, multiple models, and other applications:
 
-| Tier | RAM Range | Description | Typical Models |
+| Tier | RAM Range | Description | Portfolio Models |
 |------|-----------|-------------|----------------|
-| **S** | >64GB | High-end workstations | Llama 3.3, Llama 3.1, Granite 4.0 H-Small |
-| **A** | 32-64GB | Professional systems | Granite 4.0 H-Small, Codestral 22B, Devstral Small |
-| **B** | 17-32GB | Mid-range systems | Phi-4, Granite 4.0 H-Micro, CodeLlama 13B |
-| **C** | 8-17GB | Entry-level systems | Granite 4.0 H-Nano, CodeGemma 7B, Llama 3.2 |
-| **D** | <8GB | Minimal systems | StarCoder2 3B, minimal models |
+| **S** | >64GB | High-end workstations | 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) |
+| **A** | 32-64GB | Professional systems | 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) |
+| **B** | 17-32GB | Mid-range systems | 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) |
+| **C** | 8-17GB | Entry-level systems | 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) |
+| **D** | <8GB | Minimal systems | 3B general (Q4) + 1B utility (Q4) |
+
+### RAM Budget Allocation
+
+The portfolio recommendation uses conservative RAM budgets to ensure stability:
+- **Primary model**: 50% of usable RAM (main workhorse)
+- **Specialized models**: 30% of usable RAM (coding, reasoning, vision)
+- **Utility models**: 3% of usable RAM (embeddings, small helpers)
+- **Reserve**: 17% free RAM (for OS, multiple models, browser, and other apps)
 
 ### Apple Silicon Optimization
 
@@ -421,13 +429,14 @@ For Apple Silicon Macs:
 ### Model Categories
 
 #### Chat/Edit Models
-- **Large** (Tier S): Llama 3.3, Llama 3.1
-- **Medium-Large** (Tier A): Granite 4.0 H-Small, Codestral 22B
-- **Medium** (Tier B): Phi-4, Granite 4.0 H-Micro, CodeLlama 13B
-- **Small** (Tier C): Granite 4.0 H-Nano, CodeGemma 7B, Llama 3.2
+- **Large** (Tier S): 34B reasoning models (Llama 3.3), 22B coding models (Granite 4.0)
+- **Medium-Large** (Tier A): 34B reasoning models (Llama 3.3), 13B coding models (Granite 4.0)
+- **Medium** (Tier B): 13B general models (Llama 3.2), 7B coding models (Phi-4)
+- **Small** (Tier C): 7B general models (Llama 3.2), 3B coding models (Granite Nano)
+- **Minimal** (Tier D): 3B general models, 1B utility models
 
 #### Autocomplete Models
-- **Ultra-fast**: StarCoder2 3B, Llama 3.2 (small variants)
+- **Ultra-fast**: 3B models (Granite Nano), 1B models (TinyLlama)
 
 #### Embedding Models
 - **Code Embeddings**: Specialized models for semantic code search
@@ -652,6 +661,20 @@ MIT License - See LICENSE file for details.
 - **Docker Desktop**: [docker.com/desktop](https://docker.com/desktop)
 
 ## 📝 Changelog
+
+### Version 2.1.0
+- **Conservative model selection**: Downgraded all tier recommendations by one size tier for better stability
+  - Tier S: 70B → 34B reasoning, 34B → 22B coding, F16 → 13B Q5 multimodal
+  - Tier A: 70B → 34B reasoning, 34B → 13B coding, 13B → 7B multimodal
+  - Tier B: 34B → 13B general, 13B → 7B coding, 7B → 3B multimodal
+  - Tier C: 13B → 7B general, 7B → 3B coding, 3B → 1B utility
+  - Tier D: 7B → 3B general, 3B → 1B utility
+- **Conservative RAM budgets**: Updated allocations for proper headroom
+  - Primary budget: 70% → 50% of usable RAM
+  - Specialized budget: 25% → 30% of usable RAM
+  - Utility budget: 3% (unchanged)
+  - Reserve: 2% → 17% free RAM (for OS, multiple models, browser, and other apps)
+- **Improved stability**: Models now fit comfortably in memory with proper headroom for system overhead
 
 ### Version 2.0.0
 - **Schema compliance**: Removed all fields not in the official Continue.dev schema to ensure validation passes

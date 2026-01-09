@@ -2383,18 +2383,18 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
     """
     Generate portfolio-based model recommendations for hardware tier.
     
-    Portfolio allocation (UPGRADED for larger models):
-    - Primary model: 70% RAM budget (main workhorse - aggressive allocation for larger models)
-    - Specialized: 25% RAM budget (coding, reasoning, vision - adjusted for balance)
+    Portfolio allocation (CONSERVATIVE for proper headroom):
+    - Primary model: 50% RAM budget (main workhorse - conservative allocation for stability)
+    - Specialized: 30% RAM budget (coding, reasoning, vision - increased for balance)
     - Utility: 3% RAM budget (embeddings, small helpers - minimal, embeddings are small)
-    - Reserve: 2% free RAM (minimal reserve, models can share memory)
+    - Reserve: 17% free RAM (generous reserve for OS, multiple models, browser, and other apps)
     
-    Tier-specific portfolios (UPGRADED - one size larger than before):
-    - Tier S (>64GB): 70B reasoning (Q4) + 34B coding (Q5) + multimodal (F16) + embed (~50GB)
-    - Tier A (32-64GB): 70B reasoning (Q4) + 34B coding (Q5) + 13B multimodal (Q5) + embed (~40GB)
-    - Tier B (17-32GB): 34B general (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed (~20GB)
-    - Tier C (8-17GB): 13B general (Q4) + 7B coding (Q4) + 3B utility (Q4) + embed (~10GB)
-    - Tier D (<8GB): 7B general (Q4) + 3B utility (Q4) + embed (~5GB)
+    Tier-specific portfolios (DOWNGRADED - one size smaller for stability):
+    - Tier S (>64GB): 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) + embed
+    - Tier A (32-64GB): 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed
+    - Tier B (17-32GB): 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) + embed
+    - Tier C (8-17GB): 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) + embed
+    - Tier D (<8GB): 3B general (Q4) + 1B utility (Q4) + embed
     
     Args:
         hw_info: Hardware information
@@ -2404,25 +2404,25 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
     """
     usable_ram = hw_info.get_estimated_model_memory()
     
-    # Calculate RAM budgets (upgraded for larger models - more aggressive)
-    primary_budget = usable_ram * 0.70  # Increased to 70% for larger primary models
-    specialized_budget = usable_ram * 0.25  # Adjusted to 25% for balance
-    utility_budget = usable_ram * 0.03  # Reduced to 3% (embeddings are small)
+    # Calculate RAM budgets (conservative for proper headroom)
+    primary_budget = usable_ram * 0.50  # Reduced to 50% for stability and headroom
+    specialized_budget = usable_ram * 0.30  # Increased to 30% for balance
+    utility_budget = usable_ram * 0.03  # Kept at 3% (embeddings are small)
     
     recommended = []
     
     # Tier-specific model selection
     if hw_info.tier == hardware.HardwareTier.S:
-        # Tier S: 70B reasoning (Q4) + 34B coding (Q5) + multimodal (F16) + embed
-        # Primary: 70B reasoning model
-        primary_result = discover_best_model_by_criteria(70.0, "reasoning", primary_budget, hw_info)
+        # Tier S: 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) + embed
+        # Primary: 34B reasoning model
+        primary_result = discover_best_model_by_criteria(34.0, "reasoning", primary_budget, hw_info)
         if primary_result:
             model_name, variant = primary_result
             model_info = ModelInfo(
                 name="Llama 3.3 (Reasoning)",
                 docker_name=f"ai/{model_name}",
-                description="70B reasoning model",
-                ram_gb=calculate_model_ram(70.0, "Q4"),
+                description="34B reasoning model",
+                ram_gb=calculate_model_ram(34.0, "Q4"),
                 context_length=131072,
                 roles=["chat", "edit", "agent"],
                 tiers=[hardware.HardwareTier.S],
@@ -2431,15 +2431,15 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             )
             recommended.append(model_info)
         
-        # Specialized: 34B coding
-        coding_result = discover_best_model_by_criteria(34.0, "coding", specialized_budget, hw_info)
+        # Specialized: 22B coding
+        coding_result = discover_best_model_by_criteria(22.0, "coding", specialized_budget, hw_info)
         if coding_result:
             model_name, variant = coding_result
             model_info = ModelInfo(
                 name="Granite 4.0 (Coding)",
                 docker_name=f"ai/{model_name}",
-                description="34B coding model",
-                ram_gb=calculate_model_ram(34.0, "Q5"),
+                description="22B coding model",
+                ram_gb=calculate_model_ram(22.0, "Q5"),
                 context_length=131072,
                 roles=["chat", "edit", "autocomplete"],
                 tiers=[hardware.HardwareTier.S],
@@ -2448,57 +2448,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             )
             recommended.append(model_info)
         
-        # Multimodal
-        multimodal_result = discover_best_model_by_criteria(None, "multimodal", specialized_budget, hw_info)
-        if multimodal_result:
-            model_name, variant = multimodal_result
-            model_info = ModelInfo(
-                name="Gemma 3N (Multimodal)",
-                docker_name=f"ai/{model_name}",
-                description="Multimodal model",
-                ram_gb=calculate_model_ram(7.0, "F16"),
-                context_length=32768,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.S],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-    
-    elif hw_info.tier == hardware.HardwareTier.A:
-        # Tier A: 70B reasoning (Q4) + 34B coding (Q5) + 13B multimodal (Q5) + embed
-        primary_result = discover_best_model_by_criteria(70.0, "reasoning", primary_budget, hw_info)
-        if primary_result:
-            model_name, variant = primary_result
-            model_info = ModelInfo(
-                name="Llama 3.3 (Reasoning)",
-                docker_name=f"ai/{model_name}",
-                description="70B reasoning model",
-                ram_gb=calculate_model_ram(70.0, "Q4"),
-                context_length=131072,
-                roles=["chat", "edit", "agent"],
-                tiers=[hardware.HardwareTier.A],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        coding_result = discover_best_model_by_criteria(34.0, "coding", specialized_budget, hw_info)
-        if coding_result:
-            model_name, variant = coding_result
-            model_info = ModelInfo(
-                name="Granite 4.0 (Coding)",
-                docker_name=f"ai/{model_name}",
-                description="34B coding model",
-                ram_gb=calculate_model_ram(34.0, "Q5"),
-                context_length=131072,
-                roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.A],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
+        # Multimodal: 13B
         multimodal_result = discover_best_model_by_criteria(13.0, "multimodal", specialized_budget, hw_info)
         if multimodal_result:
             model_name, variant = multimodal_result
@@ -2509,25 +2459,25 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
                 ram_gb=calculate_model_ram(13.0, "Q5"),
                 context_length=131072,
                 roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.A],
+                tiers=[hardware.HardwareTier.S],
                 base_model_name=model_name,
                 selected_variant=variant
             )
             recommended.append(model_info)
     
-    elif hw_info.tier == hardware.HardwareTier.B:
-        # Tier B: 34B general (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed
-        primary_result = discover_best_model_by_criteria(34.0, "general", primary_budget, hw_info)
+    elif hw_info.tier == hardware.HardwareTier.A:
+        # Tier A: 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed
+        primary_result = discover_best_model_by_criteria(34.0, "reasoning", primary_budget, hw_info)
         if primary_result:
             model_name, variant = primary_result
             model_info = ModelInfo(
-                name="Llama 3.2 (General)",
+                name="Llama 3.3 (Reasoning)",
                 docker_name=f"ai/{model_name}",
-                description="34B general model",
+                description="34B reasoning model",
                 ram_gb=calculate_model_ram(34.0, "Q4"),
                 context_length=131072,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.B],
+                roles=["chat", "edit", "agent"],
+                tiers=[hardware.HardwareTier.A],
                 base_model_name=model_name,
                 selected_variant=variant
             )
@@ -2543,7 +2493,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
                 ram_gb=calculate_model_ram(13.0, "Q5"),
                 context_length=131072,
                 roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.B],
+                tiers=[hardware.HardwareTier.A],
                 base_model_name=model_name,
                 selected_variant=variant
             )
@@ -2559,14 +2509,14 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
                 ram_gb=calculate_model_ram(7.0, "Q4"),
                 context_length=16384,
                 roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.B],
+                tiers=[hardware.HardwareTier.A],
                 base_model_name=model_name,
                 selected_variant=variant
             )
             recommended.append(model_info)
     
-    elif hw_info.tier == hardware.HardwareTier.C:
-        # Tier C: 13B general (Q4) + 7B coding (Q4) + 3B utility (Q4) + embed
+    elif hw_info.tier == hardware.HardwareTier.B:
+        # Tier B: 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) + embed
         primary_result = discover_best_model_by_criteria(13.0, "general", primary_budget, hw_info)
         if primary_result:
             model_name, variant = primary_result
@@ -2577,7 +2527,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
                 ram_gb=calculate_model_ram(13.0, "Q4"),
                 context_length=131072,
                 roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.C],
+                tiers=[hardware.HardwareTier.B],
                 base_model_name=model_name,
                 selected_variant=variant
             )
@@ -2593,30 +2543,30 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
                 ram_gb=calculate_model_ram(7.0, "Q4"),
                 context_length=16384,
                 roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.C],
+                tiers=[hardware.HardwareTier.B],
                 base_model_name=model_name,
                 selected_variant=variant
             )
             recommended.append(model_info)
         
-        utility_result = discover_best_model_by_criteria(3.0, "coding", utility_budget, hw_info)
-        if utility_result:
-            model_name, variant = utility_result
+        multimodal_result = discover_best_model_by_criteria(3.0, "multimodal", specialized_budget, hw_info)
+        if multimodal_result:
+            model_name, variant = multimodal_result
             model_info = ModelInfo(
-                name="Granite Nano (Utility)",
+                name="Granite Nano (Multimodal)",
                 docker_name=f"ai/{model_name}",
-                description="3B utility model",
+                description="3B multimodal model",
                 ram_gb=calculate_model_ram(3.0, "Q4"),
                 context_length=32768,
                 roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.C],
+                tiers=[hardware.HardwareTier.B],
                 base_model_name=model_name,
                 selected_variant=variant
             )
             recommended.append(model_info)
     
-    else:  # Tier D
-        # Tier D: 7B general (Q4) + 3B utility (Q4) + embed
+    elif hw_info.tier == hardware.HardwareTier.C:
+        # Tier C: 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) + embed
         primary_result = discover_best_model_by_criteria(7.0, "general", primary_budget, hw_info)
         if primary_result:
             model_name, variant = primary_result
@@ -2627,21 +2577,71 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
                 ram_gb=calculate_model_ram(7.0, "Q4"),
                 context_length=131072,
                 roles=["chat", "edit"],
+                tiers=[hardware.HardwareTier.C],
+                base_model_name=model_name,
+                selected_variant=variant
+            )
+            recommended.append(model_info)
+        
+        coding_result = discover_best_model_by_criteria(3.0, "coding", specialized_budget, hw_info)
+        if coding_result:
+            model_name, variant = coding_result
+            model_info = ModelInfo(
+                name="Granite Nano (Coding)",
+                docker_name=f"ai/{model_name}",
+                description="3B coding model",
+                ram_gb=calculate_model_ram(3.0, "Q4"),
+                context_length=32768,
+                roles=["chat", "edit", "autocomplete"],
+                tiers=[hardware.HardwareTier.C],
+                base_model_name=model_name,
+                selected_variant=variant
+            )
+            recommended.append(model_info)
+        
+        utility_result = discover_best_model_by_criteria(1.0, "coding", utility_budget, hw_info)
+        if utility_result:
+            model_name, variant = utility_result
+            model_info = ModelInfo(
+                name="TinyLlama (Utility)",
+                docker_name=f"ai/{model_name}",
+                description="1B utility model",
+                ram_gb=calculate_model_ram(1.0, "Q4"),
+                context_length=2048,
+                roles=["chat", "edit"],
+                tiers=[hardware.HardwareTier.C],
+                base_model_name=model_name,
+                selected_variant=variant
+            )
+            recommended.append(model_info)
+    
+    else:  # Tier D
+        # Tier D: 3B general (Q4) + 1B utility (Q4) + embed
+        primary_result = discover_best_model_by_criteria(3.0, "general", primary_budget, hw_info)
+        if primary_result:
+            model_name, variant = primary_result
+            model_info = ModelInfo(
+                name="Llama 3.2 (General)",
+                docker_name=f"ai/{model_name}",
+                description="3B general model",
+                ram_gb=calculate_model_ram(3.0, "Q4"),
+                context_length=131072,
+                roles=["chat", "edit"],
                 tiers=[hardware.HardwareTier.D],
                 base_model_name=model_name,
                 selected_variant=variant
             )
             recommended.append(model_info)
         
-        utility_result = discover_best_model_by_criteria(3.0, "coding", utility_budget, hw_info)
+        utility_result = discover_best_model_by_criteria(1.0, "coding", utility_budget, hw_info)
         if utility_result:
             model_name, variant = utility_result
             model_info = ModelInfo(
-                name="Granite Nano (Utility)",
+                name="TinyLlama (Utility)",
                 docker_name=f"ai/{model_name}",
-                description="3B utility model",
-                ram_gb=calculate_model_ram(3.0, "Q4"),
-                context_length=32768,
+                description="1B utility model",
+                ram_gb=calculate_model_ram(1.0, "Q4"),
+                context_length=2048,
                 roles=["chat", "edit"],
                 tiers=[hardware.HardwareTier.D],
                 base_model_name=model_name,
