@@ -72,6 +72,92 @@ def generate_yaml(config: Dict[str, Any], indent: int = 0) -> str:
     return "\n".join(lines)
 
 
+def generate_setup_summary(
+    model_list: List[models.ModelInfo],
+    hw_info: hardware.HardwareInfo
+) -> Dict[str, Any]:
+    """
+    Generate setup summary with hardware tier, models, and RAM usage.
+    
+    Args:
+        model_list: List of selected models
+        hw_info: Hardware information
+    
+    Returns:
+        Dictionary with setup summary
+    """
+    total_ram_used = sum(m.ram_gb for m in model_list)
+    usable_ram = hw_info.get_estimated_model_memory()
+    reserve_ram = usable_ram - total_ram_used
+    
+    models_summary = []
+    for model in model_list:
+        models_summary.append({
+            "name": model.name,
+            "docker_name": model.docker_name,
+            "variant": model.selected_variant or "default",
+            "ram_gb": model.ram_gb,
+            "roles": model.roles,
+            "context_length": model.context_length
+        })
+    
+    summary = {
+        "hardware": {
+            "tier": hw_info.tier.value,
+            "ram_gb": hw_info.ram_gb,
+            "usable_ram_gb": usable_ram,
+            "cpu": hw_info.cpu_brand or "Unknown",
+            "apple_chip": hw_info.apple_chip_model or None,
+            "has_apple_silicon": hw_info.has_apple_silicon
+        },
+        "models": models_summary,
+        "ram_usage": {
+            "total_ram_gb": total_ram_used,
+            "available_ram_gb": usable_ram,
+            "reserve_ram_gb": reserve_ram,
+            "usage_percent": (total_ram_used / usable_ram * 100) if usable_ram > 0 else 0
+        },
+        "timestamp": str(Path.home() / ".continue" / "setup-summary.json")
+    }
+    
+    return summary
+
+
+def save_setup_summary(
+    model_list: List[models.ModelInfo],
+    hw_info: hardware.HardwareInfo,
+    output_path: Optional[Path] = None
+) -> Path:
+    """
+    Save setup summary to JSON file.
+    
+    Args:
+        model_list: List of selected models
+        hw_info: Hardware information
+        output_path: Optional output path (default: ~/.continue/setup-summary.json)
+    
+    Returns:
+        Path to saved summary file
+    """
+    if output_path is None:
+        output_path = Path.home() / ".continue" / "setup-summary.json"
+    
+    # Create directory if needed
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Generate summary
+    summary = generate_setup_summary(model_list, hw_info)
+    summary["timestamp"] = str(output_path)
+    
+    # Save to file
+    with open(output_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    
+    ui.print_success(f"Setup summary saved to {output_path}")
+    
+    return output_path
+
+
 def generate_continue_config(
     model_list: List[models.ModelInfo],
     hw_info: hardware.HardwareInfo,
@@ -250,12 +336,17 @@ def generate_continue_config(
         "",
     ])
     
-    # Add Apple Silicon specific notes
+    # Add Apple Silicon specific optimizations
     if hw_info.has_apple_silicon:
         yaml_lines.extend([
             f"# Optimized for {hw_info.apple_chip_model or 'Apple Silicon'}",
             f"# Available unified memory: ~{hw_info.get_estimated_model_memory():.0f}GB",
             "# Metal GPU acceleration is enabled automatically",
+            f"# Neural Engine: {hw_info.neural_engine_cores} cores available",
+            "# Apple Silicon optimizations:",
+            "#   - Metal Performance Shaders (MPS) for GPU acceleration",
+            "#   - Unified memory architecture (shared CPU/GPU/NE memory)",
+            "#   - Optimized quantization for Apple Silicon",
         ])
     
     # Write YAML config

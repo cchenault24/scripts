@@ -6,6 +6,7 @@ Provides functions to install extensions, restart VS Code, and display next step
 
 import platform
 import shutil
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -17,6 +18,16 @@ from . import hardware
 from . import models
 from . import ui
 from . import utils
+
+# SSL context that skips certificate verification (equivalent to curl -k)
+# Needed for work machines with corporate proxies/interception
+try:
+    _UNVERIFIED_SSL_CONTEXT = ssl._create_unverified_context()
+except Exception:
+    # Fallback: create a default context and disable verification
+    _UNVERIFIED_SSL_CONTEXT = ssl.create_default_context()
+    _UNVERIFIED_SSL_CONTEXT.check_hostname = False
+    _UNVERIFIED_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 
 def install_vscode_extension(extension_id: str) -> bool:
@@ -170,7 +181,7 @@ def show_next_steps(config_path: Path, model_list: List[models.ModelInfo], hw_in
             api_running = False
             try:
                 req = urllib.request.Request(f"{hw_info.dmr_api_endpoint}/models", method="GET")
-                with urllib.request.urlopen(req, timeout=2) as response:
+                with urllib.request.urlopen(req, timeout=2, context=_UNVERIFIED_SSL_CONTEXT) as response:
                     if response.status == 200:
                         api_running = True
             except (urllib.error.URLError, urllib.error.HTTPError, OSError):

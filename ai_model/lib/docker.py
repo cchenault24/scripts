@@ -7,6 +7,7 @@ and interact with the DMR API.
 
 import json
 import shutil
+import ssl
 import urllib.error
 import urllib.request
 from typing import List, Tuple
@@ -16,6 +17,15 @@ from . import models
 from . import ui
 from . import utils
 
+# SSL context that skips certificate verification (equivalent to curl -k)
+# Needed for work machines with corporate proxies/interception
+try:
+    _UNVERIFIED_SSL_CONTEXT = ssl._create_unverified_context()
+except Exception:
+    # Fallback: create a default context and disable verification
+    _UNVERIFIED_SSL_CONTEXT = ssl.create_default_context()
+    _UNVERIFIED_SSL_CONTEXT.check_hostname = False
+    _UNVERIFIED_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 # Docker Model Runner API configuration
 # DMR exposes an OpenAI-compatible API endpoint
@@ -69,7 +79,7 @@ def fetch_available_models_from_api(endpoint: str) -> List[str]:
         req = urllib.request.Request(api_url, method="GET")
         req.add_header("Content-Type", "application/json")
         
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=5, context=_UNVERIFIED_SSL_CONTEXT) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode('utf-8'))
                 if "data" in data:
@@ -111,7 +121,7 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
             try:
                 req = urllib.request.Request(f"{endpoint}/models", method="GET")
                 req.add_header("Content-Type", "application/json")
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=5, context=_UNVERIFIED_SSL_CONTEXT) as response:
                     if response.status == 200:
                         hw_info.dmr_api_endpoint = endpoint
                         api_reachable = True

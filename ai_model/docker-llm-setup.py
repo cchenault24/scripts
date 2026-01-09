@@ -72,21 +72,56 @@ def main() -> int:
         ui.print_error("Docker Model Runner is required but not available.")
         return 1
     
-    # Step 4: Model selection
+    # Step 4: Preset selection
     print()
-    selected_models = models.select_models(hw_info)
+    preset = models.select_preset(hw_info)
+    
+    # Step 5: Model selection
+    print()
+    if preset and preset != "Custom":
+        # Use portfolio recommendation for preset
+        ui.print_info(f"Generating {preset} portfolio recommendation...")
+        selected_models = models.generate_portfolio_recommendation(hw_info)
+        
+        if not selected_models:
+            ui.print_warning("Could not generate portfolio recommendation. Falling back to manual selection.")
+            selected_models = models.select_models(hw_info)
+    else:
+        # Custom selection
+        selected_models = models.select_models(hw_info)
     
     if not selected_models:
         ui.print_error("No models selected. Aborting setup.")
         return 1
     
-    # Step 5: Confirm selection
+    # Step 6: Display RAM usage
+    print()
+    models.display_ram_usage(selected_models, hw_info)
+    
+    # Step 7: Validate selection
+    print()
+    ui.print_subheader("Safety Validation")
+    is_valid, warnings = models.validate_model_selection(selected_models, hw_info)
+    
+    if warnings:
+        for warning in warnings:
+            ui.print_warning(warning)
+        print()
+    
+    if not is_valid:
+        ui.print_error("Validation failed. Please adjust your model selection.")
+        if not ui.prompt_yes_no("Continue anyway? (Not recommended)", default=False):
+            ui.print_info("Setup cancelled.")
+            return 0
+    
+    # Step 8: Confirm selection
     print()
     ui.print_subheader("Configuration Summary")
     total_ram = sum(m.ram_gb for m in selected_models)
     print(f"  Selected {len(selected_models)} model(s):")
     for model in selected_models:
-        print(f"    • {model.name} (~{model.ram_gb}GB RAM)")
+        variant_info = f" ({model.selected_variant})" if model.selected_variant else ""
+        print(f"    • {model.name}{variant_info} (~{model.ram_gb:.1f}GB RAM)")
     print(f"  Total estimated RAM: ~{total_ram:.1f}GB")
     print()
     
@@ -94,15 +129,19 @@ def main() -> int:
         ui.print_info("Setup cancelled. Run again to reconfigure.")
         return 0
     
-    # Step 6: Pull models
+    # Step 9: Pull models
     print()
     pulled_models = models.pull_models_docker(selected_models, hw_info)
     
-    # Step 7: Generate config
+    # Step 10: Generate config
     print()
     config_path = config.generate_continue_config(pulled_models, hw_info)
     
-    # Step 8: Show next steps
+    # Step 11: Save setup summary
+    print()
+    summary_path = config.save_setup_summary(pulled_models, hw_info)
+    
+    # Step 12: Show next steps
     print()
     vscode.show_next_steps(config_path, pulled_models, hw_info)
     

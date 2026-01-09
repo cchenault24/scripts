@@ -17,10 +17,11 @@ from . import utils
 
 class HardwareTier(Enum):
     """Hardware tier classification based on RAM."""
-    S = "S"  # ≥49GB RAM
-    A = "A"  # 33-48GB RAM
+    S = "S"  # >64GB RAM
+    A = "A"  # 32-64GB RAM
     B = "B"  # 17-32GB RAM
-    C = "C"  # <17GB RAM
+    C = "C"  # 8-17GB RAM
+    D = "D"  # <8GB RAM
 
 
 @dataclass
@@ -49,22 +50,16 @@ class HardwareInfo:
     available_docker_hub_models: List[str] = field(default_factory=list)  # Models available on Docker Hub
     discovered_model_tags: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # Cached model tag discovery results
     tier: HardwareTier = HardwareTier.C
+    usable_ram_gb: float = 0.0  # Calculated usable RAM after OS overhead
     
     def get_tier_label(self) -> str:
         """Get human-readable tier label."""
-        # Check if this is a high-end chip promoted to Tier S
-        is_high_end_promoted = False
-        if self.has_apple_silicon and self.apple_chip_model:
-            high_end_patterns = ["M3 Pro", "M3 Max", "M3 Ultra", "M4 Pro", "M4 Max", "M4 Ultra"]
-            is_high_end_promoted = (self.tier == HardwareTier.S and 
-                                   40 <= self.ram_gb < 49 and
-                                   any(pattern in self.apple_chip_model for pattern in high_end_patterns))
-        
         labels = {
-            HardwareTier.S: f"Tier S ({'40-48GB RAM, High-End Chip' if is_high_end_promoted else '≥49GB RAM'}) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.A: f"Tier A (33-48GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB detected",
             HardwareTier.B: f"Tier B (17-32GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.C: f"Tier C (<17GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.C: f"Tier C (8-17GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.D: f"Tier D (<8GB RAM) - {self.ram_gb:.1f}GB detected",
         }
         return labels.get(self.tier, "Unknown")
     
@@ -82,28 +77,38 @@ class HardwareInfo:
         
         return " | ".join(info_parts)
     
+    def calculate_os_overhead(self) -> float:
+        """
+        Calculate OS overhead based on total RAM.
+        OS_OVERHEAD: 3GB (<16GB), 4GB (16-32GB), 5GB (>32GB)
+        """
+        if self.ram_gb < 16:
+            return 3.0
+        elif self.ram_gb <= 32:
+            return 4.0
+        else:
+            return 5.0
+    
     def get_estimated_model_memory(self) -> float:
         """
         Get estimated memory available for models.
+        Uses formula: usable_ram = total_ram - os_overhead
+        This leaves OS overhead reserved while making the rest available for models.
         On Apple Silicon, unified memory is shared between CPU/GPU/Neural Engine.
-        We reserve ~4-8GB for system and other apps.
         """
-        if self.has_apple_silicon:
-            # Reserve more memory on systems with less RAM
-            if self.ram_gb >= 64:
-                return self.ram_gb - 8  # Reserve 8GB for system
-            elif self.ram_gb >= 32:
-                return self.ram_gb - 6  # Reserve 6GB for system
-            elif self.ram_gb >= 16:
-                return self.ram_gb - 4  # Reserve 4GB for system
-            else:
-                return self.ram_gb - 3  # Reserve 3GB for system
-        else:
-            # For discrete GPU systems, use VRAM if available
-            if self.gpu_vram_gb > 0:
-                return self.gpu_vram_gb
-            # Fallback to system RAM with reservation
-            return max(0, self.ram_gb - 4)
+        if self.usable_ram_gb > 0:
+            return self.usable_ram_gb
+        
+        # Calculate usable RAM: total_ram - os_overhead
+        # Changed from (total_ram * 0.75) - os_overhead to avoid double-counting OS overhead
+        os_overhead = self.calculate_os_overhead()
+        usable_ram = self.ram_gb - os_overhead
+        
+        # For discrete GPU systems, use VRAM if available and larger
+        if not self.has_apple_silicon and self.gpu_vram_gb > 0:
+            return max(usable_ram, self.gpu_vram_gb)
+        
+        return max(0, usable_ram)
 
 
 def detect_apple_silicon_details(info: HardwareInfo) -> None:
@@ -313,26 +318,22 @@ def detect_hardware() -> HardwareInfo:
                 info.gpu_vram_gb = float(parts[1].strip()) / 1024
                 info.has_nvidia = True
     
-    # Classify tier - enhanced to consider chip performance, not just RAM
-    # High-end chips (M3/M4 Pro/Max/Ultra) with 40GB+ RAM can handle Tier S models
-    is_high_end_chip = False
-    if info.has_apple_silicon and info.apple_chip_model:
-        # Check for high-end chip variants
-        high_end_patterns = ["M3 Pro", "M3 Max", "M3 Ultra", "M4 Pro", "M4 Max", "M4 Ultra"]
-        is_high_end_chip = any(pattern in info.apple_chip_model for pattern in high_end_patterns)
+    # Calculate usable RAM and OS overhead
+    os_overhead = info.calculate_os_overhead()
+    info.usable_ram_gb = max(0, info.ram_gb - os_overhead)
     
-    # Enhanced tier classification
-    if info.ram_gb >= 49:
+    # Classify tier based on total RAM
+    # New tier system: S (>64GB), A (32-64GB), B (17-32GB), C (8-17GB), D (<8GB)
+    if info.ram_gb > 64:
         info.tier = HardwareTier.S
-    elif info.ram_gb >= 40 and is_high_end_chip:
-        # High-end chips (M3/M4 Pro/Max/Ultra) with 40-48GB RAM can handle Tier S models
-        info.tier = HardwareTier.S
-    elif info.ram_gb >= 33:
+    elif info.ram_gb >= 32:
         info.tier = HardwareTier.A
     elif info.ram_gb >= 17:
         info.tier = HardwareTier.B
-    else:
+    elif info.ram_gb >= 8:
         info.tier = HardwareTier.C
+    else:
+        info.tier = HardwareTier.D
     
     # Print detected hardware
     if info.os_name == "Darwin" and info.macos_version:
@@ -356,7 +357,7 @@ def detect_hardware() -> HardwareInfo:
             ui.print_info(f"GPU Cores: {info.gpu_cores}")
         if info.neural_engine_cores > 0:
             ui.print_info(f"Neural Engine: {info.neural_engine_cores} cores")
-        ui.print_info(f"Estimated memory for models: ~{info.get_estimated_model_memory():.0f}GB")
+        ui.print_info(f"Usable RAM for models: ~{info.get_estimated_model_memory():.1f}GB (after OS overhead)")
     elif info.has_nvidia:
         ui.print_info(f"GPU: {info.gpu_name} ({info.gpu_vram_gb:.1f} GB VRAM)")
     else:
