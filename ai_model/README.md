@@ -328,21 +328,14 @@ VS Code Setup → Next Steps
 
 The generated config includes:
 - **Models**: Chat, edit, autocomplete, and embedding models
-  - All models include `supportsToolCalls: false` to fix @codebase compatibility with local models
   - Chat models have roles: `chat`, `edit`, `apply`
   - Autocomplete models have `autocompleteOptions` with optimized settings
   - Embedding models have role: `embed`
   - All models use `defaultCompletionOptions.contextLength` for context window
 - **API Endpoint**: Docker Model Runner API (typically `http://localhost:12434/v1`)
 - **Context Providers**: Codebase, folder, file, terminal, diff, problems, open (using new `context` format)
-- **Experimental Settings** (extension-specific): 
-  - `streamAfterToolRejection: true` - Prevents model from stopping mid-response if it tries to use a tool inappropriately (fixes palindrome/response interruption issues)
-  - Note: `codebaseUseToolCallingOnly` removed - using `supportsToolCalls: false` on models instead
-- **UI Settings** (extension-specific): 
-  - `showChatScrollbar: true` - Shows scrollbar in chat interface
-  - `wrapCodeblocks: true` - Wraps long code blocks for better readability
-  - `formatMarkdown: true` - Enables markdown formatting
-  - `textToSpeechOutput: false` - Disables TTS (not needed for coding)
+
+**Note**: The config strictly follows the Continue.dev schema. Fields not in the official schema (like `supportsToolCalls`, `experimental`, and `ui`) have been removed to ensure validation compliance.
 
 **Note**: The script no longer includes `systemMessage` in the config.yaml. All assistant behavior is controlled by the `global-rule.md` file.
 
@@ -362,6 +355,9 @@ The generated `global-rule.md` includes:
 You can manually edit the generated config:
 
 ```yaml
+name: Docker Model Runner Local LLM
+version: 1.0.0
+
 models:
   - name: Llama 3.2
     provider: openai
@@ -373,7 +369,6 @@ models:
       - apply
     defaultCompletionOptions:
       contextLength: 131072
-    supportsToolCalls: false
 
   - name: Llama 3.2 3B (Autocomplete)
     provider: openai
@@ -386,7 +381,6 @@ models:
       modelTimeout: 3000
     defaultCompletionOptions:
       contextLength: 131072
-    supportsToolCalls: false
 
 context:
   - provider: codebase
@@ -394,15 +388,6 @@ context:
   - provider: code
   - provider: terminal
   - provider: diff
-
-experimental:
-  streamAfterToolRejection: true
-
-ui:
-  showChatScrollbar: true
-  wrapCodeblocks: true
-  formatMarkdown: true
-  textToSpeechOutput: false
 ```
 
 ### Backup Files
@@ -456,11 +441,14 @@ Some models support automatic variant discovery:
 
 ### Model Roles
 
+Valid roles per Continue.dev schema:
 - **chat**: General conversation and code assistance
 - **edit**: Code editing and refactoring
+- **apply**: Apply code changes
 - **autocomplete**: Tab autocomplete in VS Code
 - **embed**: Semantic code search embeddings
-- **agent**: Agentic workflows
+- **rerank**: Reranking search results
+- **summarize**: Summarization tasks
 
 ## 🔧 Troubleshooting
 
@@ -666,23 +654,19 @@ MIT License - See LICENSE file for details.
 ## 📝 Changelog
 
 ### Version 2.0.0
-- **Fixed @codebase compatibility**: Added `supportsToolCalls: false` to all models to fix "Error parsing chat history" error
-- **Removed deprecated setting**: Removed `codebaseUseToolCallingOnly` from experimental (replaced with model-level `supportsToolCalls: false`)
+- **Schema compliance**: Removed all fields not in the official Continue.dev schema to ensure validation passes
+  - Removed `supportsToolCalls` (not in schema)
+  - Removed `experimental` section (not in schema)
+  - Removed `ui` section (not in schema)
+  - Removed `agent` role (not in schema's role enum)
 - **Updated to official schema**: 
+  - Added required `name` and `version` fields
   - Changed `contextProviders` to `context` (new format)
   - Moved `contextLength` to `defaultCompletionOptions.contextLength`
   - Moved autocomplete settings to model-level `autocompleteOptions`
   - Removed deprecated fields: `tabAutocompleteModel`, `embeddingsProvider`, `slashCommands`, `allowAnonymousTelemetry`
-- **Improved model configuration**: All models now properly configured with roles, completion options, and tool calling settings
-
-### Version 1.1.0
-- Added experimental settings to config.yaml:
-  - `streamAfterToolRejection: true` - Prevents response interruption on tool rejection
-- Added UI settings to config.yaml:
-  - Enhanced readability settings (scrollbar, codeblock wrapping, markdown formatting)
-  - Disabled text-to-speech output
-- Added autocomplete settings to model-level `autocompleteOptions`:
-  - Optimized `debounceDelay: 300` and `modelTimeout: 3000` for local llama3.3 model performance on M4 Pro
+- **Improved model configuration**: All models now properly configured with roles and completion options per schema requirements
+- **Fixed validation errors**: Config now passes Continue.dev extension validation (v1.2.11+)
 
 ### Version 1.0.0
 - Initial release
