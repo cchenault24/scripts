@@ -1,0 +1,10 @@
+# Docker LLM Setup - Python Requirements
+# This script uses only Python standard library modules
+# No external dependencies required!
+
+# The following are optional dependencies for enhanced features:
+# Uncomment if you want to install them
+
+# rich>=13.7.0  # For enhanced terminal output (colors, progress bars)
+# pyyaml>=6.0  # For YAML parsing/generation (script has built-in YAML generator)
+# requests>=2.31.0  # For HTTP requests (script uses subprocess for docker commands)
