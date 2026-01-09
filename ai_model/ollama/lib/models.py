@@ -22,25 +22,6 @@ from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
 
-# Debug logging
-DEBUG_LOG_PATH = "/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log"
-def _debug_log(location: str, message: str, data: dict):
-    """Write debug log entry."""
-    try:
-        import json
-        log_entry = {
-            "sessionId": "debug-session",
-            "runId": "run1",
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000)
-        }
-        with open(DEBUG_LOG_PATH, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-    except Exception:
-        pass
-
 # Try to import rich for better progress bars (lazy import - only when needed)
 RICH_AVAILABLE = False
 _rich_imported = False
@@ -826,14 +807,8 @@ def discover_ollama_model_tags(
     Returns:
         List of tag dictionaries with parsed metadata
     """
-    # #region agent log
-    _debug_log("models.py:810", "discover_ollama_model_tags entry", {"model_name": model_name, "use_cache": use_cache, "silent": silent})
-    # #endregion
     # Normalize model name (remove ai/ prefix if present, extract base name)
     base_name = model_name.replace("ai/", "").strip()
-    # #region agent log
-    _debug_log("models.py:812", "After normalizing model name", {"original": model_name, "base_name": base_name})
-    # #endregion
     # Remove tag if present (e.g., "llama3.2:3b" -> "llama3.2")
     if ":" in base_name:
         base_name = base_name.split(":")[0]
@@ -855,22 +830,13 @@ def discover_ollama_model_tags(
                         
                         if cache_age < ttl and not is_empty_result:
                             # Only return cached results if they're not empty
-                            # #region agent log
-                            _debug_log("models.py:854", "Returning cached tags (non-empty)", {"base_name": base_name, "tags_count": len(cached_data.get("tags", [])), "cache_age_seconds": cache_age.total_seconds()})
-                            # #endregion
                             return cached_data["tags"]
                         elif is_empty_result:
                             # Empty cached result - ignore it and try discovery again
-                            # #region agent log
-                            _debug_log("models.py:862", "Ignoring empty cached result, retrying discovery", {"base_name": base_name, "cache_age_seconds": cache_age.total_seconds()})
-                            # #endregion
                             # Remove the empty cache entry so we can try again
                             del hw_info.discovered_model_tags[cache_key]
                         else:
                             # Cache expired - remove it
-                            # #region agent log
-                            _debug_log("models.py:868", "Cache expired, removing", {"base_name": base_name, "cache_age_seconds": cache_age.total_seconds()})
-                            # #endregion
                             del hw_info.discovered_model_tags[cache_key]
                     except (TypeError, ValueError, AttributeError):
                         del hw_info.discovered_model_tags[cache_key]
@@ -881,9 +847,6 @@ def discover_ollama_model_tags(
     # Note: /api/show requires POST with JSON body, not GET
     try:
         api_url = "http://localhost:11434/api/show"
-        # #region agent log
-        _debug_log("models.py:860", "Querying Ollama API with POST", {"api_url": api_url, "base_name": base_name})
-        # #endregion
         # Ollama /api/show requires POST with JSON body: {"name": "model-name"}
         request_data = json.dumps({"name": base_name}).encode('utf-8')
         req = urllib.request.Request(api_url, data=request_data, method="POST")
@@ -892,9 +855,6 @@ def discover_ollama_model_tags(
         with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode('utf-8'))
-                # #region agent log
-                _debug_log("models.py:873", "Ollama API response received", {"status": response.status, "has_data": bool(data), "model_found": "modelfile" in data or "parameters" in data})
-                # #endregion
                 # Model is installed - we can get info, but still generate common variants
                 # Ollama API returns model info, but doesn't list all variants
                 # We'll generate common variants based on the model name
@@ -906,33 +866,18 @@ def discover_ollama_model_tags(
                     if tag_info.get("size"):
                         tags.append(tag_info)
     except urllib.error.HTTPError as e:
-        # #region agent log
-        _debug_log("models.py:887", "Ollama API /api/show HTTP error", {"base_name": base_name, "error_type": type(e).__name__, "error_msg": str(e), "error_code": e.code})
-        # #endregion
         # 404 is expected when model is not installed yet - still generate common variants
         if e.code == 404:
             # Model not installed - generate common variants anyway for discovery
-            # #region agent log
-            _debug_log("models.py:904", "Model not installed (404), generating common variants", {"base_name": base_name})
-            # #endregion
             common_variants = ["3b", "7b", "8b", "13b", "34b", "70b"]
             for variant in common_variants:
                 tag_name = f"{base_name}:{variant}"
                 tag_info = parse_tag_info(tag_name)
-                # #region agent log
-                _debug_log("models.py:911", "Generated variant tag", {"tag_name": tag_name, "has_size": bool(tag_info.get("size")), "size": tag_info.get("size")})
-                # #endregion
                 if tag_info.get("size"):
                     tags.append(tag_info)
-            # #region agent log
-            _debug_log("models.py:915", "Generated variants from 404", {"base_name": base_name, "tags_count": len(tags)})
-            # #endregion
         elif not silent:
             ui.print_warning(f"Could not fetch tags for {base_name} from Ollama API: {e}")
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        # #region agent log
-        _debug_log("models.py:901", "Ollama API /api/show query failed (non-HTTP)", {"base_name": base_name, "error_type": type(e).__name__, "error_msg": str(e)})
-        # #endregion
         # Network/connection errors - still try to generate common variants
         if not silent:
             ui.print_warning(f"Could not fetch tags for {base_name} from Ollama API (model may not be installed yet)")
@@ -973,9 +918,6 @@ def discover_ollama_model_tags(
         if not hasattr(hw_info, 'discovered_model_tags'):
             hw_info.discovered_model_tags = {}
         cache_key = f"{base_name}_cache"
-        # #region agent log
-        _debug_log("models.py:950", "Caching tags result", {"base_name": base_name, "tags_count": len(tags), "is_empty": len(tags) == 0})
-        # #endregion
         hw_info.discovered_model_tags[cache_key] = {
             "tags": tags,
             "timestamp": datetime.now(),
@@ -983,9 +925,6 @@ def discover_ollama_model_tags(
         }
         hw_info.discovered_model_tags[base_name] = tags
     
-    # #region agent log
-    _debug_log("models.py:957", "Returning tags", {"base_name": base_name, "tags_count": len(tags)})
-    # #endregion
     return tags
 
 
@@ -2771,9 +2710,6 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         primary_result = discover_best_model_by_criteria(7.0, "general", primary_budget, hw_info)
         if primary_result:
             model_name, variant = primary_result
-            # #region agent log
-            _debug_log("models.py:2709", "Tier C - Creating ModelInfo", {"model_name": model_name, "variant": variant, "ollama_name": model_name})
-            # #endregion
             model_info = ModelInfo(
                 name=get_display_name_from_model(model_name, "general", variant),
                 ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
@@ -3429,9 +3365,6 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         # Determine model name format for Ollama
         # Ollama uses format: model-name or model-name:tag (e.g., "llama3.2:3b")
         model_name_to_pull = model.ollama_name
-        # #region agent log
-        _debug_log("models.py:3330", "pull_models_ollama - starting", {"model_name": model.name, "ollama_name": model.ollama_name, "base_model_name": model.base_model_name, "selected_variant": model.selected_variant})
-        # #endregion
         
         # Check if we have a selected variant that needs to be applied
         base_model_name = None
@@ -3444,14 +3377,8 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         elif model.base_model_name:
             # We have a base model name but no variant selected yet - discover and select
             base_model_name = model.base_model_name
-            # #region agent log
-            _debug_log("models.py:3342", "Discovering variants with base_model_name", {"base_model_name": base_model_name, "model_ollama_name": model.ollama_name})
-            # #endregion
             ui.print_info(f"Discovering variants for {model.name}...")
             tags = discover_ollama_model_tags(base_model_name, hw_info)
-            # #region agent log
-            _debug_log("models.py:3345", "Variant discovery result", {"base_model_name": base_model_name, "tags_count": len(tags) if tags else 0})
-            # #endregion
             if tags:
                 selected_tag = select_best_variant(tags, hw_info)
                 if selected_tag:
@@ -3482,31 +3409,19 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                 # This handles cases where base_model_name is set incorrectly (e.g., "nomic-embed-text-v1.5" vs "nomic-embed-text")
                 if base_model_name != model.ollama_name and ":" not in model.ollama_name:
                     model_name_to_pull = model.ollama_name
-                    # #region agent log
-                    _debug_log("models.py:3417", "Variant discovery failed, falling back to ollama_name", {"base_model_name": base_model_name, "ollama_name": model.ollama_name, "model_name_to_pull": model_name_to_pull})
-                    # #endregion
                 else:
                     model_name_to_pull = base_model_name
-                    # #region agent log
-                    _debug_log("models.py:3421", "Variant discovery failed, using base", {"base_model_name": base_model_name, "model_name_to_pull": model_name_to_pull})
-                    # #endregion
         else:
             # Extract base name if it has a tag
             if ":" in model.ollama_name:
                 base_model_name = model.ollama_name.split(":")[0]
             else:
                 base_model_name = model.ollama_name
-            # #region agent log
-            _debug_log("models.py:3373", "Extracted base_model_name from ollama_name", {"ollama_name": model.ollama_name, "base_model_name": base_model_name})
-            # #endregion
             
             # Only try variant discovery if it looks like a base model (no size variant in name)
             if not re.search(r'[0-9]+\s*b', base_model_name, re.IGNORECASE):
                 ui.print_info(f"Discovering variants for {model.name}...")
                 tags = discover_ollama_model_tags(base_model_name, hw_info)
-                # #region agent log
-                _debug_log("models.py:3379", "Variant discovery result (else branch)", {"base_model_name": base_model_name, "tags_count": len(tags) if tags else 0})
-                # #endregion
                 if tags:
                     selected_tag = select_best_variant(tags, hw_info)
                     if selected_tag:
@@ -3530,9 +3445,6 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         variant_info = ""
         if model.selected_variant:
             variant_info = f" ({model.selected_variant} variant)"
-        # #region agent log
-        _debug_log("models.py:3402", "Final pull command", {"model_name_to_pull": model_name_to_pull, "selected_variant": model.selected_variant, "base_model_name": base_model_name})
-        # #endregion
         ui.print_info(f"Command: {ui.colorize(f'ollama pull {model_name_to_pull}', ui.Colors.CYAN)}")
         if variant_info:
             ui.print_info(f"Selected variant{variant_info} based on your hardware ({hw_info.ram_gb:.1f}GB RAM)")
@@ -3715,10 +3627,6 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                     # Clean up progress bar if still running
                     if progress_bar:
                         progress_bar.stop()
-                    # #region agent log
-                    with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"models.py:3695","message":"Stdout loop completed","data":{"line_count":line_count,"process_poll":process.poll()},"timestamp":int(time.time()*1000)}) + "\n")
-                    # #endregion
                 else:
                     # Fallback to simple line-by-line output with carriage return for updates
                     last_line = ""
