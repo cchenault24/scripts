@@ -843,7 +843,69 @@ def discover_ollama_model_tags(
     
     tags = []
     
-    # Query local Ollama API for model info
+    # First, try to scrape actual available tags from Ollama Library
+    # Use the comprehensive method: fetch the model's library page and extract all variants
+    # This matches the user's suggested approach using grep pattern matching
+    try:
+        library_url = f"https://ollama.com/library/{base_name}"
+        # Fetch the model's library page
+        code, stdout, _ = utils.run_command(
+            ["curl", "-k", "-s", library_url],
+            timeout=15
+        )
+        if code == 0:
+            # Use grep-style pattern matching to find all model:variant patterns
+            # Pattern: model-name:variant (e.g., "granite-code:3b", "granite-code:latest")
+            # This is more reliable than regex because it matches the exact format used in HTML
+            grep_pattern = rf'{re.escape(base_name)}:[a-zA-Z0-9._-]+'
+            found_full_tags = re.findall(grep_pattern, stdout)
+            
+            # Extract just the variant part from each found tag
+            all_found_tags = set()
+            for full_tag in found_full_tags:
+                # Extract variant part (everything after the colon)
+                if ":" in full_tag:
+                    variant = full_tag.split(":", 1)[1]
+                    all_found_tags.add(variant)
+            
+            # If no variants found with colon, check if model exists at all (might have :latest)
+            if not all_found_tags:
+                # Check if the model page exists (not 404)
+                if "404" not in stdout.lower() and "not found" not in stdout.lower():
+                    # Model exists but might only have :latest or no explicit variants
+                    all_found_tags.add("latest")
+            
+            # Convert found tags to tag_info format
+            for variant in all_found_tags:
+                tag_name = f"{base_name}:{variant}"
+                tag_info = parse_tag_info(tag_name)
+                # Include all variants, even if size parsing fails (for tags like "latest")
+                if not tag_info.get("size") and variant == "latest":
+                    # For "latest" tag, try to estimate size from model name
+                    # This is a fallback - actual size will be determined when pulled
+                    tag_info["size"] = None
+                    tag_info["estimated_ram_gb"] = 4.0  # Default estimate
+                tags.append(tag_info)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError, re.error):
+        # Scraping failed - will fall back to other methods
+        pass
+    
+    # If we found tags from library scraping, use those
+    if tags:
+        # Cache and return the found tags
+        if hw_info:
+            if not hasattr(hw_info, 'discovered_model_tags'):
+                hw_info.discovered_model_tags = {}
+            cache_key = f"{base_name}_cache"
+            hw_info.discovered_model_tags[cache_key] = {
+                "tags": tags,
+                "timestamp": datetime.now(),
+                "is_failure": len(tags) == 0
+            }
+            hw_info.discovered_model_tags[base_name] = tags
+        return tags
+    
+    # Fallback: Query local Ollama API for model info
     # Note: /api/show requires POST with JSON body, not GET
     try:
         api_url = "http://localhost:11434/api/show"
@@ -1211,19 +1273,21 @@ def discover_best_model_by_criteria(
                 best_tag = None
                 best_tag_score = -1
                 for tag in tags:
-                    size = tag.get("size", 0)
+                    size = tag.get("size")
+                    if size is None:
+                        size = 0
                     ram_needed = tag.get("estimated_ram_gb", 0)
                     
                     if ram_needed > ram_budget:
                         continue
                     
-                    if target_size is not None and size > 0:
+                    if target_size is not None and size is not None and size > 0:
                         size_diff = abs(size - target_size)
                         if size < target_size * 0.5:  # Too small
                             continue
                         score = 1000000 / (1 + size_diff)  # Prefer closer to target
                     else:
-                        score = size * 1000  # Prefer larger models
+                        score = size * 1000 if size is not None and size > 0 else 0  # Prefer larger models
                     
                     if score > best_tag_score:
                         best_tag = tag
@@ -1269,7 +1333,9 @@ def discover_best_model_by_criteria(
         
         # Score all variants
         for tag in tags:
-            size = tag.get("size", 0)
+            size = tag.get("size")
+            if size is None:
+                size = 0
             ram_needed = tag.get("estimated_ram_gb", 0)
             
             # Must fit in budget
@@ -1292,7 +1358,7 @@ def discover_best_model_by_criteria(
             # Heavily penalize models that are much smaller than target
             # Size match scores are multiplied by 100x to dominate over quality scores
             size_match_score = 0
-            if target_size is not None:
+            if target_size is not None and size is not None and size > 0:
                 size_diff = abs(size - target_size)
                 if size_diff == 0:
                     size_match_score = 1000000  # Exact match bonus (100x increase)
@@ -1315,7 +1381,7 @@ def discover_best_model_by_criteria(
                         size_match_score = 100000 - (size_diff * 5000)  # Much larger (100x)
             else:
                 # No target size - prefer larger models that fit
-                size_match_score = size * 10
+                size_match_score = size * 10 if size is not None and size > 0 else 0
             
             total_score = score + size_match_score
             
@@ -1324,9 +1390,9 @@ def discover_best_model_by_criteria(
             should_update = False
             if best_result is None:
                 should_update = True
-            elif target_size is not None:
+            elif target_size is not None and size is not None and size > 0:
                 # Models at or above target size get priority over smaller models
-                current_at_or_above = best_size >= target_size
+                current_at_or_above = best_size >= target_size if best_size is not None else False
                 candidate_at_or_above = size >= target_size
                 
                 # If candidate is at/above target and current is not, prefer candidate
@@ -1334,7 +1400,7 @@ def discover_best_model_by_criteria(
                     should_update = True
                 # If both are at/above target, prefer closer to target
                 elif candidate_at_or_above and current_at_or_above:
-                    current_diff = abs(best_size - target_size)
+                    current_diff = abs(best_size - target_size) if best_size is not None else float('inf')
                     candidate_diff = abs(size - target_size)
                     if candidate_diff < current_diff:
                         should_update = True
@@ -1342,9 +1408,9 @@ def discover_best_model_by_criteria(
                         should_update = True
                 # If both are below target, prefer larger (closer to target)
                 elif not candidate_at_or_above and not current_at_or_above:
-                    if size > best_size:
+                    if size > (best_size if best_size is not None else 0):
                         should_update = True
-                    elif size == best_size and total_score > best_score:
+                    elif size == (best_size if best_size is not None else 0) and total_score > best_score:
                         should_update = True
                 # If current is at/above but candidate is not, keep current (don't update)
             else:
@@ -1356,7 +1422,7 @@ def discover_best_model_by_criteria(
                 best_result = (family, tag.get("tag_name"))
                 best_score = total_score
                 best_size_match = size_match_score
-                best_size = size
+                best_size = size if size is not None else 0
     
     return best_result
 
@@ -3372,8 +3438,18 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
             # We have a selected variant, use it
             base_model_name = model.base_model_name or model.ollama_name.split(":")[0]
             if base_model_name:
+                # Extract variant part - selected_variant might be full format (model:tag) or just tag
+                variant_part = model.selected_variant
+                if ":" in variant_part:
+                    # If it contains ":", check if it starts with base_model_name
+                    if variant_part.startswith(f"{base_model_name}:"):
+                        # Full format like "granite-code:latest" - extract just the tag part
+                        variant_part = variant_part.split(":", 1)[1]
+                    else:
+                        # Different format, use the part after the last ":"
+                        variant_part = variant_part.split(":")[-1]
                 # Ollama variant format: model-name:tag (e.g., "llama3.2:3b")
-                model_name_to_pull = f"{base_model_name}:{model.selected_variant}"
+                model_name_to_pull = f"{base_model_name}:{variant_part}"
         elif model.base_model_name:
             # We have a base model name but no variant selected yet - discover and select
             base_model_name = model.base_model_name
@@ -3383,11 +3459,16 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                 selected_tag = select_best_variant(tags, hw_info)
                 if selected_tag:
                     model.selected_variant = selected_tag
-                    # Extract just the variant part (e.g., "3b" from "llama3.2:3b")
-                    if ":" in selected_tag:
-                        variant_part = selected_tag.split(":")[1]
-                    else:
-                        variant_part = selected_tag
+                    # Extract just the variant part (e.g., "3b" from "llama3.2:3b" or "latest" from "granite-code:latest")
+                    variant_part = selected_tag
+                    if ":" in variant_part:
+                        # If it contains ":", check if it starts with base_model_name
+                        if variant_part.startswith(f"{base_model_name}:"):
+                            # Full format like "granite-code:latest" - extract just the tag part
+                            variant_part = variant_part.split(":", 1)[1]
+                        else:
+                            # Different format, use the part after the last ":"
+                            variant_part = variant_part.split(":")[-1]
                     model_name_to_pull = f"{base_model_name}:{variant_part}"
                     ui.print_success(f"Auto-selected variant: {variant_part} (best for your hardware)")
                     # Update RAM estimate
@@ -3427,11 +3508,16 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                     if selected_tag:
                         model.selected_variant = selected_tag
                         model.base_model_name = base_model_name
-                        # Extract variant part
-                        if ":" in selected_tag:
-                            variant_part = selected_tag.split(":")[1]
-                        else:
-                            variant_part = selected_tag
+                        # Extract variant part (e.g., "3b" from "llama3.2:3b" or "latest" from "granite-code:latest")
+                        variant_part = selected_tag
+                        if ":" in variant_part:
+                            # If it contains ":", check if it starts with base_model_name
+                            if variant_part.startswith(f"{base_model_name}:"):
+                                # Full format like "granite-code:latest" - extract just the tag part
+                                variant_part = variant_part.split(":", 1)[1]
+                            else:
+                                # Different format, use the part after the last ":"
+                                variant_part = variant_part.split(":")[-1]
                         model_name_to_pull = f"{base_model_name}:{variant_part}"
                         ui.print_success(f"Auto-selected variant: {variant_part} (best for your hardware)")
                         # Update RAM estimate
@@ -3619,7 +3705,7 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                                         progress_bar.stop()
                                     console.print(f"[green]✓ {model.name} downloaded successfully[/green]")
                                 # Check for errors
-                                elif "error" in line.lower() or "failed" in line.lower():
+                                elif "error" in line.lower() or "failed" in line.lower() or "file does not exist" in line.lower():
                                     if progress_bar:
                                         progress_bar.stop()
                                     console.print(f"[red]✗ {line}[/red]")
