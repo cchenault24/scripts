@@ -1,31 +1,45 @@
 # Docker Model Runner + Continue.dev Setup
 
-An interactive Python script that helps you set up a locally hosted LLM via **Docker Model Runner** and generates a **continue.dev config.yaml** for VS Code.
+An interactive Python script that helps you set up a locally hosted LLM via **Docker Model Runner (DMR)** and generates a **continue.dev config.yaml** for VS Code.
+
+**Optimized for Mac with Apple Silicon (M1/M2/M3/M4)** - Uses Metal GPU acceleration for fast local inference.
 
 ## Features
 
-- 🔍 **Hardware Auto-Detection**: Automatically detects RAM, CPU, GPU and classifies your system into hardware tiers
-- 🐳 **Docker Model Runner Integration**: Uses Docker's native AI model running capabilities
+- 🍎 **Apple Silicon Optimized**: Detects M1/M2/M3/M4 chips and unified memory
+- 🔍 **Hardware Auto-Detection**: Automatically detects RAM, CPU, GPU and classifies into hardware tiers
+- 🐳 **Docker Model Runner Integration**: Uses Docker's native `docker model` commands
 - 🤖 **Smart Model Recommendations**: Suggests optimal models based on your hardware tier
 - ⚡ **Interactive Setup**: Guided experience with sensible defaults
 - 📝 **Auto-Generated Config**: Creates continue.dev YAML config for VS Code
 - 🔒 **Fully Local**: No cloud APIs, no telemetry, works offline after setup
+- 🚀 **Metal Acceleration**: Automatic GPU acceleration on Apple Silicon
 
 ## Prerequisites
 
 ### Required
 
-1. **Python 3.8+** - Comes pre-installed on macOS and most Linux distributions
+1. **Python 3.8+** - Comes pre-installed on macOS
 2. **Docker Desktop 4.40+** - Download from [docker.com/desktop](https://docker.com/desktop)
+3. **macOS with Apple Silicon** (recommended) or Linux/Windows with NVIDIA GPU
 
-### Docker Model Runner Setup
+### Enable Docker Model Runner
 
-Docker Model Runner is a feature in Docker Desktop that allows you to run AI models locally:
+Docker Model Runner must be enabled in Docker Desktop:
+
+#### Option A: Via Docker Desktop UI
 
 1. Open Docker Desktop
-2. Go to **Settings** → **Features in development**
-3. Enable **Docker Model Runner** (or **Docker AI**)
-4. Click **Apply & Restart**
+2. Click the ⚙️ **Settings** icon (top right)
+3. Go to **Features in development** (or **Beta features**)
+4. Enable **Docker Model Runner** or **Enable Docker AI**
+5. Click **Apply & restart**
+
+#### Option B: Via Terminal (macOS)
+
+```bash
+docker desktop enable model-runner --tcp 12434
+```
 
 ## Quick Start
 
@@ -57,31 +71,36 @@ The script automatically classifies your system based on RAM:
 
 ## Available Models
 
+All models use `ai.docker.com/` namespace and are optimized for Apple Silicon with Metal GPU acceleration.
+
 ### Chat/Edit Models (Primary)
 
-| Model | Size | RAM | Description |
-|-------|------|-----|-------------|
-| Llama 3.3 70B | 70B | ~35GB | Highest quality for complex tasks |
-| Llama 3.1 70B | 70B | ~35GB | Excellent for architecture work |
-| Qwen 2.5 Coder 32B | 32B | ~16GB | State-of-the-art coding |
-| Codestral 22B | 22B | ~11GB | Excellent code generation |
-| Phi-4 14B | 14B | ~7GB | Great reasoning |
-| Llama 3.1 8B | 8B | ~4GB | Fast general-purpose |
-| Qwen 2.5 Coder 7B | 7B | ~3.5GB | Efficient coding |
+| Model | Size | Unified Memory | Tiers | Docker Name |
+|-------|------|----------------|-------|-------------|
+| Llama 3.3 70B | 70B | ~35GB | S | `ai.docker.com/meta/llama3.3:70b-instruct-q4_K_M` |
+| Llama 3.1 70B | 70B | ~35GB | S | `ai.docker.com/meta/llama3.1:70b-instruct-q4_K_M` |
+| Qwen 2.5 Coder 32B | 32B | ~18GB | A, S | `ai.docker.com/qwen/qwen2.5-coder:32b-instruct-q4_K_M` |
+| Codestral 22B | 22B | ~12GB | A, S | `ai.docker.com/mistral/codestral:22b-v0.1-q4_K_M` |
+| Phi-4 14B | 14B | ~8GB | B, A, S | `ai.docker.com/microsoft/phi4:14b-q4_K_M` |
+| Qwen 2.5 Coder 14B | 14B | ~8GB | B, A, S | `ai.docker.com/qwen/qwen2.5-coder:14b-instruct-q4_K_M` |
+| Llama 3.2 8B | 8B | ~5GB | All | `ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M` |
+| Qwen 2.5 Coder 7B | 7B | ~4GB | All | `ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M` |
 
 ### Autocomplete Models (Fast)
 
-| Model | Size | RAM | Description |
-|-------|------|-----|-------------|
-| StarCoder2 3B | 3B | ~1.5GB | Ultra-fast autocomplete |
-| Llama 3.2 3B | 3B | ~1.5GB | Small and efficient |
+| Model | Size | Unified Memory | Docker Name |
+|-------|------|----------------|-------------|
+| StarCoder2 3B | 3B | ~1.8GB | `ai.docker.com/bigcode/starcoder2:3b-q4_K_M` |
+| Llama 3.2 3B | 3B | ~1.8GB | `ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M` |
+| Qwen 2.5 Coder 1.5B | 1.5B | ~1GB | `ai.docker.com/qwen/qwen2.5-coder:1.5b-instruct-q8_0` |
 
 ### Embedding Models (Code Indexing)
 
-| Model | Size | RAM | Description |
-|-------|------|-----|-------------|
-| Nomic Embed Text | - | ~0.3GB | Best for code indexing |
-| BGE Large | - | ~0.4GB | High-quality embeddings |
+| Model | Unified Memory | Context | Docker Name |
+|-------|----------------|---------|-------------|
+| Nomic Embed Text v1.5 | ~0.3GB | 8192 | `ai.docker.com/nomic/nomic-embed-text:v1.5` |
+| BGE-M3 | ~0.5GB | 8192 | `ai.docker.com/baai/bge-m3:latest` |
+| All-MiniLM-L6-v2 | ~0.1GB | 512 | `ai.docker.com/sentence-transformers/all-minilm:l6-v2` |
 
 ## Generated Configuration
 
@@ -148,47 +167,84 @@ allowAnonymousTelemetry: false
 ## Docker Model Runner Commands
 
 ```bash
-# List available models
+# List installed models
 docker model list
 
-# Pull a model
-docker model pull ai/llama3.1:8B-Q5_K_M
+# Pull a model (example: Qwen 2.5 Coder 7B)
+docker model pull ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M
 
-# Start model runner
-docker model start
+# Run a model interactively (starts API server)
+docker model run ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M
 
-# Check running models
-docker model ps
+# Run with custom prompt
+docker model run ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M "Explain Python decorators"
 
-# Stop model runner
-docker model stop
+# Remove a model
+docker model rm ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M
+
+# Enable Docker Model Runner (if not enabled)
+docker desktop enable model-runner --tcp 12434
+```
+
+### API Endpoint
+
+Docker Model Runner exposes an **OpenAI-compatible API** at:
+
+```
+http://localhost:12434/v1
+```
+
+You can test it with curl:
+
+```bash
+curl http://localhost:12434/v1/models
 ```
 
 ## Troubleshooting
 
 ### Docker Model Runner not available
 
-1. Ensure Docker Desktop is version 4.40 or later
-2. Go to Settings → Features in development → Enable Docker Model Runner
-3. Apply & Restart Docker Desktop
+1. Ensure Docker Desktop is version **4.40 or later**
+2. Enable via terminal: `docker desktop enable model-runner --tcp 12434`
+3. Or via UI: Settings → Features in development → Enable Docker Model Runner
+4. Restart Docker Desktop
 
 ### Models not responding
 
-1. Check if Docker Model Runner is running: `docker model ps`
-2. Start it if needed: `docker model start`
-3. Verify the model is pulled: `docker model list`
+```bash
+# Check if models are installed
+docker model list
+
+# Run a model to start the API server
+docker model run ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M
+
+# Test the API
+curl http://localhost:12434/v1/models
+```
 
 ### Continue.dev not connecting
 
-1. Check the API endpoint in `~/.continue/config.yaml`
-2. Default Docker Model Runner port is `12434`
-3. Verify with: `curl http://localhost:12434/v1/models`
+1. Verify the API endpoint in `~/.continue/config.yaml`:
+   ```yaml
+   apiBase: http://localhost:12434/v1
+   ```
+2. Make sure a model is running (the API starts when you run a model)
+3. Test the endpoint: `curl http://localhost:12434/v1/models`
+4. Restart VS Code completely (Cmd+Q, then reopen)
 
-### High RAM usage
+### High Memory Usage on Apple Silicon
 
-1. Use smaller models appropriate for your tier
-2. Only run one chat model at a time
-3. Close other memory-intensive applications
+Apple Silicon uses **unified memory** shared between CPU, GPU, and Neural Engine:
+
+1. Check your tier and use appropriate models:
+   - **M1/M2 (8GB)**: Use Tier C models (7B or smaller)
+   - **M1/M2 Pro (16GB)**: Use Tier C/B models (8B or smaller)
+   - **M1/M2/M3 Pro (18-32GB)**: Use Tier B models (14B or smaller)
+   - **M1/M2/M3 Max (32-48GB)**: Use Tier A models (22B or smaller)
+   - **M1/M2/M3 Ultra (64GB+)**: Use Tier S models (70B)
+
+2. Close memory-intensive apps before running large models
+3. Use smaller autocomplete models (1.5B-3B) for faster response
 
 ## File Structure
 
@@ -202,16 +258,32 @@ ai_model/
     └── config.json             # JSON version of config
 ```
 
-## Comparison with Ollama Setup
+## Comparison: Docker Model Runner vs Ollama
 
 | Feature | Docker Model Runner | Ollama |
 |---------|-------------------|--------|
-| Container-native | ✅ Yes | ❌ No (separate service) |
-| Docker Desktop integration | ✅ Built-in | ❌ External |
-| GPU support | ✅ NVIDIA, Apple Silicon | ✅ NVIDIA, Apple Silicon |
-| Model format | GGUF, Safetensors | GGUF |
-| OpenAI-compatible API | ✅ Yes | ✅ Yes |
-| Kubernetes ready | ✅ Yes | ⚠️ Requires extra setup |
+| **Container-native** | ✅ Built into Docker | ❌ Separate service |
+| **Docker Desktop integration** | ✅ Native `docker model` commands | ❌ External installation |
+| **Apple Silicon (Metal)** | ✅ Automatic GPU acceleration | ✅ Automatic GPU acceleration |
+| **NVIDIA GPU** | ✅ CUDA support | ✅ CUDA support |
+| **Model format** | GGUF, Safetensors, ONNX | GGUF |
+| **OpenAI-compatible API** | ✅ Port 12434 | ✅ Port 11434 |
+| **Kubernetes ready** | ✅ Native container support | ⚠️ Requires wrapper |
+| **Model registry** | Docker Hub AI models | Ollama library |
+| **Setup complexity** | Low (toggle in Docker Desktop) | Low (brew install) |
+
+### When to Use Docker Model Runner
+
+- You're already using Docker Desktop
+- You want container-native AI model management
+- You need Kubernetes deployment
+- You prefer unified Docker tooling
+
+### When to Use Ollama
+
+- You want a standalone solution
+- You need Ollama-specific models
+- You're using the existing `setup-local-llm.sh` script
 
 ## Contributing
 

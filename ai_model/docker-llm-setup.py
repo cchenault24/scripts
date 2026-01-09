@@ -3,11 +3,20 @@
 Docker Model Runner + Continue.dev Setup Script
 
 An interactive Python script that helps you set up a locally hosted LLM
-via Docker Model Runner and generates a continue.dev config.yaml for VS Code.
+via Docker Model Runner (DMR) and generates a continue.dev config.yaml for VS Code.
+
+Optimized for Mac with Apple Silicon (M1/M2/M3/M4) using Docker Model Runner.
 
 Requirements:
 - Python 3.8+
-- Docker Desktop 4.40+ (with Docker Model Runner / Docker AI enabled)
+- Docker Desktop 4.40+ (with Docker Model Runner enabled)
+- macOS with Apple Silicon (recommended) or Linux/Windows with NVIDIA GPU
+
+Docker Model Runner Commands:
+- docker model pull <model>   - Download a model
+- docker model run <model>    - Run a model interactively
+- docker model list           - List available models
+- docker model rm <model>     - Remove a model
 
 Author: AI-Generated for Local LLM Development
 License: MIT
@@ -16,6 +25,7 @@ License: MIT
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +34,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# Docker Model Runner API configuration
+# DMR exposes an OpenAI-compatible API endpoint
+DMR_API_HOST = "localhost"
+DMR_API_PORT = 12434  # Default Docker Model Runner port
+DMR_API_BASE = f"http://{DMR_API_HOST}:{DMR_API_PORT}/v1"
+
+# Alternative: Docker Model Runner can also be accessed via Docker socket
+# For some setups, the endpoint might be different
+DMR_SOCKET_ENDPOINT = "http://model-runner.docker.internal/v1"
 
 # ANSI color codes for terminal output
 class Colors:
@@ -206,16 +226,23 @@ class HardwareInfo:
     """System hardware information."""
     os_name: str = ""
     os_version: str = ""
+    macos_version: str = ""  # e.g., "14.0" for Sonoma
     cpu_brand: str = ""
     cpu_arch: str = ""
     cpu_cores: int = 0
+    cpu_perf_cores: int = 0  # Apple Silicon performance cores
+    cpu_eff_cores: int = 0   # Apple Silicon efficiency cores
     ram_gb: float = 0.0
     gpu_name: str = ""
     gpu_vram_gb: float = 0.0
+    gpu_cores: int = 0       # Apple Silicon GPU cores
+    neural_engine_cores: int = 0  # Apple Neural Engine cores
     has_nvidia: bool = False
     has_apple_silicon: bool = False
+    apple_chip_model: str = ""  # e.g., "M1", "M2 Pro", "M3 Max"
     docker_version: str = ""
     docker_model_runner_available: bool = False
+    dmr_api_endpoint: str = DMR_API_BASE
     tier: HardwareTier = HardwareTier.C
     
     def get_tier_label(self) -> str:
@@ -227,6 +254,43 @@ class HardwareInfo:
             HardwareTier.C: f"Tier C (<17GB RAM) - {self.ram_gb:.1f}GB detected",
         }
         return labels.get(self.tier, "Unknown")
+    
+    def get_apple_silicon_info(self) -> str:
+        """Get Apple Silicon specific information."""
+        if not self.has_apple_silicon:
+            return "Not Apple Silicon"
+        
+        info_parts = [self.apple_chip_model or "Apple Silicon"]
+        if self.gpu_cores > 0:
+            info_parts.append(f"{self.gpu_cores}-core GPU")
+        if self.neural_engine_cores > 0:
+            info_parts.append(f"{self.neural_engine_cores}-core Neural Engine")
+        info_parts.append(f"{self.ram_gb:.0f}GB Unified Memory")
+        
+        return " | ".join(info_parts)
+    
+    def get_estimated_model_memory(self) -> float:
+        """
+        Get estimated memory available for models.
+        On Apple Silicon, unified memory is shared between CPU/GPU/Neural Engine.
+        We reserve ~4-8GB for system and other apps.
+        """
+        if self.has_apple_silicon:
+            # Reserve more memory on systems with less RAM
+            if self.ram_gb >= 64:
+                return self.ram_gb - 8  # Reserve 8GB for system
+            elif self.ram_gb >= 32:
+                return self.ram_gb - 6  # Reserve 6GB for system
+            elif self.ram_gb >= 16:
+                return self.ram_gb - 4  # Reserve 4GB for system
+            else:
+                return self.ram_gb - 3  # Reserve 3GB for system
+        else:
+            # For discrete GPU systems, use VRAM if available
+            if self.gpu_vram_gb > 0:
+                return self.gpu_vram_gb
+            # Fallback to system RAM with reservation
+            return max(0, self.ram_gb - 4)
 
 
 @dataclass
@@ -242,138 +306,173 @@ class ModelInfo:
     recommended_for: List[str] = field(default_factory=list)
 
 
-# Model catalog for Docker Model Runner
-# Docker Model Runner uses ai/ namespace for models
+# Model catalog for Docker Model Runner (DMR)
+# Docker Model Runner uses the namespace: ai.docker.com/ or just model names
+# Models are optimized for Apple Silicon with Metal acceleration
+# Format: ai.docker.com/<org>/<model>:<tag> or simplified <model>:<tag>
 MODEL_CATALOG: List[ModelInfo] = [
-    # Chat/Edit Models - Large
+    # =========================================================================
+    # Chat/Edit Models - Large (Tier S: 49GB+ RAM)
+    # =========================================================================
     ModelInfo(
         name="Llama 3.3 70B",
-        docker_name="ai/llama3.3:70B-Q4_K_M",
+        docker_name="ai.docker.com/meta/llama3.3:70b-instruct-q4_K_M",
         description="70B - Highest quality for complex refactoring (Tier S only)",
         ram_gb=35.0,
-        context_length=32768,
+        context_length=131072,
         roles=["chat", "edit", "agent"],
         tiers=[HardwareTier.S],
-        recommended_for=["Tier S primary model"]
+        recommended_for=["Tier S primary model", "Complex refactoring"]
     ),
     ModelInfo(
         name="Llama 3.1 70B",
-        docker_name="ai/llama3.1:70B-Q4_K_M",
+        docker_name="ai.docker.com/meta/llama3.1:70b-instruct-q4_K_M",
         description="70B - Excellent for architecture and complex tasks",
         ram_gb=35.0,
-        context_length=32768,
+        context_length=131072,
         roles=["chat", "edit", "agent"],
         tiers=[HardwareTier.S],
         recommended_for=["Tier S alternative"]
     ),
-    # Chat/Edit Models - Medium-Large
-    ModelInfo(
-        name="Codestral 22B",
-        docker_name="ai/codestral:22B-Q4_K_M",
-        description="22B - Excellent code generation and reasoning",
-        ram_gb=11.0,
-        context_length=32768,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[HardwareTier.S, HardwareTier.A],
-        recommended_for=["Tier A/S primary", "Best for code generation"]
-    ),
+    # =========================================================================
+    # Chat/Edit Models - Medium-Large (Tier A: 33-48GB RAM)
+    # =========================================================================
     ModelInfo(
         name="Qwen 2.5 Coder 32B",
-        docker_name="ai/qwen2.5-coder:32B-Q4_K_M",
+        docker_name="ai.docker.com/qwen/qwen2.5-coder:32b-instruct-q4_K_M",
         description="32B - State-of-the-art open coding model",
-        ram_gb=16.0,
+        ram_gb=18.0,
+        context_length=131072,
+        roles=["chat", "edit", "autocomplete"],
+        tiers=[HardwareTier.S, HardwareTier.A],
+        recommended_for=["Best coding quality", "Tier A primary"]
+    ),
+    ModelInfo(
+        name="Codestral 22B",
+        docker_name="ai.docker.com/mistral/codestral:22b-v0.1-q4_K_M",
+        description="22B - Mistral's code generation model",
+        ram_gb=12.0,
         context_length=32768,
         roles=["chat", "edit", "autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A],
-        recommended_for=["Best coding quality"]
+        recommended_for=["Excellent code generation"]
     ),
     ModelInfo(
-        name="Granite Code 20B",
-        docker_name="ai/granite-code:20B-Q4_K_M",
-        description="20B - IBM Granite code model",
-        ram_gb=10.0,
-        context_length=16384,
-        roles=["chat", "edit"],
-        tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B],
-        recommended_for=["Tier B primary"]
+        name="DeepSeek Coder V2 Lite 16B",
+        docker_name="ai.docker.com/deepseek/deepseek-coder-v2:16b-lite-instruct-q4_K_M",
+        description="16B - Fast and capable coding model",
+        ram_gb=9.0,
+        context_length=131072,
+        roles=["chat", "edit", "autocomplete"],
+        tiers=[HardwareTier.S, HardwareTier.A],
+        recommended_for=["Good balance of speed and quality"]
     ),
+    # =========================================================================
+    # Chat/Edit Models - Medium (Tier B: 17-32GB RAM)
+    # =========================================================================
     ModelInfo(
         name="Phi-4 14B",
-        docker_name="ai/phi4:14B-Q4_K_M",
-        description="14B - State-of-the-art reasoning model",
-        ram_gb=7.0,
+        docker_name="ai.docker.com/microsoft/phi4:14b-q4_K_M",
+        description="14B - Microsoft's state-of-the-art reasoning model",
+        ram_gb=8.0,
         context_length=16384,
         roles=["chat", "edit", "agent"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B],
-        recommended_for=["Excellent reasoning"]
+        recommended_for=["Excellent reasoning", "Tier B primary"]
     ),
     ModelInfo(
         name="Qwen 2.5 Coder 14B",
-        docker_name="ai/qwen2.5-coder:14B-Q4_K_M",
+        docker_name="ai.docker.com/qwen/qwen2.5-coder:14b-instruct-q4_K_M",
         description="14B - Strong coding with good performance",
-        ram_gb=7.0,
-        context_length=32768,
+        ram_gb=8.0,
+        context_length=131072,
         roles=["chat", "edit", "autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B],
         recommended_for=["Good balance of quality and speed"]
     ),
-    # Chat/Edit Models - Small
     ModelInfo(
-        name="Llama 3.1 8B",
-        docker_name="ai/llama3.1:8B-Q5_K_M",
-        description="8B - Fast general-purpose coding assistant",
-        ram_gb=4.2,
+        name="CodeLlama 13B",
+        docker_name="ai.docker.com/meta/codellama:13b-instruct-q4_K_M",
+        description="13B - Meta's code-specialized Llama",
+        ram_gb=7.5,
         context_length=16384,
+        roles=["chat", "edit", "autocomplete"],
+        tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B],
+        recommended_for=["Code generation"]
+    ),
+    # =========================================================================
+    # Chat/Edit Models - Small (All Tiers, optimized for Tier C: <17GB RAM)
+    # =========================================================================
+    ModelInfo(
+        name="Llama 3.2 8B",
+        docker_name="ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M",
+        description="8B - Fast general-purpose assistant",
+        ram_gb=5.0,
+        context_length=131072,
         roles=["chat", "edit", "autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
         recommended_for=["All tiers", "Fast responses"]
     ),
     ModelInfo(
         name="Qwen 2.5 Coder 7B",
-        docker_name="ai/qwen2.5-coder:7B-Q4_K_M",
+        docker_name="ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M",
         description="7B - Efficient coding model",
-        ram_gb=3.5,
-        context_length=32768,
+        ram_gb=4.0,
+        context_length=131072,
         roles=["chat", "edit", "autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
         recommended_for=["Tier C primary", "Fast autocomplete"]
     ),
     ModelInfo(
         name="CodeGemma 7B",
-        docker_name="ai/codegemma:7B-Q4_K_M",
+        docker_name="ai.docker.com/google/codegemma:7b-it-q4_K_M",
         description="7B - Google's code-optimized model",
-        ram_gb=3.5,
+        ram_gb=4.0,
         context_length=8192,
         roles=["chat", "autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
         recommended_for=["Fast autocomplete"]
     ),
-    # Autocomplete Models - Ultra-fast
+    # =========================================================================
+    # Autocomplete Models - Ultra-fast (All Tiers)
+    # =========================================================================
     ModelInfo(
         name="StarCoder2 3B",
-        docker_name="ai/starcoder2:3B-Q4_K_M",
-        description="3B - Ultra-fast autocomplete",
-        ram_gb=1.5,
-        context_length=4096,
+        docker_name="ai.docker.com/bigcode/starcoder2:3b-q4_K_M",
+        description="3B - Ultra-fast autocomplete optimized for code",
+        ram_gb=1.8,
+        context_length=16384,
         roles=["autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
         recommended_for=["Fastest autocomplete", "Low memory"]
     ),
     ModelInfo(
         name="Llama 3.2 3B",
-        docker_name="ai/llama3.2:3B-Q4_K_M",
-        description="3B - Small and efficient",
-        ram_gb=1.5,
-        context_length=4096,
+        docker_name="ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M",
+        description="3B - Small and efficient general model",
+        ram_gb=1.8,
+        context_length=131072,
         roles=["chat", "autocomplete"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
         recommended_for=["Quick edits", "Low memory"]
     ),
-    # Embedding Models
     ModelInfo(
-        name="Nomic Embed Text",
-        docker_name="ai/nomic-embed-text:latest",
-        description="Best open embedding model for code indexing",
+        name="Qwen 2.5 Coder 1.5B",
+        docker_name="ai.docker.com/qwen/qwen2.5-coder:1.5b-instruct-q8_0",
+        description="1.5B - Smallest coding model, very fast",
+        ram_gb=1.0,
+        context_length=131072,
+        roles=["autocomplete"],
+        tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
+        recommended_for=["Minimal memory usage", "Ultra-fast autocomplete"]
+    ),
+    # =========================================================================
+    # Embedding Models (All Tiers)
+    # =========================================================================
+    ModelInfo(
+        name="Nomic Embed Text v1.5",
+        docker_name="ai.docker.com/nomic/nomic-embed-text:v1.5",
+        description="Best open embedding model for code indexing (8192 tokens)",
         ram_gb=0.3,
         context_length=8192,
         roles=["embed"],
@@ -381,16 +480,101 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Code indexing", "Semantic search"]
     ),
     ModelInfo(
-        name="BGE Large",
-        docker_name="ai/bge-large:latest",
-        description="High-quality embeddings from BAAI",
-        ram_gb=0.4,
+        name="BGE-M3",
+        docker_name="ai.docker.com/baai/bge-m3:latest",
+        description="Multi-lingual embedding model from BAAI",
+        ram_gb=0.5,
+        context_length=8192,
+        roles=["embed"],
+        tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
+        recommended_for=["Multi-lingual codebases"]
+    ),
+    ModelInfo(
+        name="All-MiniLM-L6-v2",
+        docker_name="ai.docker.com/sentence-transformers/all-minilm:l6-v2",
+        description="Lightweight embedding for simple use cases",
+        ram_gb=0.1,
         context_length=512,
         roles=["embed"],
         tiers=[HardwareTier.S, HardwareTier.A, HardwareTier.B, HardwareTier.C],
-        recommended_for=["Alternative embedding"]
+        recommended_for=["Minimal memory", "Simple search"]
     ),
 ]
+
+
+def detect_apple_silicon_details(info: HardwareInfo) -> None:
+    """Detect detailed Apple Silicon information."""
+    if not info.has_apple_silicon:
+        return
+    
+    # Get chip model from CPU brand string or system_profiler
+    if "Apple" in info.cpu_brand:
+        # Extract chip model (M1, M2, M3, M4 and variants)
+        chip_patterns = [
+            r"Apple M(\d+) (Ultra|Max|Pro)",
+            r"Apple M(\d+)",
+        ]
+        for pattern in chip_patterns:
+            match = re.search(pattern, info.cpu_brand)
+            if match:
+                if len(match.groups()) == 2:
+                    info.apple_chip_model = f"M{match.group(1)} {match.group(2)}"
+                else:
+                    info.apple_chip_model = f"M{match.group(1)}"
+                break
+    
+    # Try to get more details from system_profiler
+    code, stdout, _ = run_command(["system_profiler", "SPHardwareDataType", "-json"])
+    if code == 0:
+        try:
+            data = json.loads(stdout)
+            hw_info = data.get("SPHardwareDataType", [{}])[0]
+            
+            # Get chip name if not already set
+            if not info.apple_chip_model:
+                chip_type = hw_info.get("chip_type", "")
+                if chip_type:
+                    info.apple_chip_model = chip_type.replace("Apple ", "")
+            
+            # Get number of cores
+            cores_str = hw_info.get("number_processors", "")
+            if "proc" in cores_str.lower():
+                # Parse "proc X:Y" format (X performance, Y efficiency)
+                match = re.search(r"(\d+):(\d+)", cores_str)
+                if match:
+                    info.cpu_perf_cores = int(match.group(1))
+                    info.cpu_eff_cores = int(match.group(2))
+        except (json.JSONDecodeError, KeyError, IndexError):
+            pass
+    
+    # Try to get GPU core count from system_profiler
+    code, stdout, _ = run_command(["system_profiler", "SPDisplaysDataType", "-json"])
+    if code == 0:
+        try:
+            data = json.loads(stdout)
+            displays = data.get("SPDisplaysDataType", [])
+            for display in displays:
+                # Look for integrated GPU info
+                if "Apple" in display.get("sppci_model", ""):
+                    # GPU cores might be in the model name or chipset
+                    gpu_model = display.get("sppci_model", "")
+                    info.gpu_name = gpu_model
+                    # Try to extract core count from various sources
+                    cores_match = re.search(r"(\d+)[- ]core", gpu_model.lower())
+                    if cores_match:
+                        info.gpu_cores = int(cores_match.group(1))
+                    break
+        except (json.JSONDecodeError, KeyError, IndexError):
+            pass
+    
+    # Estimate Neural Engine cores based on chip model
+    ne_cores = {
+        "M1": 16, "M1 Pro": 16, "M1 Max": 16, "M1 Ultra": 32,
+        "M2": 16, "M2 Pro": 16, "M2 Max": 16, "M2 Ultra": 32,
+        "M3": 16, "M3 Pro": 16, "M3 Max": 16, "M3 Ultra": 32,
+        "M4": 16, "M4 Pro": 16, "M4 Max": 16, "M4 Ultra": 32,
+    }
+    info.neural_engine_cores = ne_cores.get(info.apple_chip_model, 16)
 
 
 def detect_hardware() -> HardwareInfo:
@@ -406,15 +590,38 @@ def detect_hardware() -> HardwareInfo:
     
     # CPU Detection
     if info.os_name == "Darwin":  # macOS
+        # Get macOS version name
+        code, stdout, _ = run_command(["sw_vers", "-productVersion"])
+        if code == 0:
+            info.macos_version = stdout.strip()
+        
         # CPU brand
         code, stdout, _ = run_command(["sysctl", "-n", "machdep.cpu.brand_string"])
         if code == 0:
             info.cpu_brand = stdout.strip()
+        else:
+            # Fallback for Apple Silicon which might not have brand_string
+            code, stdout, _ = run_command(["sysctl", "-n", "machdep.cpu.brand"])
+            if code == 0:
+                info.cpu_brand = stdout.strip()
+        
+        # If still no brand, use uname
+        if not info.cpu_brand:
+            info.cpu_brand = f"Apple {platform.processor() or 'Silicon'}"
         
         # CPU cores
         code, stdout, _ = run_command(["sysctl", "-n", "hw.physicalcpu"])
         if code == 0:
             info.cpu_cores = int(stdout.strip())
+        
+        # Performance and efficiency cores (Apple Silicon)
+        code, stdout, _ = run_command(["sysctl", "-n", "hw.perflevel0.physicalcpu"])
+        if code == 0:
+            info.cpu_perf_cores = int(stdout.strip())
+        
+        code, stdout, _ = run_command(["sysctl", "-n", "hw.perflevel1.physicalcpu"])
+        if code == 0:
+            info.cpu_eff_cores = int(stdout.strip())
         
         # RAM
         code, stdout, _ = run_command(["sysctl", "-n", "hw.memsize"])
@@ -423,6 +630,13 @@ def detect_hardware() -> HardwareInfo:
         
         # Apple Silicon detection
         info.has_apple_silicon = info.cpu_arch == "arm64"
+        
+        # Get detailed Apple Silicon info
+        if info.has_apple_silicon:
+            detect_apple_silicon_details(info)
+            info.gpu_name = f"Apple {info.apple_chip_model} GPU" if info.apple_chip_model else "Apple Silicon GPU"
+            # Unified memory means GPU can use all system RAM
+            info.gpu_vram_gb = info.ram_gb
         
     elif info.os_name == "Linux":
         # CPU brand
@@ -502,21 +716,39 @@ def detect_hardware() -> HardwareInfo:
         info.tier = HardwareTier.C
     
     # Print detected hardware
-    print_info(f"OS: {info.os_name} {info.os_version}")
+    if info.os_name == "Darwin" and info.macos_version:
+        print_info(f"OS: macOS {info.macos_version}")
+    else:
+        print_info(f"OS: {info.os_name} {info.os_version}")
+    
     print_info(f"CPU: {info.cpu_brand or 'Unknown'}")
     print_info(f"Architecture: {info.cpu_arch}")
-    print_info(f"CPU Cores: {info.cpu_cores}")
+    
+    if info.cpu_perf_cores > 0 and info.cpu_eff_cores > 0:
+        print_info(f"CPU Cores: {info.cpu_cores} ({info.cpu_perf_cores}P + {info.cpu_eff_cores}E)")
+    else:
+        print_info(f"CPU Cores: {info.cpu_cores}")
+    
     print_info(f"RAM: {info.ram_gb:.1f} GB")
     
-    if info.has_nvidia:
+    if info.has_apple_silicon:
+        print_success(f"GPU: {info.gpu_name} (Unified Memory: {info.ram_gb:.0f}GB)")
+        if info.gpu_cores > 0:
+            print_info(f"GPU Cores: {info.gpu_cores}")
+        if info.neural_engine_cores > 0:
+            print_info(f"Neural Engine: {info.neural_engine_cores} cores")
+        print_info(f"Estimated memory for models: ~{info.get_estimated_model_memory():.0f}GB")
+    elif info.has_nvidia:
         print_info(f"GPU: {info.gpu_name} ({info.gpu_vram_gb:.1f} GB VRAM)")
-    elif info.has_apple_silicon:
-        print_info("GPU: Apple Silicon (Unified Memory)")
     else:
         print_info("GPU: None detected (CPU inference only)")
     
     print()
     print_success(f"Hardware Tier: {info.get_tier_label()}")
+    
+    if info.has_apple_silicon:
+        print_success(f"Apple Silicon: {info.get_apple_silicon_info()}")
+        print_info("Metal GPU acceleration will be used for inference")
     
     return info
 
@@ -552,37 +784,89 @@ def check_docker() -> Tuple[bool, str]:
 
 def check_docker_model_runner(hardware: HardwareInfo) -> bool:
     """Check if Docker Model Runner is available."""
-    print_subheader("Checking Docker Model Runner")
+    print_subheader("Checking Docker Model Runner (DMR)")
     
     # Docker Model Runner was introduced in Docker Desktop 4.40+
-    # It uses the 'docker model' command
+    # It uses the 'docker model' command namespace
     code, stdout, stderr = run_command(["docker", "model", "list"])
     
     if code == 0:
         hardware.docker_model_runner_available = True
-        print_success("Docker Model Runner is available")
+        print_success("Docker Model Runner is available and running")
+        
+        # Determine the API endpoint
+        # Try the standard localhost endpoint first
+        hardware.dmr_api_endpoint = DMR_API_BASE
+        
+        # Check if we can reach the API
+        import urllib.request
+        import urllib.error
+        
+        api_reachable = False
+        for endpoint in [DMR_API_BASE, DMR_SOCKET_ENDPOINT, "http://localhost:8080/v1"]:
+            try:
+                req = urllib.request.Request(f"{endpoint}/models", method="GET")
+                req.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        hardware.dmr_api_endpoint = endpoint
+                        api_reachable = True
+                        print_info(f"API endpoint: {endpoint}")
+                        break
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                continue
+        
+        if not api_reachable:
+            print_info(f"API endpoint (default): {hardware.dmr_api_endpoint}")
+            print_warning("Could not verify API endpoint - it may start when a model runs")
         
         # Check for existing models
-        if stdout.strip():
-            print_info("Existing models found:")
-            for line in stdout.strip().split("\n")[1:]:  # Skip header
+        lines = stdout.strip().split("\n")
+        if len(lines) > 1:  # Has models (first line is header)
+            print_info("Installed models:")
+            for line in lines[1:]:
                 if line.strip():
-                    print(f"    {line.strip()}")
+                    parts = line.split()
+                    if parts:
+                        print(f"    • {parts[0]}")
+        else:
+            print_info("No models installed yet")
+        
+        # Show Apple Silicon optimization status
+        if hardware.has_apple_silicon:
+            print_success("Metal GPU acceleration enabled for Apple Silicon")
+        
         return True
     
-    # Check if it's just not enabled
-    if "docker model" in stderr.lower() or "unknown command" in stderr.lower():
+    # Check if it's just not enabled or not installed
+    error_lower = stderr.lower()
+    if "unknown command" in error_lower or "docker model" in error_lower or "not found" in error_lower:
         print_warning("Docker Model Runner is not enabled")
         print()
         print_info("Docker Model Runner requires Docker Desktop 4.40 or later.")
-        print_info("To enable it:")
-        print_info("  1. Open Docker Desktop")
-        print_info("  2. Go to Settings → Features in development")
-        print_info("  3. Enable 'Docker Model Runner' or 'Docker AI'")
-        print_info("  4. Restart Docker Desktop")
         print()
         
-        if prompt_yes_no("Would you like to continue setup anyway (models will be configured but not pulled)?"):
+        if hardware.os_name == "Darwin":
+            print_info(colorize("To enable on macOS:", Colors.BOLD))
+            print_info("  1. Open Docker Desktop")
+            print_info("  2. Click the ⚙️ Settings icon (top right)")
+            print_info("  3. Go to 'Features in development' or 'Beta features'")
+            print_info("  4. Enable 'Docker Model Runner' or 'Enable Docker AI'")
+            print_info("  5. Click 'Apply & restart'")
+            print()
+            print_info("Or run this command:")
+            print(colorize("     docker desktop enable model-runner --tcp 12434", Colors.CYAN))
+        else:
+            print_info("To enable Docker Model Runner:")
+            print_info("  1. Open Docker Desktop")
+            print_info("  2. Go to Settings → Features in development")
+            print_info("  3. Enable 'Docker Model Runner' or 'Enable Docker AI'")
+            print_info("  4. Click 'Apply & restart'")
+        
+        print()
+        
+        if prompt_yes_no("Would you like to continue setup anyway (config will be generated but models won't be pulled)?"):
+            hardware.dmr_api_endpoint = DMR_API_BASE
             return True
         return False
     
@@ -715,44 +999,106 @@ def select_models(hardware: HardwareInfo) -> List[ModelInfo]:
 
 def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[ModelInfo]:
     """Pull selected models using Docker Model Runner."""
-    print_header("📥 Downloading Models")
+    print_header("📥 Downloading Models via Docker Model Runner")
     
     if not hardware.docker_model_runner_available:
         print_warning("Docker Model Runner not available. Skipping model download.")
-        print_info("Models will be downloaded when you first use them.")
+        print_info("Models will be downloaded when you first use them in Continue.dev.")
+        print()
+        print_info("To manually pull models later, run:")
+        for model in models:
+            print(colorize(f"    docker model pull {model.docker_name}", Colors.CYAN))
         return models
     
     successfully_pulled: List[ModelInfo] = []
     
+    # Estimate total download size
+    total_download_gb = sum(m.ram_gb * 0.5 for m in models)  # Rough estimate: model size is ~50% of RAM needed
+    print_info(f"Estimated total download: ~{total_download_gb:.1f}GB")
+    print_info(f"Models will use Metal GPU acceleration on Apple Silicon")
+    print()
+    
     for i, model in enumerate(models, 1):
         print_step(i, len(models), f"Pulling {model.name}...")
-        print_info(f"Docker image: {model.docker_name}")
-        print_info(f"Estimated size: ~{model.ram_gb * 0.5:.1f}GB download")
+        print_info(f"Model: {model.docker_name}")
+        print_info(f"Estimated download: ~{model.ram_gb * 0.5:.1f}GB")
+        print_info(f"Memory required: ~{model.ram_gb:.1f}GB")
         print()
         
         # Run docker model pull
-        code, stdout, stderr = run_command(
-            ["docker", "model", "pull", model.docker_name],
-            capture=False,  # Show progress
-            timeout=3600  # 1 hour timeout for large models
-        )
+        # We don't capture output so user can see download progress
+        try:
+            process = subprocess.Popen(
+                ["docker", "model", "pull", model.docker_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            
+            # Stream output in real-time
+            if process.stdout:
+                for line in process.stdout:
+                    line = line.strip()
+                    if line:
+                        # Show progress lines
+                        if "pulling" in line.lower() or "download" in line.lower() or "%" in line:
+                            print(f"    {line}")
+                        elif "complete" in line.lower() or "done" in line.lower():
+                            print(colorize(f"    {line}", Colors.GREEN))
+            
+            process.wait(timeout=3600)  # 1 hour timeout
+            code = process.returncode
+            
+        except subprocess.TimeoutExpired:
+            process.kill()
+            print_error("Download timed out after 1 hour")
+            code = -1
+        except Exception as e:
+            print_error(f"Error: {e}")
+            code = -1
         
         if code == 0:
             print_success(f"{model.name} downloaded successfully")
             successfully_pulled.append(model)
+            
+            # Verify the model is listed
+            verify_code, verify_out, _ = run_command(["docker", "model", "list"])
+            if verify_code == 0 and model.docker_name in verify_out:
+                print_info("Model verified in Docker Model Runner")
         else:
             print_error(f"Failed to pull {model.name}")
-            if stderr:
-                print(colorize(f"  Error: {stderr[:200]}", Colors.DIM))
+            print_info("You can try pulling manually later with:")
+            print(colorize(f"    docker model pull {model.docker_name}", Colors.CYAN))
             
-            if prompt_yes_no("Continue with remaining models?", default=True):
+            if len(models) > i and prompt_yes_no("Continue with remaining models?", default=True):
                 continue
-            else:
+            elif len(models) > i:
                 break
         
         print()
     
-    return successfully_pulled
+    # Summary
+    if successfully_pulled:
+        print_success(f"Successfully downloaded {len(successfully_pulled)}/{len(models)} models")
+    
+    return successfully_pulled if successfully_pulled else models
+
+
+def get_model_id_for_continue(docker_name: str) -> str:
+    """
+    Convert Docker Model Runner model name to Continue.dev compatible format.
+    Docker Model Runner uses: ai.docker.com/<org>/<model>:<tag>
+    Continue.dev expects just the model identifier.
+    """
+    # Remove the ai.docker.com/ prefix if present
+    model_id = docker_name
+    if model_id.startswith("ai.docker.com/"):
+        model_id = model_id[len("ai.docker.com/"):]
+    if model_id.startswith("ai/"):
+        model_id = model_id[len("ai/"):]
+    
+    return model_id
 
 
 def generate_continue_config(
@@ -775,85 +1121,144 @@ def generate_continue_config(
         shutil.copy(output_path, backup_path)
         print_info(f"Backed up existing config to {backup_path}")
     
-    # Determine Docker Model Runner endpoint
-    # Docker Model Runner typically exposes an OpenAI-compatible API
-    # Default port is 12434 for Docker Model Runner
-    api_base = "http://localhost:12434/v1"
+    # Use the detected API endpoint from hardware info
+    api_base = hardware.dmr_api_endpoint
+    print_info(f"Using API endpoint: {api_base}")
     
-    # Build config
-    config: Dict[str, Any] = {
-        "# Generated by Docker LLM Setup Script": None,
-        "# https://docs.continue.dev/yaml-reference": None,
-    }
+    # Build config with comments
+    yaml_lines = [
+        "# Continue.dev Configuration for Docker Model Runner",
+        "# Generated by docker-llm-setup.py",
+        f"# Hardware: {hardware.apple_chip_model or hardware.cpu_brand}",
+        f"# RAM: {hardware.ram_gb:.0f}GB | Tier: {hardware.tier.value}",
+        "#",
+        "# Documentation: https://docs.continue.dev/yaml-reference",
+        "",
+    ]
     
-    # Models section
-    config_models = []
-    
-    # Find primary chat model
+    # Find models by role
     chat_models = [m for m in models if "chat" in m.roles or "edit" in m.roles]
     autocomplete_models = [m for m in models if "autocomplete" in m.roles]
     embed_models = [m for m in models if "embed" in m.roles]
     
-    # Add chat/edit models
-    for model in chat_models:
-        model_config = {
-            "name": model.name,
-            "provider": "openai",
-            "model": model.docker_name.replace("ai/", ""),
-            "apiBase": api_base,
-            "contextLength": model.context_length,
-            "roles": ["chat", "edit", "apply"],
-        }
-        config_models.append(model_config)
+    # Sort chat models by RAM (largest first = highest quality)
+    chat_models.sort(key=lambda m: m.ram_gb, reverse=True)
     
-    # Add autocomplete model (if different from chat)
-    for model in autocomplete_models:
-        if model not in chat_models:
-            model_config = {
-                "name": f"{model.name} (Autocomplete)",
-                "provider": "openai",
-                "model": model.docker_name.replace("ai/", ""),
-                "apiBase": api_base,
-                "roles": ["autocomplete"],
-            }
-            config_models.append(model_config)
+    # Sort autocomplete models by RAM (smallest first = fastest)
+    autocomplete_models.sort(key=lambda m: m.ram_gb)
     
-    config["models"] = config_models
+    # Build models section
+    yaml_lines.append("models:")
+    
+    for i, model in enumerate(chat_models):
+        model_id = get_model_id_for_continue(model.docker_name)
+        yaml_lines.extend([
+            f"  - name: {model.name}",
+            f"    provider: openai",
+            f"    model: {model_id}",
+            f"    apiBase: {api_base}",
+            f"    contextLength: {model.context_length}",
+        ])
+        
+        # Add roles
+        roles = ["chat", "edit", "apply"]
+        if "agent" in model.roles:
+            roles.append("agent")
+        yaml_lines.append("    roles:")
+        for role in roles:
+            yaml_lines.append(f"      - {role}")
+        
+        # Add system message for primary model
+        if i == 0:
+            yaml_lines.extend([
+                "    systemMessage: |",
+                "      You are an expert coding assistant. You help with:",
+                "      - Writing clean, efficient code",
+                "      - Debugging and fixing issues", 
+                "      - Explaining code and concepts",
+                "      - Refactoring and optimization",
+                "      Be concise, accurate, and provide working code examples.",
+            ])
+        yaml_lines.append("")
+    
+    # Add autocomplete model (if different from chat models)
+    autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
+    for model in autocomplete_only:
+        model_id = get_model_id_for_continue(model.docker_name)
+        yaml_lines.extend([
+            f"  - name: {model.name} (Autocomplete)",
+            f"    provider: openai",
+            f"    model: {model_id}",
+            f"    apiBase: {api_base}",
+            "    roles:",
+            "      - autocomplete",
+            "",
+        ])
     
     # Tab autocomplete configuration
     if autocomplete_models:
         auto_model = autocomplete_models[0]
-        config["tabAutocompleteModel"] = {
-            "provider": "openai",
-            "model": auto_model.docker_name.replace("ai/", ""),
-            "apiBase": api_base,
-        }
+        model_id = get_model_id_for_continue(auto_model.docker_name)
+        yaml_lines.extend([
+            "# Tab autocomplete settings",
+            "tabAutocompleteModel:",
+            f"  provider: openai",
+            f"  model: {model_id}",
+            f"  apiBase: {api_base}",
+            "",
+        ])
     
     # Embeddings configuration
     if embed_models:
         embed_model = embed_models[0]
-        config["embeddingsProvider"] = {
-            "provider": "openai",
-            "model": embed_model.docker_name.replace("ai/", ""),
-            "apiBase": api_base,
-        }
+        model_id = get_model_id_for_continue(embed_model.docker_name)
+        yaml_lines.extend([
+            "# Embeddings for semantic code search (@Codebase)",
+            "embeddingsProvider:",
+            f"  provider: openai",
+            f"  model: {model_id}",
+            f"  apiBase: {api_base}",
+            "",
+        ])
     
     # Context providers
-    config["contextProviders"] = [
-        {"name": "codebase"},
-        {"name": "folder"},
-        {"name": "file"},
-        {"name": "code"},
-        {"name": "terminal"},
-        {"name": "diff"},
-        {"name": "problems"},
-    ]
+    yaml_lines.extend([
+        "# Context providers for code understanding",
+        "contextProviders:",
+        "  - name: codebase",
+        "    params: {}",
+        "  - name: folder",
+        "  - name: file",
+        "  - name: code",
+        "  - name: terminal",
+        "  - name: diff",
+        "  - name: problems",
+        "  - name: open",
+        "",
+        "# Slash commands",
+        "slashCommands:",
+        "  - name: edit",
+        "    description: Edit selected code",
+        "  - name: comment",
+        "    description: Add comments to code",
+        "  - name: share",
+        "    description: Share conversation",
+        "",
+        "# Privacy settings",
+        "allowAnonymousTelemetry: false",
+        "",
+    ])
     
-    # Disable telemetry
-    config["allowAnonymousTelemetry"] = False
+    # Add Apple Silicon specific notes
+    if hardware.has_apple_silicon:
+        yaml_lines.extend([
+            f"# Optimized for {hardware.apple_chip_model or 'Apple Silicon'}",
+            f"# Available unified memory: ~{hardware.get_estimated_model_memory():.0f}GB",
+            "# Metal GPU acceleration is enabled automatically",
+        ])
     
     # Write YAML config
-    yaml_content = generate_yaml(config)
+    yaml_content = "\n".join(yaml_lines)
     
     with open(output_path, "w") as f:
         f.write(yaml_content)
@@ -862,8 +1267,60 @@ def generate_continue_config(
     
     # Also create a JSON version for compatibility
     json_path = output_path.parent / "config.json"
-    # Remove comment entries for JSON
-    json_config = {k: v for k, v in config.items() if not k.startswith("#")}
+    
+    # Build JSON config
+    json_config: Dict[str, Any] = {"models": []}
+    
+    for model in chat_models:
+        model_id = get_model_id_for_continue(model.docker_name)
+        json_config["models"].append({
+            "name": model.name,
+            "provider": "openai",
+            "model": model_id,
+            "apiBase": api_base,
+            "contextLength": model.context_length,
+            "roles": ["chat", "edit", "apply"] + (["agent"] if "agent" in model.roles else []),
+        })
+    
+    for model in autocomplete_only:
+        model_id = get_model_id_for_continue(model.docker_name)
+        json_config["models"].append({
+            "name": f"{model.name} (Autocomplete)",
+            "provider": "openai", 
+            "model": model_id,
+            "apiBase": api_base,
+            "roles": ["autocomplete"],
+        })
+    
+    if autocomplete_models:
+        auto_model = autocomplete_models[0]
+        model_id = get_model_id_for_continue(auto_model.docker_name)
+        json_config["tabAutocompleteModel"] = {
+            "provider": "openai",
+            "model": model_id,
+            "apiBase": api_base,
+        }
+    
+    if embed_models:
+        embed_model = embed_models[0]
+        model_id = get_model_id_for_continue(embed_model.docker_name)
+        json_config["embeddingsProvider"] = {
+            "provider": "openai",
+            "model": model_id,
+            "apiBase": api_base,
+        }
+    
+    json_config["contextProviders"] = [
+        {"name": "codebase", "params": {}},
+        {"name": "folder"},
+        {"name": "file"},
+        {"name": "code"},
+        {"name": "terminal"},
+        {"name": "diff"},
+        {"name": "problems"},
+    ]
+    
+    json_config["allowAnonymousTelemetry"] = False
     
     with open(json_path, "w") as f:
         json.dump(json_config, f, indent=2)
@@ -937,53 +1394,128 @@ def show_next_steps(config_path: Path, models: List[ModelInfo], hardware: Hardwa
     
     print(colorize("Installation Summary:", Colors.GREEN + Colors.BOLD))
     print()
-    print(f"  Hardware Tier: {hardware.get_tier_label()}")
+    print(f"  Hardware: {hardware.apple_chip_model or hardware.cpu_brand}")
+    print(f"  Tier: {hardware.get_tier_label()}")
+    if hardware.has_apple_silicon:
+        print(f"  GPU: Metal acceleration enabled ({hardware.ram_gb:.0f}GB unified memory)")
+    print(f"  API Endpoint: {hardware.dmr_api_endpoint}")
+    print()
     print(f"  Models Configured: {len(models)}")
     for model in models:
-        print(f"    • {model.name} ({', '.join(model.roles)})")
-    print(f"  Config Location: {config_path}")
+        roles_str = ", ".join(model.roles)
+        print(f"    • {model.name} ({roles_str}) - ~{model.ram_gb}GB")
+    print()
+    print(f"  Config: {config_path}")
     print()
     
+    print(colorize("━" * 60, Colors.DIM))
     print(colorize("Next Steps:", Colors.YELLOW + Colors.BOLD))
     print()
-    print("  1. Install Continue.dev extension in VS Code:")
-    print(colorize("     • Open VS Code", Colors.DIM))
-    print(colorize("     • Press Cmd+Shift+X (or Ctrl+Shift+X)", Colors.DIM))
-    print(colorize("     • Search for 'Continue' and install", Colors.DIM))
-    print()
     
+    step = 1
+    
+    # Step 1: Install Continue.dev
+    print(f"  {step}. Install Continue.dev extension in VS Code:")
+    if hardware.os_name == "Darwin":
+        print(colorize("     • Open VS Code", Colors.DIM))
+        print(colorize("     • Press Cmd+Shift+X to open Extensions", Colors.DIM))
+        print(colorize("     • Search for 'Continue' and install 'Continue - Codestral, GPT-4, etc.'", Colors.DIM))
+    else:
+        print(colorize("     • Open VS Code", Colors.DIM))
+        print(colorize("     • Press Ctrl+Shift+X to open Extensions", Colors.DIM))
+        print(colorize("     • Search for 'Continue' and install", Colors.DIM))
+    print()
+    step += 1
+    
+    # Step 2: Docker Model Runner setup
     if hardware.docker_model_runner_available:
-        print("  2. Start Docker Model Runner:")
-        print(colorize("     docker model start", Colors.CYAN))
-        print()
-        print("  3. Verify models are running:")
+        print(f"  {step}. Verify Docker Model Runner is running:")
         print(colorize("     docker model list", Colors.CYAN))
         print()
+        step += 1
+        
+        # Run a model if needed
+        chat_models = [m for m in models if "chat" in m.roles]
+        if chat_models:
+            print(f"  {step}. Start the model server (if not already running):")
+            print(colorize(f"     docker model run {chat_models[0].docker_name}", Colors.CYAN))
+            print(colorize("     (This starts the API server for Continue.dev to connect)", Colors.DIM))
+            print()
+            step += 1
     else:
-        print("  2. Enable Docker Model Runner:")
-        print(colorize("     • Open Docker Desktop → Settings", Colors.DIM))
-        print(colorize("     • Features in development → Enable Docker Model Runner", Colors.DIM))
-        print(colorize("     • Restart Docker Desktop", Colors.DIM))
+        print(f"  {step}. Enable Docker Model Runner:")
+        if hardware.os_name == "Darwin":
+            print(colorize("     Option A - Via Docker Desktop:", Colors.DIM))
+            print(colorize("       • Open Docker Desktop", Colors.DIM))
+            print(colorize("       • Settings → Features in development", Colors.DIM))
+            print(colorize("       • Enable 'Docker Model Runner' or 'Enable Docker AI'", Colors.DIM))
+            print(colorize("       • Click 'Apply & restart'", Colors.DIM))
+            print()
+            print(colorize("     Option B - Via terminal:", Colors.DIM))
+            print(colorize("       docker desktop enable model-runner --tcp 12434", Colors.CYAN))
+        else:
+            print(colorize("     • Open Docker Desktop → Settings", Colors.DIM))
+            print(colorize("     • Features in development → Enable Docker Model Runner", Colors.DIM))
+            print(colorize("     • Apply & restart", Colors.DIM))
         print()
-        print("  3. Pull models:")
+        step += 1
+        
+        print(f"  {step}. Pull the models:")
         for model in models:
             print(colorize(f"     docker model pull {model.docker_name}", Colors.CYAN))
         print()
+        step += 1
     
-    print("  4. Restart VS Code:")
-    print(colorize("     • Quit VS Code completely (Cmd+Q)", Colors.DIM))
+    # Step: Restart VS Code
+    print(f"  {step}. Restart VS Code:")
+    if hardware.os_name == "Darwin":
+        print(colorize("     • Quit VS Code completely (Cmd+Q)", Colors.DIM))
+    else:
+        print(colorize("     • Close all VS Code windows", Colors.DIM))
     print(colorize("     • Reopen VS Code", Colors.DIM))
     print()
+    step += 1
     
-    print("  5. Start using Continue.dev:")
-    print(colorize("     • Press Cmd+L to open chat", Colors.DIM))
-    print(colorize("     • Press Cmd+K for inline edits", Colors.DIM))
-    print(colorize("     • Use @Codebase for semantic search", Colors.DIM))
+    # Step: Start using
+    print(f"  {step}. Start coding with AI:")
+    if hardware.os_name == "Darwin":
+        print(colorize("     • Cmd+L - Open Continue.dev chat", Colors.DIM))
+        print(colorize("     • Cmd+K - Inline code edits", Colors.DIM))
+        print(colorize("     • Cmd+I - Quick actions", Colors.DIM))
+    else:
+        print(colorize("     • Ctrl+L - Open Continue.dev chat", Colors.DIM))
+        print(colorize("     • Ctrl+K - Inline code edits", Colors.DIM))
+        print(colorize("     • Ctrl+I - Quick actions", Colors.DIM))
+    print(colorize("     • @Codebase - Semantic code search", Colors.DIM))
+    print(colorize("     • @file - Reference specific files", Colors.DIM))
     print()
     
+    print(colorize("━" * 60, Colors.DIM))
+    print(colorize("Useful Commands:", Colors.BLUE + Colors.BOLD))
+    print()
+    print("  Check installed models:")
+    print(colorize("     docker model list", Colors.CYAN))
+    print()
+    print("  Run a model interactively:")
+    if models:
+        print(colorize(f"     docker model run {models[0].docker_name}", Colors.CYAN))
+    else:
+        print(colorize("     docker model run <model-name>", Colors.CYAN))
+    print()
+    print("  Remove a model:")
+    print(colorize("     docker model rm <model-name>", Colors.CYAN))
+    print()
+    print("  View config:")
+    print(colorize(f"     cat {config_path}", Colors.CYAN))
+    print()
+    
+    print(colorize("━" * 60, Colors.DIM))
     print(colorize("Documentation:", Colors.BLUE + Colors.BOLD))
+    print()
     print("  • Continue.dev: https://docs.continue.dev")
-    print("  • Docker Model Runner: https://docs.docker.com/ai/")
+    print("  • Docker Model Runner: https://docs.docker.com/desktop/features/ai/")
+    if hardware.has_apple_silicon:
+        print("  • Apple Silicon optimization: Metal acceleration is automatic")
     print()
 
 
