@@ -3711,13 +3711,6 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                                     if progress_bar:
                                         progress_bar.stop()
                                     console.print(f"[red]✗ {line}[/red]")
-                        
-                        # If process finished successfully, we can break early after processing current line
-                        # (stdout might still have buffered data, but process is done)
-                        if process_finished and poll_result == 0:
-                            # Process completed successfully, continue reading buffered output but don't wait indefinitely
-                            # The loop will naturally exit when stdout is closed (EOF)
-                            pass
                     
                     # Clean up progress bar if still running
                     if progress_bar:
