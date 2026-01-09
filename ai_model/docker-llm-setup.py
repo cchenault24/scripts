@@ -251,8 +251,16 @@ class HardwareInfo:
     
     def get_tier_label(self) -> str:
         """Get human-readable tier label."""
+        # Check if this is a high-end chip promoted to Tier S
+        is_high_end_promoted = False
+        if self.has_apple_silicon and self.apple_chip_model:
+            high_end_patterns = ["M3 Pro", "M3 Max", "M3 Ultra", "M4 Pro", "M4 Max", "M4 Ultra"]
+            is_high_end_promoted = (self.tier == HardwareTier.S and 
+                                   40 <= self.ram_gb < 49 and
+                                   any(pattern in self.apple_chip_model for pattern in high_end_patterns))
+        
         labels = {
-            HardwareTier.S: f"Tier S (≥49GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.S: f"Tier S ({'40-48GB RAM, High-End Chip' if is_high_end_promoted else '≥49GB RAM'}) - {self.ram_gb:.1f}GB detected",
             HardwareTier.A: f"Tier A (33-48GB RAM) - {self.ram_gb:.1f}GB detected",
             HardwareTier.B: f"Tier B (17-32GB RAM) - {self.ram_gb:.1f}GB detected",
             HardwareTier.C: f"Tier C (<17GB RAM) - {self.ram_gb:.1f}GB detected",
@@ -712,8 +720,19 @@ def detect_hardware() -> HardwareInfo:
                 info.gpu_vram_gb = float(parts[1].strip()) / 1024
                 info.has_nvidia = True
     
-    # Classify tier
+    # Classify tier - enhanced to consider chip performance, not just RAM
+    # High-end chips (M3/M4 Pro/Max/Ultra) with 40GB+ RAM can handle Tier S models
+    is_high_end_chip = False
+    if info.has_apple_silicon and info.apple_chip_model:
+        # Check for high-end chip variants
+        high_end_patterns = ["M3 Pro", "M3 Max", "M3 Ultra", "M4 Pro", "M4 Max", "M4 Ultra"]
+        is_high_end_chip = any(pattern in info.apple_chip_model for pattern in high_end_patterns)
+    
+    # Enhanced tier classification
     if info.ram_gb >= 49:
+        info.tier = HardwareTier.S
+    elif info.ram_gb >= 40 and is_high_end_chip:
+        # High-end chips (M3/M4 Pro/Max/Ultra) with 40-48GB RAM can handle Tier S models
         info.tier = HardwareTier.S
     elif info.ram_gb >= 33:
         info.tier = HardwareTier.A
@@ -1432,9 +1451,10 @@ def get_curated_top_models(tier: HardwareTier, limit: int = 10, hardware: Option
 
 
 def get_recommended_models(tier: HardwareTier, hardware: Optional[HardwareInfo] = None) -> Dict[str, ModelInfo]:
-    """Get recommended models for each role based on tier.
+    """Get recommended models for each role based on tier and chip capabilities.
     Excludes models from restricted countries (China, Russia) due to political conflicts.
-    Only includes models verified to exist in Docker Model Runner."""
+    Only includes models verified to exist in Docker Model Runner.
+    Enhanced to consider chip performance for better recommendations."""
     recommendations: Dict[str, ModelInfo] = {}
     
     available = get_models_for_tier(tier)
@@ -1450,19 +1470,49 @@ def get_recommended_models(tier: HardwareTier, hardware: Optional[HardwareInfo] 
                 verified_available.append(model)
         available = verified_available
     
-    # Chat/Edit model (primary)
+    # Determine if this is a high-end chip that can handle larger models
+    is_high_end_chip = False
+    if hardware and hardware.has_apple_silicon and hardware.apple_chip_model:
+        high_end_patterns = ["M3 Pro", "M3 Max", "M3 Ultra", "M4 Pro", "M4 Max", "M4 Ultra"]
+        is_high_end_chip = any(pattern in hardware.apple_chip_model for pattern in high_end_patterns)
+    
+    # Chat/Edit model (primary) - prioritize best quality models
     chat_models = [m for m in available if "chat" in m.roles or "edit" in m.roles]
     if chat_models:
+        # For high-end chips, prefer larger models even if at tier boundary
         # Sort by RAM (descending) to get best quality within tier
         chat_models.sort(key=lambda m: m.ram_gb, reverse=True)
-        recommendations["chat"] = chat_models[0]
+        
+        # For Tier A with high-end chips and 40GB+ RAM, prefer larger models
+        if tier == HardwareTier.A and is_high_end_chip and hardware and hardware.ram_gb >= 40:
+            # Prefer models that are close to Tier S quality
+            # Look for models that are 20GB+ (like devstral:27b, codestral:22b)
+            large_models = [m for m in chat_models if m.ram_gb >= 20]
+            if large_models:
+                recommendations["chat"] = large_models[0]
+            else:
+                recommendations["chat"] = chat_models[0]
+        else:
+            recommendations["chat"] = chat_models[0]
     
-    # Autocomplete model (fast)
+    # Autocomplete model (fast) - balance speed and quality
     auto_models = [m for m in available if "autocomplete" in m.roles]
     if auto_models:
-        # Sort by RAM (ascending) to get fastest
-        auto_models.sort(key=lambda m: m.ram_gb)
-        recommendations["autocomplete"] = auto_models[0]
+        # For high-end chips, we can use slightly larger autocomplete models for better quality
+        if is_high_end_chip and tier in (HardwareTier.S, HardwareTier.A):
+            # Prefer medium-sized autocomplete models (5-15GB) for better quality
+            medium_auto = [m for m in auto_models if 5 <= m.ram_gb <= 15]
+            if medium_auto:
+                medium_auto.sort(key=lambda m: m.ram_gb, reverse=True)  # Best quality first
+                recommendations["autocomplete"] = medium_auto[0]
+            else:
+                # Fallback to smallest for speed
+                auto_models.sort(key=lambda m: m.ram_gb)
+                recommendations["autocomplete"] = auto_models[0]
+        else:
+            # For other systems, prioritize speed (smallest)
+            auto_models.sort(key=lambda m: m.ram_gb)
+            recommendations["autocomplete"] = auto_models[0]
     
     # Embedding model (excluding restricted ones)
     embed_models = [m for m in available if "embed" in m.roles]
@@ -1590,21 +1640,11 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
         print_info(f"Memory required: ~{model.ram_gb:.1f}GB")
         print()
         
-        # #region agent log
-        log_path = "/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log"
-        try:
-            with open(log_path, "a") as f:
-                import json
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "docker-llm-setup.py:1021", "message": "Starting model pull", "data": {"model_name": model.name, "docker_name": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except: pass
-        # #endregion
-        
         # Determine model name format and handle legacy ai.docker.com format
         # Docker Model Runner supports:
         # - Docker Hub: ai/model-name (e.g., ai/llama3.2)
         # - Hugging Face: hf.co/username/model-name
         # Legacy format: ai.docker.com/org/model:tag (convert directly to ai/model-name)
-        # #region agent log
         model_name_to_pull = model.docker_name
         
         # Convert legacy ai.docker.com format directly to Docker Hub format
@@ -1630,62 +1670,8 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
             # Convert to Docker Hub format: ai/modelname
             model_name_to_pull = f"ai/{model_part}"
         
-        try:
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "docker-llm-setup.py:1035", "message": "Model name format conversion", "data": {"original_name": model.docker_name, "final_name": model_name_to_pull}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except: pass
-        # #endregion
-        
-        # Hypothesis B: Check Docker DNS configuration
-        # #region agent log
-        try:
-            docker_info_code, docker_info_out, docker_info_err = run_command(["docker", "info"], timeout=10)
-            docker_dns_info = ""
-            if docker_info_code == 0:
-                for line in docker_info_out.split("\n"):
-                    if "dns" in line.lower() or "nameserver" in line.lower():
-                        docker_dns_info += line + "; "
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "docker-llm-setup.py:1048", "message": "Docker DNS configuration", "data": {"docker_info_code": docker_info_code, "dns_info": docker_dns_info[:200]}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception as e:
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "docker-llm-setup.py:1051", "message": "Docker info check exception", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
-        
-        # Hypothesis C: Check network connectivity
-        # #region agent log
-        try:
-            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_socket.settimeout(5)
-            connectivity_test = test_socket.connect_ex(("8.8.8.8", 53))
-            test_socket.close()
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "docker-llm-setup.py:1060", "message": "Network connectivity test", "data": {"connectivity_result": connectivity_test, "test_target": "8.8.8.8:53"}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception as e:
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "docker-llm-setup.py:1063", "message": "Connectivity test exception", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
-        
-        # Hypothesis E: Check Docker Desktop network/proxy settings
-        # #region agent log
-        try:
-            docker_version_code, docker_version_out, _ = run_command(["docker", "version", "--format", "{{.Server.Version}}"], timeout=10)
-            docker_network_code, docker_network_out, _ = run_command(["docker", "network", "ls"], timeout=10)
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "docker-llm-setup.py:1070", "message": "Docker network/proxy check", "data": {"docker_version_code": docker_version_code, "docker_network_code": docker_network_code, "has_network_access": docker_network_code == 0}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception as e:
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "docker-llm-setup.py:1073", "message": "Docker network check exception", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
-        
         # Run docker model pull
         # We don't capture output so user can see download progress
-        # #region agent log
-        try:
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "docker-llm-setup.py:1070", "message": "Before docker model pull", "data": {"command": ["docker", "model", "pull", model_name_to_pull], "original_name": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except: pass
-        # #endregion
         
         # Initialize full_output for error handling
         full_output = []
@@ -1715,33 +1701,13 @@ def pull_models_docker(models: List[ModelInfo], hardware: HardwareInfo) -> List[
             process.wait(timeout=3600)  # 1 hour timeout
             code = process.returncode
             
-            # #region agent log
-            try:
-                error_lines = [l for l in full_output if "error" in l.lower() or "failed" in l.lower() or "no such host" in l.lower() or "dns" in l.lower() or "unauthorized" in l.lower()]
-                with open(log_path, "a") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "D", "location": "docker-llm-setup.py:1095", "message": "After docker model pull", "data": {"returncode": code, "model_name_used": model_name_to_pull, "original_name": model.docker_name, "error_lines": error_lines[:5], "output_lines_count": len(full_output)}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except: pass
-            # #endregion
-            
         except subprocess.TimeoutExpired:
             process.kill()
             print_error("Download timed out after 1 hour")
             code = -1
-            # #region agent log
-            try:
-                with open(log_path, "a") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "docker-llm-setup.py:1104", "message": "Docker pull timeout", "data": {"model": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except: pass
-            # #endregion
         except Exception as e:
             print_error(f"Error: {e}")
             code = -1
-            # #region agent log
-            try:
-                with open(log_path, "a") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "docker-llm-setup.py:1109", "message": "Docker pull exception", "data": {"error": str(e), "model": model.docker_name}, "timestamp": int(time.time() * 1000)}) + "\n")
-            except: pass
-            # #endregion
         
         if code == 0:
             # Verify the model was actually downloaded and check its parameters
