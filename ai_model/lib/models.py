@@ -134,9 +134,10 @@ class ModelInfo:
 
 
 # Model catalog for Docker Model Runner (DMR)
-# Docker Model Runner uses the namespace: ai.docker.com/ or just model names
+# Docker Model Runner uses the namespace: ai/ for Docker Hub models
 # Models are optimized for Apple Silicon with Metal acceleration
-# Format: ai.docker.com/<org>/<model>:<tag> or simplified <model>:<tag>
+# Format: ai/<model-name> or ai/<model-name>:<tag>
+# Note: Legacy ai.docker.com/ format models have been removed as they don't exist in ai/ namespace
 MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     # Chat/Edit Models - Large (Tier S: 49GB+ RAM)
@@ -177,14 +178,14 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Best coding quality", "Tier A primary"]
     ),
     ModelInfo(
-        name="Codestral 22B",
-        docker_name="ai.docker.com/mistral/codestral:22b-v0.1",
-        description="22B - Mistral's code generation model",
+        name="Codestral",
+        docker_name="ai/codestral",
+        description="Mistral's Codestral code generation model - Excellent for code generation",
         ram_gb=12.0,
         context_length=32768,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
-        recommended_for=["Excellent code generation"]
+        recommended_for=["Excellent code generation", "Mistral coding model"]
     ),
     ModelInfo(
         name="Devstral Small",
@@ -220,16 +221,6 @@ MODEL_CATALOG: List[ModelInfo] = [
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B],
         recommended_for=["Good balance of quality and speed"]
     ),
-    ModelInfo(
-        name="CodeLlama 13B",
-        docker_name="ai.docker.com/meta/codellama:13b-instruct",
-        description="13B - Meta's code-specialized Llama",
-        ram_gb=7.5,
-        context_length=16384,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B],
-        recommended_for=["Code generation"]
-    ),
     # =========================================================================
     # Chat/Edit Models - Small (All Tiers, optimized for Tier C: <17GB RAM)
     # =========================================================================
@@ -256,29 +247,9 @@ MODEL_CATALOG: List[ModelInfo] = [
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
         recommended_for=["Tier C primary", "Fast autocomplete"]
     ),
-    ModelInfo(
-        name="CodeGemma 7B",
-        docker_name="ai.docker.com/google/codegemma:7b-it",
-        description="7B - Google's code-optimized model",
-        ram_gb=4.0,
-        context_length=8192,
-        roles=["chat", "autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Fast autocomplete"]
-    ),
     # =========================================================================
     # Autocomplete Models - Ultra-fast (All Tiers)
     # =========================================================================
-    ModelInfo(
-        name="StarCoder2 3B",
-        docker_name="ai.docker.com/bigcode/starcoder2:3b",
-        description="3B - Ultra-fast autocomplete optimized for code",
-        ram_gb=1.8,
-        context_length=16384,
-        roles=["autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Fastest autocomplete", "Low memory"]
-    ),
     ModelInfo(
         name="Llama 3.2",
         docker_name="ai/llama3.2",
@@ -335,14 +306,14 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["High-quality code embeddings"]
     ),
     ModelInfo(
-        name="All-MiniLM-L6-v2",
-        docker_name="ai.docker.com/sentence-transformers/all-minilm:l6-v2",
-        description="Lightweight embedding for simple use cases",
+        name="All-MiniLM-L6-v2 (vLLM)",
+        docker_name="ai/all-minilm-l6-v2-vllm",
+        description="Lightweight embedding model optimized with vLLM - Minimal memory usage",
         ram_gb=0.1,
         context_length=512,
         roles=["embed"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Minimal memory", "Simple search"]
+        recommended_for=["Minimal memory", "Simple search", "Fast embeddings"]
     ),
 ]
 
@@ -1524,36 +1495,22 @@ def is_docker_hub_unavailable(model: ModelInfo) -> bool:
     These models would fail with 401 Unauthorized when trying to pull.
     Only models confirmed to exist in Docker Hub's ai/ namespace are included."""
     # Models that don't exist in Docker Hub's ai/ namespace (verified)
-    # These models are not available and will fail with 401 Unauthorized
     unavailable_models = [
         "starcoder2",  # Not in ai/ namespace (401 error confirmed)
-        "codestral",  # Not in ai/ namespace
         "codegemma",  # Not in ai/ namespace (only in other namespaces)
         "codellama",  # Not in ai/ namespace
-        # Note: nomic-embed-text exists as ai/nomic-embed-text-v1.5, but our format is different
-        # Keeping it filtered since the exact name doesn't match
     ]
     
-    # Convert model name to what it would be in Docker Hub format
-    if model.docker_name.startswith("ai.docker.com/"):
-        remaining = model.docker_name[len("ai.docker.com/"):]
-        parts = remaining.split("/")
-        if len(parts) > 1:
-            model_part = parts[1]
-        else:
-            model_part = parts[0]
-        if ":" in model_part:
-            model_part = model_part.split(":")[0]
-    else:
-        # Already in Docker Hub format or other format
-        if model.docker_name.startswith("ai/"):
-            model_part = model.docker_name[3:]
-            if ":" in model_part:
-                model_part = model_part.split(":")[0]
-        else:
-            return False
+    # Extract base model name (remove ai/ prefix and any tag)
+    if not model.docker_name.startswith("ai/"):
+        return False
     
-    model_lower = model_part.lower()
+    model_name = model.docker_name[3:]  # Remove "ai/" prefix
+    if ":" in model_name:
+        model_name = model_name.split(":")[0]  # Remove tag
+    
+    # Check if model name contains any unavailable model names
+    model_lower = model_name.lower()
     return any(unavailable in model_lower for unavailable in unavailable_models)
 
 
