@@ -28,9 +28,9 @@ import sys
 from lib import config
 from lib import docker
 from lib import hardware
+from lib import ide
 from lib import models
 from lib import ui
-from lib import vscode
 
 
 def main() -> int:
@@ -39,7 +39,7 @@ def main() -> int:
     
     ui.print_header("🚀 Docker Model Runner + Continue.dev Setup")
     ui.print_info("This script will help you set up a locally hosted LLM")
-    ui.print_info("via Docker Model Runner and configure Continue.dev for VS Code.")
+    ui.print_info("via Docker Model Runner and configure Continue.dev for VS Code and IntelliJ IDEA.")
     print()
     
     if not ui.prompt_yes_no("Ready to begin setup?", default=True):
@@ -53,7 +53,28 @@ def main() -> int:
     print()
     hw_info = hardware.detect_hardware()
     
-    # Step 2: Check Docker
+    # Step 2: IDE selection
+    print()
+    ui.print_subheader("IDE Selection")
+    ide_choices = ["VS Code only", "IntelliJ only", "Both"]
+    ide_choice_idx = ui.prompt_choice("Which IDE(s) do you want to configure?", ide_choices, default=2)
+    
+    # Map choice to target_ide list
+    if ide_choice_idx == 0:
+        target_ide = ["vscode"]
+    elif ide_choice_idx == 1:
+        target_ide = ["intellij"]
+    else:  # Both
+        target_ide = ["vscode", "intellij"]
+    
+    ide_names = []
+    if "vscode" in target_ide:
+        ide_names.append("VS Code")
+    if "intellij" in target_ide:
+        ide_names.append("IntelliJ IDEA")
+    ui.print_success(f"Selected: {', '.join(ide_names)}")
+    
+    # Step 3: Check Docker
     print()
     docker_ok, docker_version = docker.check_docker()
     if not docker_ok:
@@ -64,7 +85,7 @@ def main() -> int:
     
     hw_info.docker_version = docker_version
     
-    # Step 3: Check Docker Model Runner
+    # Step 4: Check Docker Model Runner
     print()
     dmr_ok = docker.check_docker_model_runner(hw_info)
     if not dmr_ok:
@@ -72,11 +93,11 @@ def main() -> int:
         ui.print_error("Docker Model Runner is required but not available.")
         return 1
     
-    # Step 4: Preset selection
+    # Step 5: Preset selection
     print()
     preset = models.select_preset(hw_info)
     
-    # Step 5: Model selection
+    # Step 6: Model selection
     print()
     if preset and preset != "Custom":
         # Use portfolio recommendation for preset
@@ -94,11 +115,11 @@ def main() -> int:
         ui.print_error("No models selected. Aborting setup.")
         return 1
     
-    # Step 6: Display RAM usage
+    # Step 7: Display RAM usage
     print()
     models.display_ram_usage(selected_models, hw_info)
     
-    # Step 7: Validate selection
+    # Step 8: Validate selection
     print()
     ui.print_subheader("Safety Validation")
     is_valid, warnings = models.validate_model_selection(selected_models, hw_info)
@@ -114,7 +135,7 @@ def main() -> int:
             ui.print_info("Setup cancelled.")
             return 0
     
-    # Step 8: Confirm selection
+    # Step 9: Confirm selection
     print()
     ui.print_subheader("Configuration Summary")
     total_ram = sum(m.ram_gb for m in selected_models)
@@ -123,31 +144,32 @@ def main() -> int:
         variant_info = f" ({model.selected_variant})" if model.selected_variant else ""
         print(f"    • {model.name}{variant_info} (~{model.ram_gb:.1f}GB RAM)")
     print(f"  Total estimated RAM: ~{total_ram:.1f}GB")
+    print(f"  Target IDE(s): {', '.join(ide_names)}")
     print()
     
     if not ui.prompt_yes_no("Proceed with this configuration?", default=True):
         ui.print_info("Setup cancelled. Run again to reconfigure.")
         return 0
     
-    # Step 9: Pull models
+    # Step 10: Pull models
     print()
     pulled_models = models.pull_models_docker(selected_models, hw_info)
     
-    # Step 10: Generate config
+    # Step 11: Generate config
     print()
-    config_path = config.generate_continue_config(pulled_models, hw_info)
+    config_path = config.generate_continue_config(pulled_models, hw_info, target_ide=target_ide)
     
-    # Step 11: Generate global-rule.md
+    # Step 12: Generate global-rule.md
     print()
     rule_path = config.generate_global_rule()
     
-    # Step 12: Save setup summary
+    # Step 13: Save setup summary
     print()
     summary_path = config.save_setup_summary(pulled_models, hw_info)
     
-    # Step 13: Show next steps
+    # Step 14: Show next steps
     print()
-    vscode.show_next_steps(config_path, pulled_models, hw_info)
+    ide.show_next_steps(config_path, pulled_models, hw_info, target_ide=target_ide)
     
     return 0
 

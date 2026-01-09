@@ -19,9 +19,9 @@ class HardwareTier(Enum):
     """Hardware tier classification based on RAM."""
     S = "S"  # >64GB RAM
     A = "A"  # 32-64GB RAM
-    B = "B"  # 17-32GB RAM
-    C = "C"  # 8-17GB RAM
-    D = "D"  # <8GB RAM
+    B = "B"  # >24-32GB RAM
+    C = "C"  # 16-24GB RAM
+    D = "D"  # <16GB RAM (unsupported - minimum 16GB required)
 
 
 @dataclass
@@ -57,9 +57,9 @@ class HardwareInfo:
         labels = {
             HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB detected",
             HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.B: f"Tier B (17-32GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.C: f"Tier C (8-17GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.D: f"Tier D (<8GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.B: f"Tier B (>24-32GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.C: f"Tier C (16-24GB RAM) - {self.ram_gb:.1f}GB detected",
+            HardwareTier.D: f"Tier D (<16GB RAM) - {self.ram_gb:.1f}GB detected (UNSUPPORTED - minimum 16GB required)",
         }
         return labels.get(self.tier, "Unknown")
     
@@ -318,21 +318,29 @@ def detect_hardware() -> HardwareInfo:
                 info.gpu_vram_gb = float(parts[1].strip()) / 1024
                 info.has_nvidia = True
     
+    # Validate minimum RAM requirement (16GB)
+    if info.ram_gb < 16:
+        ui.print_error(f"Insufficient RAM: {info.ram_gb:.1f}GB detected")
+        ui.print_error("Minimum 16GB RAM required for Docker Model Runner setup")
+        ui.print_error("Please upgrade your hardware to at least 16GB RAM")
+        raise SystemExit("Hardware requirements not met: Minimum 16GB RAM required")
+    
     # Calculate usable RAM and OS overhead
     os_overhead = info.calculate_os_overhead()
     info.usable_ram_gb = max(0, info.ram_gb - os_overhead)
     
     # Classify tier based on total RAM
-    # New tier system: S (>64GB), A (32-64GB), B (17-32GB), C (8-17GB), D (<8GB)
+    # Updated tier system: S (>64GB), A (32-64GB), B (>24-32GB), C (16-24GB), D (<16GB - unsupported)
     if info.ram_gb > 64:
         info.tier = HardwareTier.S
     elif info.ram_gb >= 32:
         info.tier = HardwareTier.A
-    elif info.ram_gb >= 17:
+    elif info.ram_gb > 24:
         info.tier = HardwareTier.B
-    elif info.ram_gb >= 8:
+    elif info.ram_gb >= 16:
         info.tier = HardwareTier.C
     else:
+        # This should never be reached due to validation above, but kept for safety
         info.tier = HardwareTier.D
     
     # Print detected hardware

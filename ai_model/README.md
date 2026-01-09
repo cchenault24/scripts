@@ -1,6 +1,6 @@
 # Docker Model Runner + Continue.dev Setup
 
-A comprehensive, interactive Python script for setting up locally hosted Large Language Models (LLMs) via Docker Model Runner (DMR) and configuring Continue.dev for VS Code. Optimized for Mac with Apple Silicon (M1/M2/M3/M4) and supports Linux/Windows with NVIDIA GPUs.
+A comprehensive, interactive Python script for setting up locally hosted Large Language Models (LLMs) via Docker Model Runner (DMR) and configuring Continue.dev for VS Code and IntelliJ IDEA. Optimized for Mac with Apple Silicon (M1/M2/M3/M4) and supports Linux/Windows with NVIDIA GPUs.
 
 ## 📋 Table of Contents
 
@@ -13,6 +13,7 @@ A comprehensive, interactive Python script for setting up locally hosted Large L
 - [Project Structure](#project-structure)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
+- [IDE Support](#ide-support)
 - [Hardware Tiers](#hardware-tiers)
 - [Model Catalog](#model-catalog)
 - [Troubleshooting](#troubleshooting)
@@ -28,7 +29,7 @@ This project provides an automated setup solution for running LLMs locally using
 - Detects your hardware capabilities (CPU, RAM, GPU)
 - Recommends appropriate models based on your system
 - Pulls and configures models via Docker Model Runner
-- Generates Continue.dev configuration files for VS Code
+- Generates Continue.dev configuration files for VS Code and IntelliJ IDEA
 - Generates global rules file for assistant behavior
 - Sets up the complete development environment
 
@@ -46,6 +47,7 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 - **Continue.dev Configuration**: Generates both YAML and JSON config files
 - **Global Rules**: Automatically generates `global-rule.md` with assistant behavior rules
 - **VS Code Integration**: Optional automatic extension installation and setup
+- **IntelliJ IDEA Support**: Full support for IntelliJ IDEA with Continue plugin
 
 ### Advanced Features
 
@@ -75,8 +77,8 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 
 ### Hardware Recommendations
 
-- **Minimum**: 8GB RAM (Tier D)
-- **Recommended**: 16GB+ RAM (Tier B or higher)
+- **Minimum**: 16GB RAM (Tier C) - systems with less than 16GB RAM are not supported
+- **Recommended**: 24GB+ RAM (Tier B or higher)
 - **Optimal**: 32GB+ RAM (Tier A or S) for larger models
 
 ### Optional Dependencies
@@ -150,9 +152,9 @@ The script will:
 The script offers presets based on your hardware tier:
 - **Tier S** (>64GB RAM): Large models for complex tasks
 - **Tier A** (32-64GB RAM): High-quality models
-- **Tier B** (17-32GB RAM): Balanced models
-- **Tier C** (8-17GB RAM): Efficient models
-- **Tier D** (<8GB RAM): Minimal models
+- **Tier B** (>24-32GB RAM): Balanced models
+- **Tier C** (16-24GB RAM): Efficient models
+- **Tier D** (<16GB RAM): Unsupported - minimum 16GB RAM required
 
 ### Custom Selection
 
@@ -168,15 +170,16 @@ python3 docker-llm-setup.py
 
 **Interactive Flow:**
 1. Hardware detection
-2. Docker verification
-3. Docker Model Runner check
-4. Preset selection (or Custom)
-5. Model selection (with recommendations)
-6. RAM usage validation
-7. Model pulling
-8. Configuration generation
-9. Global rules generation
-10. Next steps display
+2. IDE selection (VS Code, IntelliJ IDEA, or Both)
+3. Docker verification
+4. Docker Model Runner check
+5. Preset selection (or Custom)
+6. Model selection (with recommendations)
+7. RAM usage validation
+8. Model pulling
+9. Configuration generation
+10. Global rules generation
+11. Next steps display
 
 ### Uninstall Script
 
@@ -195,9 +198,64 @@ python3 docker-llm-uninstall.py --skip-models
 # Skip config file removal
 python3 docker-llm-uninstall.py --skip-config
 
-# Skip VS Code extension removal
+# Skip both VS Code extension and IntelliJ plugin removal
 python3 docker-llm-uninstall.py --skip-extension
+
+# Skip only VS Code extension removal
+python3 docker-llm-uninstall.py --skip-vscode
+
+# Skip only IntelliJ plugin removal
+python3 docker-llm-uninstall.py --skip-intellij
 ```
+
+### IDE-Specific Uninstallation
+
+The uninstaller detects which IDE(s) have Continue installed:
+
+- **Both IDEs installed**: You'll be prompted to choose:
+  - VS Code only
+  - IntelliJ only
+  - Both
+  - Neither (skip plugin removal)
+
+- **Only one IDE installed**: You'll be asked to confirm uninstallation for that IDE
+
+- **Config files**: The script warns that config files are shared between IDEs and asks for confirmation before removing
+
+### Manual Cleanup
+
+If the uninstaller doesn't work:
+
+```bash
+# Remove models manually
+docker model rm <model-name>
+
+# Remove config files (shared between both IDEs)
+rm ~/.continue/config.yaml
+rm ~/.continue/config.json
+rm ~/.continue/rules/global-rule.md
+
+# Restore backups
+cp ~/.continue/config.yaml.backup ~/.continue/config.yaml
+cp ~/.continue/rules/global-rule.md.backup ~/.continue/rules/global-rule.md
+
+# Remove VS Code extension manually
+# Press Cmd+Shift+X (macOS) or Ctrl+Shift+X (Linux/Windows)
+# Search for 'Continue' → Click Uninstall
+
+# Remove IntelliJ plugin manually
+# Open IntelliJ IDEA → Preferences/Settings → Plugins
+# Search for 'Continue' → Click Uninstall
+```
+
+### IntelliJ Plugin Uninstallation Notes
+
+- **IntelliJ must be closed**: The uninstaller will warn if IntelliJ is running
+- **Plugin directories**: Located at:
+  - macOS: `~/Library/Application Support/JetBrains/*/plugins/Continue`
+  - Linux: `~/.local/share/JetBrains/*/plugins/Continue`
+  - Windows: `%APPDATA%\JetBrains\*\plugins\Continue`
+- **Manual removal**: If automatic removal fails, you can delete the plugin directory directly or use IntelliJ's UI
 
 ### Docker Model Runner Commands
 
@@ -233,7 +291,7 @@ ai_model/
     ├── models.py                # Model catalog & selection
     ├── ui.py                    # Terminal UI utilities
     ├── utils.py                 # General utilities
-    └── vscode.py                # VS Code integration
+    └── ide.py                   # IDE integration (VS Code & IntelliJ)
 ```
 
 ## 🏗️ Architecture
@@ -243,6 +301,7 @@ ai_model/
 #### `docker-llm-setup.py`
 Main entry point. Orchestrates the setup workflow:
 - Hardware detection
+- IDE selection (VS Code, IntelliJ, or Both)
 - Docker verification
 - Model selection
 - Configuration generation
@@ -279,11 +338,14 @@ Continue.dev configuration generation:
 - **save_setup_summary()**: Saves setup summary JSON
 - **generate_yaml()**: YAML generation utility
 
-#### `lib/vscode.py`
-VS Code integration:
-- **install_vscode_extension()**: Installs Continue.dev extension
-- **show_next_steps()**: Displays post-setup instructions
+#### `lib/ide.py`
+IDE integration for VS Code and IntelliJ IDEA:
+- **install_vscode_extension()**: Installs Continue.dev extension in VS Code
+- **detect_intellij_cli()**: Detects IntelliJ IDEA CLI command
+- **install_intellij_plugin()**: Installs Continue plugin in IntelliJ IDEA
 - **restart_vscode()**: Restarts VS Code (macOS)
+- **restart_intellij()**: Restarts IntelliJ IDEA (macOS)
+- **show_next_steps()**: Displays post-setup instructions for selected IDE(s)
 
 #### `lib/ui.py`
 Terminal UI utilities:
@@ -303,21 +365,30 @@ User Input
     ↓
 Hardware Detection → Tier Classification
     ↓
+IDE Selection (VS Code, IntelliJ, or Both)
+    ↓
 Preset Selection → Model Recommendations
     ↓
 Model Selection → RAM Validation
     ↓
 Model Pulling → Configuration Generation → Global Rules Generation
     ↓
-VS Code Setup → Next Steps
+IDE Setup → Next Steps
 ```
 
 ## ⚙️ Configuration
 
 ### Continue.dev Config Location
 
-- **macOS/Linux**: `~/.continue/config.yaml`
-- **Windows**: `%USERPROFILE%\.continue\config.yaml`
+Both VS Code and IntelliJ IDEA use the same config location:
+- **macOS/Linux**: `~/.continue/config.json` (and `config.yaml` for VS Code)
+- **Windows**: `%USERPROFILE%\.continue\config.json` (and `config.yaml` for VS Code)
+
+**Note**: 
+- VS Code uses both `config.yaml` and `config.json` (YAML is preferred)
+- IntelliJ IDEA uses only `config.json` (does not support YAML)
+- When selecting "Both" IDEs, the script generates both formats
+- When selecting "IntelliJ only", only `config.json` is generated
 
 ### Global Rules Location
 
@@ -393,8 +464,78 @@ context:
 ### Backup Files
 
 The script automatically backs up existing configs to:
-- `~/.continue/config.yaml.backup`
+- `~/.continue/config.yaml.backup` (if YAML exists)
+- `~/.continue/config.json.backup` (if JSON exists)
 - `~/.continue/rules/global-rule.md.backup`
+
+## 💻 IDE Support
+
+The setup script supports both VS Code and IntelliJ IDEA with the Continue plugin/extension.
+
+### VS Code (Continue.dev Extension)
+
+**Installation:**
+- The script can automatically install the Continue.dev extension via VS Code CLI
+- Or install manually: Press `Cmd+Shift+X` (macOS) or `Ctrl+Shift+X` (Linux/Windows) → Search "Continue" → Install
+
+**Keyboard Shortcuts:**
+- **macOS**: 
+  - `Cmd+L` - Open Continue.dev chat
+  - `Cmd+K` - Inline code edits
+  - `Cmd+I` - Quick actions
+- **Linux/Windows**: 
+  - `Ctrl+L` - Open Continue.dev chat
+  - `Ctrl+K` - Inline code edits
+  - `Ctrl+I` - Quick actions
+
+**Config Files:**
+- Uses both `config.yaml` and `config.json`
+- YAML is the preferred format for VS Code
+
+### IntelliJ IDEA (Continue Plugin)
+
+**Installation:**
+- Install manually via IntelliJ IDEA:
+  - **macOS**: Preferences → Plugins (or `Cmd+,` then Plugins)
+  - **Linux/Windows**: Settings → Plugins (or `Ctrl+Alt+S` then Plugins)
+  - Search for "Continue" and click Install
+
+**Keyboard Shortcuts:**
+- **macOS**: 
+  - `Cmd+J` - Open Continue chat
+  - `Cmd+Shift+J` - Inline edit
+- **Linux/Windows**: 
+  - `Ctrl+J` - Open Continue chat
+  - `Ctrl+Shift+J` - Inline edit
+
+**Config Files:**
+- Uses only `config.json` (IntelliJ doesn't support YAML configs)
+- Same location as VS Code: `~/.continue/config.json`
+
+**Verification:**
+After installing the plugin and generating config:
+1. Open IntelliJ IDEA
+2. Press `Cmd+J` (or `Ctrl+J`) to open Continue
+3. Check that your models appear in the model selector
+4. If models don't appear:
+   - Verify config file exists: `~/.continue/config.json`
+   - Check model server is running: `docker model list`
+   - Restart IntelliJ IDEA if needed
+
+### Shared Features
+
+Both IDEs support:
+- **@Codebase** - Semantic code search
+- **@file** - Reference specific files
+- **@folder** - Reference entire folders
+- **Global Rules** - Same `global-rule.md` file works for both IDEs
+
+### IDE Selection During Setup
+
+When running the setup script, you'll be prompted to select:
+- **VS Code only** - Generates YAML and JSON configs
+- **IntelliJ only** - Generates JSON config only
+- **Both** - Generates both YAML and JSON (recommended if you use both IDEs)
 
 ## 🖥️ Hardware Tiers
 
@@ -404,9 +545,9 @@ The script classifies hardware into tiers based on total RAM. Model selections a
 |------|-----------|-------------|----------------|
 | **S** | >64GB | High-end workstations | 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) |
 | **A** | 32-64GB | Professional systems | 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) |
-| **B** | 17-32GB | Mid-range systems | 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) |
-| **C** | 8-17GB | Entry-level systems | 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) |
-| **D** | <8GB | Minimal systems | 3B general (Q4) + 1B utility (Q4) |
+| **B** | >24-32GB | Mid-range systems | 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) |
+| **C** | 16-24GB | Entry-level systems | 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) |
+| **D** | <16GB | Unsupported | Minimum 16GB RAM required |
 
 ### RAM Budget Allocation
 
@@ -433,7 +574,7 @@ For Apple Silicon Macs:
 - **Medium-Large** (Tier A): 34B reasoning models (Llama 3.3), 13B coding models (Granite 4.0)
 - **Medium** (Tier B): 13B general models (Llama 3.2), 7B coding models (Phi-4)
 - **Small** (Tier C): 7B general models (Llama 3.2), 3B coding models (Granite Nano)
-- **Minimal** (Tier D): 3B general models, 1B utility models
+- **Tier D**: Unsupported - minimum 16GB RAM required
 
 #### Autocomplete Models
 - **Ultra-fast**: 3B models (Granite Nano), 1B models (TinyLlama)
@@ -513,6 +654,33 @@ Valid roles per Continue.dev schema:
 4. Check VS Code output panel for errors
 5. Reinstall Continue.dev extension
 
+### IntelliJ IDEA Plugin Not Working
+
+**Problem**: Continue plugin doesn't load config or models don't appear
+
+**Solutions**:
+1. Restart IntelliJ IDEA completely (quit and reopen)
+2. Check config file exists: `~/.continue/config.json` (not YAML - IntelliJ doesn't use YAML)
+3. Verify JSON syntax is valid: `cat ~/.continue/config.json | python3 -m json.tool`
+4. Check IntelliJ IDEA Event Log: Help → Show Log in Finder/Explorer
+5. Verify plugin is installed: Preferences → Plugins → Installed → Search "Continue"
+6. Reinstall Continue plugin if needed
+7. Check that model server is running: `docker model list`
+8. Verify API endpoint is accessible: `curl http://localhost:12434/v1/models`
+9. If models still don't appear:
+   - Check IntelliJ IDEA version compatibility (plugin may require specific version)
+   - Try invalidating caches: File → Invalidate Caches / Restart
+
+**Problem**: IntelliJ IDEA CLI not found
+
+**Solutions**:
+1. IntelliJ IDEA CLI is optional - plugin installation can be done manually
+2. To enable CLI on macOS:
+   - Open IntelliJ IDEA
+   - Tools → Create Command-line Launcher
+   - Or check: `/Applications/IntelliJ IDEA.app/Contents/MacOS/idea`
+3. On Linux/Windows, CLI may be in different locations - manual installation is recommended
+
 ### Apple Silicon Issues
 
 **Problem**: Models run slowly or use CPU instead of GPU
@@ -536,6 +704,9 @@ This will:
 2. Remove Continue.dev config files (optional)
 3. Restore backup config if available (optional)
 4. Remove VS Code extension (optional)
+5. Remove IntelliJ IDEA plugin (optional)
+
+The script will automatically detect which IDE(s) have Continue installed and ask which to uninstall.
 
 ### Selective Uninstallation
 
@@ -547,7 +718,52 @@ python3 docker-llm-uninstall.py --skip-config --skip-extension
 
 # Only remove config files
 python3 docker-llm-uninstall.py --skip-models --skip-extension
+
+# Uninstall from VS Code only
+python3 docker-llm-uninstall.py --skip-intellij
+
+# Uninstall from IntelliJ only
+python3 docker-llm-uninstall.py --skip-vscode
+
+# Skip both IDE plugins but remove models/config
+python3 docker-llm-uninstall.py --skip-extension
 ```
+
+### Command-Line Options
+
+```bash
+# Skip Docker checks (useful if Docker is hanging)
+python3 docker-llm-uninstall.py --skip-docker-checks
+
+# Skip model removal
+python3 docker-llm-uninstall.py --skip-models
+
+# Skip config file removal
+python3 docker-llm-uninstall.py --skip-config
+
+# Skip both VS Code extension and IntelliJ plugin removal
+python3 docker-llm-uninstall.py --skip-extension
+
+# Skip only VS Code extension removal
+python3 docker-llm-uninstall.py --skip-vscode
+
+# Skip only IntelliJ plugin removal
+python3 docker-llm-uninstall.py --skip-intellij
+```
+
+### IDE-Specific Uninstallation
+
+The uninstaller detects which IDE(s) have Continue installed:
+
+- **Both IDEs installed**: You'll be prompted to choose:
+  - VS Code only
+  - IntelliJ only
+  - Both
+  - Neither (skip plugin removal)
+
+- **Only one IDE installed**: You'll be asked to confirm uninstallation for that IDE
+
+- **Config files**: The script warns that config files are shared between IDEs and asks for confirmation before removing
 
 ### Manual Cleanup
 
@@ -557,7 +773,7 @@ If the uninstaller doesn't work:
 # Remove models manually
 docker model rm <model-name>
 
-# Remove config files
+# Remove config files (shared between both IDEs)
 rm ~/.continue/config.yaml
 rm ~/.continue/config.json
 rm ~/.continue/rules/global-rule.md
@@ -565,7 +781,24 @@ rm ~/.continue/rules/global-rule.md
 # Restore backups
 cp ~/.continue/config.yaml.backup ~/.continue/config.yaml
 cp ~/.continue/rules/global-rule.md.backup ~/.continue/rules/global-rule.md
+
+# Remove VS Code extension manually
+# Press Cmd+Shift+X (macOS) or Ctrl+Shift+X (Linux/Windows)
+# Search for 'Continue' → Click Uninstall
+
+# Remove IntelliJ plugin manually
+# Open IntelliJ IDEA → Preferences/Settings → Plugins
+# Search for 'Continue' → Click Uninstall
 ```
+
+### IntelliJ Plugin Uninstallation Notes
+
+- **IntelliJ must be closed**: The uninstaller will warn if IntelliJ is running
+- **Plugin directories**: Located at:
+  - macOS: `~/Library/Application Support/JetBrains/*/plugins/Continue`
+  - Linux: `~/.local/share/JetBrains/*/plugins/Continue`
+  - Windows: `%APPDATA%\JetBrains\*\plugins\Continue`
+- **Manual removal**: If automatic removal fails, you can delete the plugin directory directly or use IntelliJ's UI
 
 ## 💻 Development
 
@@ -668,7 +901,7 @@ MIT License - See LICENSE file for details.
   - Tier A: 70B → 34B reasoning, 34B → 13B coding, 13B → 7B multimodal
   - Tier B: 34B → 13B general, 13B → 7B coding, 7B → 3B multimodal
   - Tier C: 13B → 7B general, 7B → 3B coding, 3B → 1B utility
-  - Tier D: 7B → 3B general, 3B → 1B utility
+  - Tier D: Unsupported - minimum 16GB RAM required
 - **Conservative RAM budgets**: Updated allocations for proper headroom
   - Primary budget: 70% → 50% of usable RAM
   - Specialized budget: 25% → 30% of usable RAM

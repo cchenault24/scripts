@@ -7,6 +7,7 @@ docker-llm-setup.py, including:
 - Docker Model Runner models
 - Continue.dev configuration files
 - VS Code Continue.dev extension (optional)
+- IntelliJ IDEA Continue plugin (optional)
 
 Author: AI-Generated for Local LLM Development
 License: MIT
@@ -347,9 +348,19 @@ def uninstall_models(models: List[str]) -> int:
     return removed
 
 
-def uninstall_config_files(restore_backup: bool = False) -> bool:
-    """Uninstall Continue.dev config files."""
+def uninstall_config_files(restore_backup: bool = False, warn_shared: bool = True) -> bool:
+    """
+    Uninstall Continue.dev config files.
+    
+    Args:
+        restore_backup: Whether to restore backup before removing
+        warn_shared: Whether to warn that config is shared between IDEs
+    """
     print_subheader("Removing Continue.dev Configuration")
+    
+    if warn_shared:
+        print_info("Note: Config files are shared between VS Code and IntelliJ IDEA")
+        print()
     
     config_yaml, config_json, backup_yaml = get_config_files()
     
@@ -424,6 +435,71 @@ def uninstall_config_files(restore_backup: bool = False) -> bool:
     return removed_any
 
 
+def check_vscode_extension_installed() -> bool:
+    """Check if VS Code Continue.dev extension is installed."""
+    code_path = shutil.which("code")
+    if not code_path:
+        return False
+    
+    code, stdout, _ = run_command(["code", "--list-extensions"], timeout=10)
+    if code != 0:
+        return False
+    
+    return "Continue.continue" in stdout
+
+
+def check_intellij_plugin_installed() -> Tuple[bool, List[Path]]:
+    """
+    Check if IntelliJ Continue plugin is installed.
+    
+    Returns:
+        Tuple of (is_installed, list of plugin paths found)
+    """
+    plugin_paths = []
+    
+    # Check common plugin directories based on OS
+    if platform.system() == "Darwin":
+        base_dirs = [
+            Path.home() / "Library/Application Support/JetBrains",
+        ]
+    elif platform.system() == "Linux":
+        base_dirs = [
+            Path.home() / ".local/share/JetBrains",
+        ]
+    else:  # Windows
+        appdata = os.getenv("APPDATA", "")
+        if appdata:
+            base_dirs = [Path(appdata) / "JetBrains"]
+        else:
+            base_dirs = []
+    
+    for base_dir in base_dirs:
+        if base_dir.exists():
+            # Search for Continue plugin in any JetBrains product
+            for product_dir in base_dir.iterdir():
+                if product_dir.is_dir():
+                    plugins_dir = product_dir / "plugins"
+                    if plugins_dir.exists():
+                        continue_plugin = plugins_dir / "Continue"
+                        if continue_plugin.exists():
+                            plugin_paths.append(continue_plugin)
+    
+    return len(plugin_paths) > 0, plugin_paths
+
+
+def check_intellij_running() -> bool:
+    """Check if IntelliJ IDEA is currently running."""
+    if platform.system() == "Darwin":
+        code, _, _ = run_command(["pgrep", "-f", "IntelliJ IDEA"], timeout=5)
+        return code == 0
+    elif platform.system() == "Linux":
+        code, _, _ = run_command(["pgrep", "-f", "idea"], timeout=5)
+        return code == 0
+    else:  # Windows
+        code, _, _ = run_command(["tasklist", "/FI", "IMAGENAME eq idea64.exe"], timeout=5)
+        return code == 0
+
+
 def uninstall_vscode_extension() -> bool:
     """Uninstall Continue.dev VS Code extension."""
     print_subheader("Removing VS Code Extension")
@@ -432,22 +508,19 @@ def uninstall_vscode_extension() -> bool:
     if not code_path:
         print_warning("VS Code CLI not found. Cannot uninstall extension automatically.")
         print_info("You can uninstall manually:")
-        print_info("  • Press Cmd+Shift+X (macOS) or Ctrl+Shift+X (Windows/Linux)")
-        print_info("  • Search for 'Continue' and click Uninstall")
+        if platform.system() == "Darwin":
+            print_info("  • Press Cmd+Shift+X → Search for 'Continue' → Click Uninstall")
+        else:
+            print_info("  • Press Ctrl+Shift+X → Search for 'Continue' → Click Uninstall")
         return False
     
     # Check if extension is installed
-    code, stdout, _ = run_command(["code", "--list-extensions"], timeout=10)
-    if code != 0:
-        print_warning("Could not list VS Code extensions")
-        return False
-    
-    extension_id = "Continue.continue"
-    if extension_id not in stdout:
+    if not check_vscode_extension_installed():
         print_info("Continue.dev extension is not installed")
         return False
     
     # Uninstall the extension
+    extension_id = "Continue.continue"
     print_info(f"Uninstalling {extension_id}...")
     code, stdout, stderr = run_command(["code", "--uninstall-extension", extension_id], timeout=60)
     
@@ -457,12 +530,106 @@ def uninstall_vscode_extension() -> bool:
     else:
         print_error(f"Failed to uninstall extension: {stderr or stdout}")
         print_info("You can uninstall manually:")
-        print_info("  • Press Cmd+Shift+X (macOS) or Ctrl+Shift+X (Windows/Linux)")
-        print_info("  • Search for 'Continue' and click Uninstall")
+        if platform.system() == "Darwin":
+            print_info("  • Press Cmd+Shift+X → Search for 'Continue' → Click Uninstall")
+        else:
+            print_info("  • Press Ctrl+Shift+X → Search for 'Continue' → Click Uninstall")
         return False
 
 
-def show_summary(models_removed: int, config_removed: bool, extension_removed: bool) -> None:
+def uninstall_intellij_plugin() -> bool:
+    """Uninstall Continue plugin from IntelliJ IDEA."""
+    print_subheader("Removing IntelliJ IDEA Plugin")
+    
+    # Check if plugin is installed
+    is_installed, plugin_paths = check_intellij_plugin_installed()
+    if not is_installed:
+        print_info("Continue plugin is not installed in IntelliJ IDEA")
+        return False
+    
+    # Check if IntelliJ is running
+    if check_intellij_running():
+        print_warning("IntelliJ IDEA is currently running")
+        print_info("Please close IntelliJ IDEA before uninstalling the plugin")
+        if not prompt_yes_no("Continue anyway? (Plugin may not be fully removed)", default=False):
+            return False
+    
+    # Try using IntelliJ CLI if available
+    idea_path = shutil.which("idea")
+    if not idea_path:
+        # Check common installation paths
+        if platform.system() == "Darwin":
+            common_paths = [
+                "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea",
+                "/Applications/IntelliJ IDEA Ultimate.app/Contents/MacOS/idea",
+                "/Applications/IntelliJ IDEA Community Edition.app/Contents/MacOS/idea",
+            ]
+        elif platform.system() == "Linux":
+            common_paths = [
+                "/usr/local/bin/idea",
+                str(Path.home() / ".local/share/JetBrains/Toolbox/scripts/idea"),
+            ]
+        else:  # Windows
+            common_paths = [
+                str(Path.home() / "AppData/Local/JetBrains/Toolbox/scripts/idea.bat"),
+            ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                idea_path = path
+                break
+    
+    # Try CLI uninstallation (may not be supported in all versions)
+    if idea_path:
+        print_info("Attempting to uninstall via IntelliJ CLI...")
+        # Note: IntelliJ CLI plugin management syntax varies by version
+        # Try common patterns
+        code, _, _ = run_command([idea_path, "uninstall-plugin", "Continue.continue"], timeout=30)
+        if code == 0:
+            print_success("Plugin uninstalled via CLI")
+            return True
+        # Try alternative syntax
+        code, _, _ = run_command([idea_path, "--uninstall-plugin", "Continue.continue"], timeout=30)
+        if code == 0:
+            print_success("Plugin uninstalled via CLI")
+            return True
+    
+    # Manual removal fallback - delete plugin directories
+    print_info("Removing plugin directories manually...")
+    removed_any = False
+    for plugin_path in plugin_paths:
+        try:
+            if plugin_path.exists():
+                shutil.rmtree(plugin_path)
+                print_success(f"Removed plugin from {plugin_path.parent.parent.name}")
+                removed_any = True
+        except Exception as e:
+            print_error(f"Failed to remove {plugin_path}: {e}")
+    
+    if removed_any:
+        print_success("Plugin directories removed")
+        print_info("Note: You may need to restart IntelliJ IDEA for changes to take effect")
+        return True
+    else:
+        print_warning("Could not remove plugin automatically")
+        print_info("You can uninstall manually:")
+        if platform.system() == "Darwin":
+            print_info("  • Open IntelliJ IDEA")
+            print_info("  • Preferences → Plugins (or Cmd+, then Plugins)")
+            print_info("  • Search for 'Continue' → Click Uninstall")
+        else:
+            print_info("  • Open IntelliJ IDEA")
+            print_info("  • Settings → Plugins (or Ctrl+Alt+S then Plugins)")
+            print_info("  • Search for 'Continue' → Click Uninstall")
+        return False
+
+
+def show_summary(
+    models_removed: int, 
+    config_removed: bool, 
+    vscode_removed: bool,
+    intellij_removed: bool
+) -> None:
     """Show uninstallation summary."""
     print_header("✅ Uninstallation Complete!")
     
@@ -471,7 +638,8 @@ def show_summary(models_removed: int, config_removed: bool, extension_removed: b
     
     print(f"  Docker Models Removed: {models_removed}")
     print(f"  Config Files Removed: {'Yes' if config_removed else 'No'}")
-    print(f"  VS Code Extension Removed: {'Yes' if extension_removed else 'No'}")
+    print(f"  VS Code Extension Removed: {'Yes' if vscode_removed else 'No'}")
+    print(f"  IntelliJ Plugin Removed: {'Yes' if intellij_removed else 'No'}")
     print()
     
     print(colorize("━" * 60, Colors.DIM))
@@ -509,7 +677,17 @@ def main() -> int:
     parser.add_argument(
         "--skip-extension",
         action="store_true",
-        help="Skip VS Code extension removal"
+        help="Skip both VS Code extension and IntelliJ plugin removal"
+    )
+    parser.add_argument(
+        "--skip-vscode",
+        action="store_true",
+        help="Skip VS Code extension removal only"
+    )
+    parser.add_argument(
+        "--skip-intellij",
+        action="store_true",
+        help="Skip IntelliJ plugin removal only"
     )
     
     args = parser.parse_args()
@@ -643,6 +821,20 @@ def main() -> int:
                 print_info(f"Backup available: {backup_yaml}")
             print()
             
+            # Check if both IDEs might be using the config
+            vscode_has_extension = check_vscode_extension_installed()
+            intellij_has_plugin, _ = check_intellij_plugin_installed()
+            
+            if vscode_has_extension or intellij_has_plugin:
+                print_warning("Config files are shared between VS Code and IntelliJ IDEA")
+                if vscode_has_extension and intellij_has_plugin:
+                    print_info("Both IDEs appear to have Continue installed")
+                elif vscode_has_extension:
+                    print_info("VS Code has Continue extension installed")
+                elif intellij_has_plugin:
+                    print_info("IntelliJ IDEA has Continue plugin installed")
+                print()
+            
             choice = prompt_choice(
                 "What would you like to do with config files?",
                 ["Remove config files", "Restore backup and remove generated config", "Keep config files"],
@@ -650,8 +842,14 @@ def main() -> int:
             )
             
             if choice == 0:  # Remove
-                if prompt_yes_no("Remove Continue.dev config files?", default=False):
-                    config_removed = uninstall_config_files(restore_backup=False)
+                if vscode_has_extension or intellij_has_plugin:
+                    if not prompt_yes_no("This config is shared between IDEs. Remove anyway?", default=False):
+                        print_info("Keeping config files")
+                    else:
+                        config_removed = uninstall_config_files(restore_backup=False, warn_shared=False)
+                else:
+                    if prompt_yes_no("Remove Continue.dev config files?", default=False):
+                        config_removed = uninstall_config_files(restore_backup=False, warn_shared=False)
             elif choice == 1:  # Restore backup
                 if backup_yaml and backup_yaml.exists():
                     if prompt_yes_no("Restore backup and remove generated config?", default=False):
@@ -667,33 +865,74 @@ def main() -> int:
             print_subheader("Continue.dev Configuration Files")
             print_info("No config files found")
     
-    # Step 3: Remove VS Code extension (optional)
-    extension_removed = False
-    if args.skip_extension:
+    # Step 3: Remove IDE extensions/plugins
+    vscode_removed = False
+    intellij_removed = False
+    
+    # Check which IDEs have Continue installed
+    vscode_installed = check_vscode_extension_installed()
+    intellij_installed, intellij_paths = check_intellij_plugin_installed()
+    
+    # Determine which IDEs to process based on flags
+    skip_vscode = args.skip_extension or args.skip_vscode
+    skip_intellij = args.skip_extension or args.skip_intellij
+    
+    # If both are installed and neither is skipped, ask which to uninstall
+    if vscode_installed and intellij_installed and not skip_vscode and not skip_intellij:
         print()
-        print_subheader("VS Code Extension")
-        print_warning("Skipping VS Code extension removal (--skip-extension flag used)")
-    else:
+        print_subheader("IDE Extensions/Plugins")
+        print_info("Found Continue installed in both VS Code and IntelliJ IDEA")
         print()
-        print_subheader("VS Code Extension")
         
-        code_path = shutil.which("code")
-        if code_path:
-            code, stdout, _ = run_command(["code", "--list-extensions"], timeout=10)
-            if code == 0 and "Continue.continue" in stdout:
-                if prompt_yes_no("Remove Continue.dev VS Code extension?", default=False):
-                    extension_removed = uninstall_vscode_extension()
-                else:
-                    extension_removed = False
-            else:
-                print_info("Continue.dev extension is not installed")
-                extension_removed = False
-        else:
-            print_info("VS Code CLI not found - cannot check extension status")
+        choice = prompt_choice(
+            "Which IDE(s) would you like to uninstall Continue from?",
+            ["VS Code only", "IntelliJ only", "Both", "Neither (skip plugin removal)"],
+            default=2
+        )
+        
+        if choice == 0:  # VS Code only
+            skip_intellij = True
+        elif choice == 1:  # IntelliJ only
+            skip_vscode = True
+        elif choice == 3:  # Neither
+            skip_vscode = True
+            skip_intellij = True
+    
+    # Process VS Code extension
+    if skip_vscode:
+        if vscode_installed:
+            print()
+            print_subheader("VS Code Extension")
+            print_warning("Skipping VS Code extension removal")
+    elif vscode_installed:
+        print()
+        print_subheader("VS Code Extension")
+        if prompt_yes_no("Remove Continue.dev VS Code extension?", default=False):
+            vscode_removed = uninstall_vscode_extension()
+    elif not vscode_installed:
+        print()
+        print_subheader("VS Code Extension")
+        print_info("Continue.dev extension is not installed in VS Code")
+    
+    # Process IntelliJ plugin
+    if skip_intellij:
+        if intellij_installed:
+            print()
+            print_subheader("IntelliJ IDEA Plugin")
+            print_warning("Skipping IntelliJ plugin removal")
+    elif intellij_installed:
+        print()
+        print_subheader("IntelliJ IDEA Plugin")
+        if prompt_yes_no("Remove Continue plugin from IntelliJ IDEA?", default=False):
+            intellij_removed = uninstall_intellij_plugin()
+    elif not intellij_installed:
+        print()
+        print_subheader("IntelliJ IDEA Plugin")
+        print_info("Continue plugin is not installed in IntelliJ IDEA")
     
     # Show summary
     print()
-    show_summary(models_removed, config_removed, extension_removed)
+    show_summary(models_removed, config_removed, vscode_removed, intellij_removed)
     
     return 0
 

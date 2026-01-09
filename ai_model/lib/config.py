@@ -161,19 +161,45 @@ def save_setup_summary(
 def generate_continue_config(
     model_list: List[models.ModelInfo],
     hw_info: hardware.HardwareInfo,
-    output_path: Optional[Path] = None
+    output_path: Optional[Path] = None,
+    target_ide: Optional[List[str]] = None
 ) -> Path:
-    """Generate continue.dev config.yaml file."""
+    """
+    Generate continue.dev config files.
+    
+    Args:
+        model_list: List of selected models
+        hw_info: Hardware information
+        output_path: Optional output path (default: ~/.continue/config.yaml)
+        target_ide: List of IDEs to configure (e.g., ["vscode"], ["intellij"], or ["vscode", "intellij"])
+                   Defaults to ["vscode"] for backward compatibility.
+                   If "intellij" only, skips YAML generation (IntelliJ doesn't use YAML).
+    
+    Returns:
+        Path to saved config file (YAML if VS Code, JSON if IntelliJ only)
+    """
     # Input validation
     if not model_list:
         raise ValueError("model_list cannot be empty")
     if not hw_info:
         raise ValueError("hw_info is required")
     
+    # Default to VS Code for backward compatibility
+    if target_ide is None:
+        target_ide = ["vscode"]
+    
+    # Determine if we should generate YAML (VS Code uses YAML, IntelliJ doesn't)
+    generate_yaml = "vscode" in target_ide
+    
     ui.print_header("📝 Generating Continue.dev Configuration")
     
+    # Determine output path based on target IDE
     if output_path is None:
-        output_path = Path.home() / ".continue" / "config.yaml"
+        if generate_yaml:
+            output_path = Path.home() / ".continue" / "config.yaml"
+        else:
+            # IntelliJ only - use JSON path
+            output_path = Path.home() / ".continue" / "config.json"
     
     # Validate output path
     if output_path.parent and not output_path.parent.exists():
@@ -355,16 +381,21 @@ def generate_continue_config(
             "#   - Optimized quantization for Apple Silicon",
         ])
     
-    # Write YAML config
-    yaml_content = "\n".join(yaml_lines)
+    # Write YAML config (only if VS Code is in target_ide)
+    if generate_yaml:
+        yaml_content = "\n".join(yaml_lines)
+        
+        with open(output_path, "w") as f:
+            f.write(yaml_content)
+        
+        ui.print_success(f"Configuration saved to {output_path}")
     
-    with open(output_path, "w") as f:
-        f.write(yaml_content)
-    
-    ui.print_success(f"Configuration saved to {output_path}")
-    
-    # Also create a JSON version for compatibility
-    json_path = output_path.parent / "config.json"
+    # Always create JSON version (works for both VS Code and IntelliJ)
+    if generate_yaml:
+        json_path = output_path.parent / "config.json"
+    else:
+        # IntelliJ only - use the output_path for JSON
+        json_path = output_path
     
     # Build JSON config (using new schema format)
     # Note: 'name' and 'version' are REQUIRED fields per the Continue.dev config schema (config-yaml-schema.json)
@@ -455,7 +486,12 @@ def generate_continue_config(
     with open(json_path, "w") as f:
         json.dump(json_config, f, indent=2)
     
-    ui.print_info(f"JSON config also saved to {json_path}")
+    if generate_yaml:
+        ui.print_info(f"JSON config also saved to {json_path}")
+    else:
+        ui.print_success(f"Configuration saved to {json_path}")
+        # Return JSON path for IntelliJ-only case
+        return json_path
     
     return output_path
 

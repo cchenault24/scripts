@@ -198,7 +198,7 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Good balance of speed and quality"]
     ),
     # =========================================================================
-    # Chat/Edit Models - Medium (Tier B: 17-32GB RAM)
+    # Chat/Edit Models - Medium (Tier B: >24-32GB RAM)
     # =========================================================================
     ModelInfo(
         name="Phi-4",
@@ -222,7 +222,7 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Good balance of quality and speed"]
     ),
     # =========================================================================
-    # Chat/Edit Models - Small (All Tiers, optimized for Tier C: <17GB RAM)
+    # Chat/Edit Models - Small (All Tiers, optimized for Tier C: 16-24GB RAM)
     # =========================================================================
     # Note: Llama 3.2 8B is NOT available in Docker Model Runner
     # Docker Model Runner only provides ai/llama3.2 which is the 3B variant
@@ -1205,15 +1205,15 @@ def select_best_variant(
             if size <= 70 or ram_needed <= usable_ram:
                 tier_appropriate_tags.append(tag)
         elif hw_info.tier == hardware.HardwareTier.B:
-            # Tier B can handle 34B, 13B, 7B (upgraded from 13B, 7B, 3B)
+            # Tier B (>24-32GB) can handle 34B, 13B, 7B
             if size <= 40 or ram_needed <= usable_ram:
                 tier_appropriate_tags.append(tag)
         elif hw_info.tier == hardware.HardwareTier.C:
-            # Tier C can handle 13B, 7B, 3B (upgraded from 7B, 3B, 1B)
+            # Tier C (16-24GB) can handle 13B, 7B, 3B
             if size <= 15 or ram_needed <= usable_ram:
                 tier_appropriate_tags.append(tag)
-        else:  # Tier D
-            # Tier D can handle 7B, 3B (upgraded from 3B, 1B)
+        else:  # Tier D (should not occur - minimum 16GB required)
+            # Tier D (<16GB) is unsupported - this should never be reached
             if size <= 8 or ram_needed <= usable_ram:
                 tier_appropriate_tags.append(tag)
     
@@ -2351,9 +2351,9 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
     Tier-specific portfolios (DOWNGRADED - one size smaller for stability):
     - Tier S (>64GB): 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) + embed
     - Tier A (32-64GB): 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed
-    - Tier B (17-32GB): 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) + embed
-    - Tier C (8-17GB): 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) + embed
-    - Tier D (<8GB): 3B general (Q4) + 1B utility (Q4) + embed
+    - Tier B (>24-32GB): 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) + embed
+    - Tier C (16-24GB): 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) + embed
+    - Tier D (<16GB): Unsupported - minimum 16GB RAM required
     
     Args:
         hw_info: Hardware information
@@ -2574,39 +2574,11 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
             )
             recommended.append(model_info)
     
-    else:  # Tier D
-        # Tier D: 3B general (Q4) + 1B utility (Q4) + embed
-        primary_result = discover_best_model_by_criteria(3.0, "general", primary_budget, hw_info)
-        if primary_result:
-            model_name, variant = primary_result
-            model_info = ModelInfo(
-                name="Llama 3.2 (General)",
-                docker_name=f"ai/{model_name}",
-                description="3B general model",
-                ram_gb=calculate_model_ram(3.0, "Q4"),
-                context_length=131072,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.D],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        utility_result = discover_best_model_by_criteria(1.0, "coding", utility_budget, hw_info)
-        if utility_result:
-            model_name, variant = utility_result
-            model_info = ModelInfo(
-                name="TinyLlama (Utility)",
-                docker_name=f"ai/{model_name}",
-                description="1B utility model",
-                ram_gb=calculate_model_ram(1.0, "Q4"),
-                context_length=2048,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.D],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
+    else:  # Tier D - should never be reached (minimum 16GB required)
+        # Tier D (<16GB) is unsupported - hardware detection should have raised an error
+        ui.print_error("Tier D hardware detected - this should not be possible")
+        ui.print_error("Minimum 16GB RAM is required. Please upgrade your hardware.")
+        raise ValueError("Tier D hardware is unsupported - minimum 16GB RAM required")
     
     # Always add embedding model
     # Embedding models typically don't have variants, so use catalog models directly
