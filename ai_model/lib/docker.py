@@ -12,6 +12,7 @@ import urllib.request
 from typing import List, Tuple
 
 from . import hardware
+from . import models
 from . import ui
 from . import utils
 
@@ -129,6 +130,15 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
         
         # Store available models for later verification
         hw_info.available_api_models = available_api_models
+        
+        # Fetch available models from Docker Hub API (for verification)
+        ui.print_info("Fetching available models from Docker Hub...")
+        docker_hub_models = models.fetch_available_models_from_docker_hub()
+        if docker_hub_models:
+            hw_info.available_docker_hub_models = docker_hub_models
+            ui.print_info(f"Found {len(docker_hub_models)} model(s) available on Docker Hub")
+        else:
+            ui.print_warning("Could not fetch models from Docker Hub (will use fallback verification)")
         
         # Check for existing models
         lines = stdout.strip().split("\n")

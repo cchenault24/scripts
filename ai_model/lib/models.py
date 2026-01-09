@@ -7,6 +7,8 @@ Provides model information, catalog, discovery, selection, and pulling capabilit
 import json
 import re
 import subprocess
+import sys
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -15,6 +17,133 @@ from typing import Any, Dict, List, Optional
 from . import hardware
 from . import ui
 from . import utils
+
+# Try to import rich for better progress bars (lazy import - only when needed)
+RICH_AVAILABLE = False
+_rich_imported = False
+
+def _install_rich_background():
+    """Install rich in the background (non-blocking)."""
+    def install():
+        global RICH_AVAILABLE, _rich_imported
+        if RICH_AVAILABLE or _rich_imported:
+            return
+        
+        try:
+            # Try multiple installation methods
+            install_commands = [
+                [sys.executable, "-m", "pip", "install", "--quiet", "--user", "rich>=13.7.0"],
+                [sys.executable, "-m", "pip", "install", "--quiet", "--break-system-packages", "rich>=13.7.0"],
+                [sys.executable, "-m", "pip", "install", "--quiet", "rich>=13.7.0"],
+            ]
+            
+            for cmd in install_commands:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=60,
+                    text=True
+                )
+                if result.returncode == 0:
+                    # Try importing after successful installation
+                    try:
+                        from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, DownloadColumn, TransferSpeedColumn
+                        from rich.console import Console
+                        RICH_AVAILABLE = True
+                        break
+                    except ImportError:
+                        continue
+        except Exception:
+            # Silently fail in background
+            pass
+        finally:
+            _rich_imported = True
+    
+    # Start installation in background thread
+    thread = threading.Thread(target=install, daemon=True)
+    thread.start()
+    return thread
+
+
+def _ensure_rich_available():
+    """Ensure rich is available, installing it if necessary."""
+    global RICH_AVAILABLE, _rich_imported
+    
+    if RICH_AVAILABLE:
+        return True
+    
+    # First try: import if already installed
+    if not _rich_imported:
+        try:
+            from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, DownloadColumn, TransferSpeedColumn
+            from rich.console import Console
+            RICH_AVAILABLE = True
+            _rich_imported = True
+            return True
+        except ImportError:
+            _rich_imported = True  # Mark as tried so we don't try again
+    
+    # Second try: install and import
+    if not RICH_AVAILABLE:
+        try:
+            ui.print_info("Installing 'rich' for better progress bars...")
+            # Try multiple installation methods (for different Python environments)
+            install_commands = [
+                [sys.executable, "-m", "pip", "install", "--quiet", "--user", "rich>=13.7.0"],
+                [sys.executable, "-m", "pip", "install", "--quiet", "--break-system-packages", "rich>=13.7.0"],
+                [sys.executable, "-m", "pip", "install", "--quiet", "rich>=13.7.0"],
+            ]
+            
+            installed = False
+            last_error = None
+            for cmd in install_commands:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=60,
+                    text=True
+                )
+                if result.returncode == 0:
+                    installed = True
+                    break
+                else:
+                    # Capture error message for helpful feedback
+                    error_output = result.stderr.strip() if result.stderr else result.stdout.strip()
+                    if error_output:
+                        last_error = error_output
+            
+            if installed:
+                # Try importing again after installation
+                try:
+                    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, DownloadColumn, TransferSpeedColumn
+                    from rich.console import Console
+                    RICH_AVAILABLE = True
+                    ui.print_success("Successfully installed 'rich'")
+                    return True
+                except ImportError:
+                    ui.print_warning("Installed 'rich' but import failed - will use basic progress display")
+                    return False
+            else:
+                # Installation failed - provide helpful message based on error
+                ui.print_warning("Could not install 'rich' automatically")
+                if last_error and "externally-managed" in last_error.lower():
+                    ui.print_info("Your Python environment is externally managed (e.g., Homebrew)")
+                    ui.print_info("Install manually with one of these options:")
+                    ui.print_info("  1. pip install --user rich")
+                    ui.print_info("  2. pip install --break-system-packages rich")
+                    ui.print_info("  3. python3 -m pip install --user rich")
+                else:
+                    ui.print_info("You can install it manually with: pip install rich")
+                ui.print_info("Will use basic progress display (still functional)")
+                return False
+        except subprocess.TimeoutExpired:
+            ui.print_warning("Installation of 'rich' timed out - will use basic progress display")
+            return False
+        except (FileNotFoundError, ImportError, Exception) as e:
+            ui.print_warning(f"Could not install 'rich' - will use basic progress display")
+            return False
+    
+    return False
 
 
 @dataclass
@@ -28,6 +157,8 @@ class ModelInfo:
     roles: List[str]  # chat, autocomplete, embed, etc.
     tiers: List[hardware.HardwareTier]  # Which tiers can run this model
     recommended_for: List[str] = field(default_factory=list)
+    base_model_name: Optional[str] = None  # Base model name for variant discovery (e.g., "llama3.3")
+    selected_variant: Optional[str] = None  # Selected variant tag (e.g., "70B-Q4_K_M")
 
 
 # Model catalog for Docker Model Runner (DMR)
@@ -39,32 +170,34 @@ MODEL_CATALOG: List[ModelInfo] = [
     # Chat/Edit Models - Large (Tier S: 49GB+ RAM)
     # =========================================================================
     ModelInfo(
-        name="Llama 3.3 70B",
-        docker_name="ai.docker.com/meta/llama3.3:70b-instruct-q4_K_M",
-        description="70B - Highest quality for complex refactoring (Tier S only)",
-        ram_gb=35.0,
+        name="Llama 3.3",
+        docker_name="ai/llama3.3",
+        description="Highest quality for complex refactoring - variant auto-selected based on hardware",
+        ram_gb=35.0,  # Will be updated based on selected variant
         context_length=131072,
         roles=["chat", "edit", "agent"],
         tiers=[hardware.HardwareTier.S],
-        recommended_for=["Tier S primary model", "Complex refactoring"]
+        recommended_for=["Tier S primary model", "Complex refactoring"],
+        base_model_name="llama3.3"
     ),
     ModelInfo(
-        name="Llama 3.1 70B",
-        docker_name="ai.docker.com/meta/llama3.1:70b-instruct-q4_K_M",
-        description="70B - Excellent for architecture and complex tasks",
-        ram_gb=35.0,
+        name="Llama 3.1",
+        docker_name="ai/llama3.1",
+        description="Excellent for architecture and complex tasks - variant auto-selected based on hardware",
+        ram_gb=35.0,  # Will be updated based on selected variant
         context_length=131072,
         roles=["chat", "edit", "agent"],
         tiers=[hardware.HardwareTier.S],
-        recommended_for=["Tier S alternative"]
+        recommended_for=["Tier S alternative"],
+        base_model_name="llama3.1"
     ),
     # =========================================================================
     # Chat/Edit Models - Medium-Large (Tier A: 33-48GB RAM)
     # =========================================================================
     ModelInfo(
-        name="Qwen 2.5 Coder 32B",
-        docker_name="ai.docker.com/qwen/qwen2.5-coder:32b-instruct-q4_K_M",
-        description="32B - State-of-the-art open coding model",
+        name="Granite 4.0 H-Small",
+        docker_name="ai/granite-4.0-h-small",
+        description="IBM's Granite 4.0 coding model (small variant) - State-of-the-art code generation",
         ram_gb=18.0,
         context_length=131072,
         roles=["chat", "edit", "autocomplete"],
@@ -73,7 +206,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="Codestral 22B",
-        docker_name="ai.docker.com/mistral/codestral:22b-v0.1-q4_K_M",
+        docker_name="ai.docker.com/mistral/codestral:22b-v0.1",
         description="22B - Mistral's code generation model",
         ram_gb=12.0,
         context_length=32768,
@@ -82,11 +215,11 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Excellent code generation"]
     ),
     ModelInfo(
-        name="DeepSeek Coder V2 Lite 16B",
-        docker_name="ai.docker.com/deepseek/deepseek-coder-v2:16b-lite-instruct-q4_K_M",
-        description="16B - Fast and capable coding model",
+        name="Devstral Small",
+        docker_name="ai/devstral-small",
+        description="Mistral's Devstral coding model (small variant) - Fast and capable",
         ram_gb=9.0,
-        context_length=131072,
+        context_length=32768,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
         recommended_for=["Good balance of speed and quality"]
@@ -95,19 +228,20 @@ MODEL_CATALOG: List[ModelInfo] = [
     # Chat/Edit Models - Medium (Tier B: 17-32GB RAM)
     # =========================================================================
     ModelInfo(
-        name="Phi-4 14B",
-        docker_name="ai.docker.com/microsoft/phi4:14b-q4_K_M",
-        description="14B - Microsoft's state-of-the-art reasoning model",
-        ram_gb=8.0,
+        name="Phi-4",
+        docker_name="ai/phi4",
+        description="Microsoft's state-of-the-art reasoning model - variant auto-selected based on hardware",
+        ram_gb=8.0,  # Will be updated based on selected variant
         context_length=16384,
         roles=["chat", "edit", "agent"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B],
-        recommended_for=["Excellent reasoning", "Tier B primary"]
+        recommended_for=["Excellent reasoning", "Tier B primary"],
+        base_model_name="phi4"
     ),
     ModelInfo(
-        name="Qwen 2.5 Coder 14B",
-        docker_name="ai.docker.com/qwen/qwen2.5-coder:14b-instruct-q4_K_M",
-        description="14B - Strong coding with good performance",
+        name="Granite 4.0 H-Micro",
+        docker_name="ai/granite-4.0-h-micro",
+        description="IBM's Granite 4.0 coding model (micro variant) - Strong coding with good performance",
         ram_gb=8.0,
         context_length=131072,
         roles=["chat", "edit", "autocomplete"],
@@ -116,7 +250,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="CodeLlama 13B",
-        docker_name="ai.docker.com/meta/codellama:13b-instruct-q4_K_M",
+        docker_name="ai.docker.com/meta/codellama:13b-instruct",
         description="13B - Meta's code-specialized Llama",
         ram_gb=7.5,
         context_length=16384,
@@ -132,7 +266,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     # Keeping this commented out to prevent confusion
     # ModelInfo(
     #     name="Llama 3.2 8B",
-    #     docker_name="ai.docker.com/meta/llama3.2:8b-instruct-q5_K_M",
+    #     docker_name="ai.docker.com/meta/llama3.2:8b-instruct",
     #     description="8B - Fast general-purpose assistant",
     #     ram_gb=5.0,
     #     context_length=131072,
@@ -141,9 +275,9 @@ MODEL_CATALOG: List[ModelInfo] = [
     #     recommended_for=["All tiers", "Fast responses"]
     # ),
     ModelInfo(
-        name="Qwen 2.5 Coder 7B",
-        docker_name="ai.docker.com/qwen/qwen2.5-coder:7b-instruct-q4_K_M",
-        description="7B - Efficient coding model",
+        name="Granite 4.0 H-Nano",
+        docker_name="ai/granite-4.0-h-nano",
+        description="IBM's Granite 4.0 coding model (nano variant) - Efficient coding model",
         ram_gb=4.0,
         context_length=131072,
         roles=["chat", "edit", "autocomplete"],
@@ -152,7 +286,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     ),
     ModelInfo(
         name="CodeGemma 7B",
-        docker_name="ai.docker.com/google/codegemma:7b-it-q4_K_M",
+        docker_name="ai.docker.com/google/codegemma:7b-it",
         description="7B - Google's code-optimized model",
         ram_gb=4.0,
         context_length=8192,
@@ -165,7 +299,7 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="StarCoder2 3B",
-        docker_name="ai.docker.com/bigcode/starcoder2:3b-q4_K_M",
+        docker_name="ai.docker.com/bigcode/starcoder2:3b",
         description="3B - Ultra-fast autocomplete optimized for code",
         ram_gb=1.8,
         context_length=16384,
@@ -174,19 +308,20 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Fastest autocomplete", "Low memory"]
     ),
     ModelInfo(
-        name="Llama 3.2 3B",
-        docker_name="ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M",
-        description="3B - Small and efficient general model (available in Docker Model Runner as ai/llama3.2)",
-        ram_gb=1.8,
+        name="Llama 3.2",
+        docker_name="ai/llama3.2",
+        description="Small and efficient general model - variant auto-selected based on hardware",
+        ram_gb=1.8,  # Will be updated based on selected variant
         context_length=131072,
-        roles=["chat", "edit", "autocomplete"],  # Added "edit" since 8B is not available
+        roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["All tiers", "Quick edits", "Low memory", "Fast responses"]
+        recommended_for=["All tiers", "Quick edits", "Low memory", "Fast responses"],
+        base_model_name="llama3.2"
     ),
     ModelInfo(
-        name="Qwen 2.5 Coder 1.5B",
-        docker_name="ai.docker.com/qwen/qwen2.5-coder:1.5b-instruct-q8_0",
-        description="1.5B - Smallest coding model, very fast",
+        name="Granite 4.0 H-Tiny",
+        docker_name="ai/granite-4.0-h-tiny",
+        description="IBM's Granite 4.0 coding model (tiny variant) - Smallest coding model, very fast",
         ram_gb=1.0,
         context_length=131072,
         roles=["autocomplete"],
@@ -198,23 +333,34 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Nomic Embed Text v1.5",
-        docker_name="ai.docker.com/nomic/nomic-embed-text:v1.5",
+        docker_name="ai/nomic-embed-text-v1.5",
         description="Best open embedding model for code indexing (8192 tokens)",
         ram_gb=0.3,
         context_length=8192,
         roles=["embed"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Code indexing", "Semantic search"]
+        recommended_for=["Code indexing", "Semantic search"],
+        base_model_name="nomic-embed-text-v1.5"
     ),
     ModelInfo(
-        name="BGE-M3",
-        docker_name="ai.docker.com/baai/bge-m3:latest",
-        description="Multi-lingual embedding model from BAAI",
+        name="Granite Embedding Multilingual",
+        docker_name="ai/granite-embedding-multilingual",
+        description="IBM's Granite multilingual embedding model - Multi-lingual code and text embeddings",
         ram_gb=0.5,
         context_length=8192,
         roles=["embed"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
         recommended_for=["Multi-lingual codebases"]
+    ),
+    ModelInfo(
+        name="MXBAI Embed Large",
+        docker_name="ai/mxbai-embed-large",
+        description="Mixedbread AI's large embedding model - High-quality embeddings for code",
+        ram_gb=0.8,
+        context_length=8192,
+        roles=["embed"],
+        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
+        recommended_for=["High-quality code embeddings"]
     ),
     ModelInfo(
         name="All-MiniLM-L6-v2",
@@ -227,6 +373,53 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Minimal memory", "Simple search"]
     ),
 ]
+
+
+def discover_model_variants(base_model_name: str, hw_info: Optional[hardware.HardwareInfo] = None) -> List[str]:
+    """
+    Discover available variants of a model using docker search.
+    
+    For example, searching for 'ai/phi4' might reveal that 'ai/phi4' exists,
+    which helps verify our catalog models match what's actually available.
+    
+    Returns a list of found model names in 'ai/namespace' format.
+    """
+    variants = []
+    try:
+        # Extract just the model name part (e.g., 'phi4' from 'ai/phi4' or 'ai.docker.com/microsoft/phi4:14b')
+        search_query = base_model_name
+        if base_model_name.startswith("ai.docker.com/"):
+            # Extract model name from ai.docker.com format
+            remaining = base_model_name[len("ai.docker.com/"):]
+            parts = remaining.split("/")
+            if len(parts) > 1:
+                model_part = parts[1]
+            else:
+                model_part = parts[0]
+            if ":" in model_part:
+                model_part = model_part.split(":")[0]
+            search_query = f"ai/{model_part}"
+        elif not base_model_name.startswith("ai/"):
+            # If it's just a model name, add ai/ prefix
+            search_query = f"ai/{base_model_name}"
+        
+        # Use docker search to find variants
+        code, stdout, _ = utils.run_command(["docker", "search", search_query, "--limit", "25"], timeout=15)
+        if code == 0:
+            lines = stdout.strip().split("\n")
+            for line in lines[1:]:  # Skip header
+                if line.strip():
+                    parts = line.split()
+                    if parts:
+                        found_name = parts[0]
+                        # Only include models in ai/ namespace that match our base
+                        if found_name.startswith("ai/") and search_query.replace("ai/", "").lower() in found_name.lower():
+                            variants.append(found_name)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
+        # Silently fail - this is just for discovery
+        pass
+    
+    return variants
 
 
 def discover_docker_hub_models(query: str = "ai/", limit: int = 50) -> List[Dict[str, Any]]:
@@ -256,6 +449,308 @@ def discover_docker_hub_models(query: str = "ai/", limit: int = 50) -> List[Dict
         ui.print_warning(f"Could not search Docker Hub: {e}")
     
     return models
+
+
+def fetch_available_models_from_docker_hub(page_size: int = 100) -> List[str]:
+    """
+    Fetch list of available models from Docker Hub API.
+    
+    Uses the Docker Hub v2 API to get all repositories in the 'ai' namespace.
+    Returns a list of model names in format 'ai/model-name'.
+    """
+    available_models = []
+    try:
+        url = f"https://hub.docker.com/v2/repositories/ai/?page_size={page_size}"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode('utf-8'))
+                if "results" in data:
+                    for repo in data["results"]:
+                        repo_name = repo.get("name", "")
+                        if repo_name:
+                            available_models.append(f"ai/{repo_name}")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as e:
+        ui.print_warning(f"Could not fetch models from Docker Hub API: {e}")
+    
+    return available_models
+
+
+def parse_tag_info(tag_name: str) -> Dict[str, Any]:
+    """
+    Parse tag name to extract size, quantization, and other metadata.
+    
+    Args:
+        tag_name: Tag name from Docker Hub (e.g., "70B-Q4_K_M", "14B-F16", "32B", "latest")
+    
+    Returns:
+        Dictionary with:
+        - size: Model size in billions (e.g., 70, 14, 32) or None
+        - size_str: Size string (e.g., "70B", "14B") or None
+        - quantization: Quantization level (e.g., "Q4_K_M", "Q4_0", "F16") or None
+        - is_full_precision: True if F16 or no quantization specified
+        - estimated_ram_gb: Estimated RAM requirement in GB
+    """
+    tag_lower = tag_name.lower()
+    
+    # Skip "latest" tag - it's unpredictable
+    if tag_lower == "latest":
+        return {
+            "size": None,
+            "size_str": None,
+            "quantization": None,
+            "is_full_precision": False,
+            "estimated_ram_gb": 0.0,
+            "tag_name": tag_name
+        }
+    
+    # Extract size (e.g., 70B, 14B, 32B, 7B, 3B, or 335M for millions)
+    size_match = re.search(r'(\d+(?:\.\d+)?)\s*([mb])', tag_lower)
+    size = None
+    size_str = None
+    if size_match:
+        size_val = float(size_match.group(1))
+        size_unit = size_match.group(2).lower()
+        if size_unit == 'm':
+            # Convert millions to billions (e.g., 335M -> 0.335B)
+            size = size_val / 1000.0
+        else:
+            # Already in billions
+            size = size_val
+        size_str = tag_name[size_match.start():size_match.end()].upper()
+    
+    # Extract quantization level
+    quantization = None
+    is_full_precision = False
+    
+    if "-f16" in tag_lower or tag_lower.endswith("-f16"):
+        quantization = "F16"
+        is_full_precision = True
+    elif "-q4_k_m" in tag_lower or tag_lower.endswith("-q4_k_m"):
+        quantization = "Q4_K_M"
+    elif "-q4_0" in tag_lower or tag_lower.endswith("-q4_0"):
+        quantization = "Q4_0"
+    elif "-q8_0" in tag_lower or tag_lower.endswith("-q8_0"):
+        quantization = "Q8_0"
+    elif "-q8" in tag_lower:
+        quantization = "Q8"
+    elif "-q4" in tag_lower:
+        quantization = "Q4"
+    
+    # If no quantization specified and size exists, assume full precision
+    if quantization is None and size is not None:
+        is_full_precision = True
+    
+    # Estimate RAM requirements
+    estimated_ram_gb = 0.0
+    if size is not None:
+        # Base RAM estimate: roughly size * 0.5 for full precision
+        base_ram = size * 0.5
+        
+        # Apply quantization reduction
+        if quantization == "F16" or is_full_precision:
+            estimated_ram_gb = base_ram
+        elif quantization == "Q8_0" or quantization == "Q8":
+            estimated_ram_gb = base_ram * 0.75
+        elif quantization == "Q4_K_M" or quantization == "Q4_0" or quantization == "Q4":
+            estimated_ram_gb = base_ram * 0.5
+        else:
+            # Unknown quantization, assume full precision
+            estimated_ram_gb = base_ram
+    
+    return {
+        "size": size,
+        "size_str": size_str,
+        "quantization": quantization,
+        "is_full_precision": is_full_precision,
+        "estimated_ram_gb": estimated_ram_gb,
+        "tag_name": tag_name
+    }
+
+
+def discover_model_tags(model_name: str, hw_info: Optional[hardware.HardwareInfo] = None) -> List[Dict[str, Any]]:
+    """
+    Discover available tags/variants for a model from Docker Hub API.
+    
+    Args:
+        model_name: Base model name (e.g., "llama3.3" or "ai/llama3.3")
+        hw_info: Optional HardwareInfo for caching
+    
+    Returns:
+        List of tag dictionaries with parsed metadata
+    """
+    # Normalize model name (remove ai/ prefix if present)
+    base_name = model_name.replace("ai/", "").strip()
+    
+    # Check cache first
+    if hw_info and hasattr(hw_info, 'discovered_model_tags') and base_name in hw_info.discovered_model_tags:
+        return hw_info.discovered_model_tags[base_name]
+    
+    tags = []
+    try:
+        url = f"https://hub.docker.com/v2/repositories/ai/{base_name}/tags/?page_size=100"
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "Docker-Model-Runner-Setup/1.0")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode('utf-8'))
+                if "results" in data:
+                    for tag_result in data["results"]:
+                        tag_name = tag_result.get("name", "")
+                        if tag_name:
+                            # Parse tag info
+                            tag_info = parse_tag_info(tag_name)
+                            tags.append(tag_info)
+            else:
+                ui.print_warning(f"Could not fetch tags for {base_name}: HTTP {response.status}")
+                return []
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            ui.print_warning(f"Model {base_name} not found on Docker Hub (404)")
+        else:
+            ui.print_warning(f"Could not fetch tags for {base_name}: HTTP {e.code}")
+        return []
+    except (urllib.error.URLError, OSError) as e:
+        ui.print_warning(f"Network error fetching tags for {base_name}: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        ui.print_warning(f"Invalid JSON response for {base_name} tags: {e}")
+        return []
+    except Exception as e:
+        ui.print_warning(f"Unexpected error fetching tags for {base_name}: {e}")
+        return []
+    
+    # Cache results
+    if hw_info:
+        if not hasattr(hw_info, 'discovered_model_tags'):
+            hw_info.discovered_model_tags = {}
+        hw_info.discovered_model_tags[base_name] = tags
+    
+    return tags
+
+
+def select_best_variant(
+    available_tags: List[Dict[str, Any]], 
+    hw_info: hardware.HardwareInfo,
+    preferred_size: Optional[str] = None
+) -> Optional[str]:
+    """
+    Select best model variant tag based on hardware capabilities.
+    
+    Args:
+        available_tags: List of parsed tag dictionaries from discover_model_tags()
+        hw_info: Hardware information for tier and RAM constraints
+        preferred_size: Optional preferred size (e.g., "70B", "14B") to prioritize
+    
+    Returns:
+        Selected tag name (e.g., "70B-Q4_K_M") or None if no suitable variant
+    """
+    if not available_tags:
+        return None
+    
+    # Filter out "latest" and invalid tags
+    valid_tags = [t for t in available_tags if t.get("size") is not None]
+    if not valid_tags:
+        # If no valid tags, return None (will fall back to base model)
+        return None
+    
+    available_ram = hw_info.ram_gb
+    ram_buffer = available_ram * 0.15  # 15% buffer for system overhead
+    usable_ram = available_ram - ram_buffer
+    
+    # Filter tags by tier compatibility (rough size-based tier matching)
+    tier_appropriate_tags = []
+    for tag in valid_tags:
+        size = tag.get("size", 0)
+        ram_needed = tag.get("estimated_ram_gb", 0)
+        
+        # Check if this size is appropriate for the tier
+        if hw_info.tier == hardware.HardwareTier.S:
+            # Tier S can handle 70B, 32B, 22B
+            if size >= 20 or ram_needed <= usable_ram:
+                tier_appropriate_tags.append(tag)
+        elif hw_info.tier == hardware.HardwareTier.A:
+            # Tier A can handle 22B, 14B, 7B
+            if size <= 32 or ram_needed <= usable_ram:
+                tier_appropriate_tags.append(tag)
+        elif hw_info.tier == hardware.HardwareTier.B:
+            # Tier B can handle 14B, 7B, 3B
+            if size <= 14 or ram_needed <= usable_ram:
+                tier_appropriate_tags.append(tag)
+        else:  # Tier C
+            # Tier C can handle 7B, 3B, 1.5B
+            if size <= 7 or ram_needed <= usable_ram:
+                tier_appropriate_tags.append(tag)
+    
+    if not tier_appropriate_tags:
+        tier_appropriate_tags = valid_tags  # Fallback to all valid tags
+    
+    # Filter by preferred size if specified
+    if preferred_size:
+        preferred_size_num = None
+        try:
+            # Extract number from preferred_size (e.g., "70B" -> 70)
+            match = re.search(r'(\d+(?:\.\d+)?)', preferred_size.upper())
+            if match:
+                preferred_size_num = float(match.group(1))
+        except (ValueError, AttributeError):
+            pass
+        
+        if preferred_size_num:
+            preferred_tags = [t for t in tier_appropriate_tags if t.get("size") == preferred_size_num]
+            if preferred_tags:
+                tier_appropriate_tags = preferred_tags
+    
+    # Filter tags that fit in available RAM
+    fitting_tags = [t for t in tier_appropriate_tags if t.get("estimated_ram_gb", 0) <= usable_ram]
+    if not fitting_tags:
+        # If nothing fits, use the smallest tag
+        fitting_tags = sorted(tier_appropriate_tags, key=lambda t: t.get("estimated_ram_gb", float('inf')))
+        if fitting_tags:
+            fitting_tags = [fitting_tags[0]]  # Just the smallest one
+    
+    # Calculate RAM headroom for quantization decision
+    if fitting_tags:
+        largest_tag = max(fitting_tags, key=lambda t: t.get("estimated_ram_gb", 0))
+        ram_needed = largest_tag.get("estimated_ram_gb", 0)
+        ram_headroom = usable_ram - ram_needed
+    else:
+        ram_headroom = 0
+    
+    # Sort tags by priority:
+    # 1. Size (largest first, but must fit in RAM)
+    # 2. Quantization preference based on RAM headroom
+    def tag_priority(tag):
+        size = tag.get("size", 0)
+        is_full = tag.get("is_full_precision", False)
+        quant = tag.get("quantization", "")
+        ram = tag.get("estimated_ram_gb", 0)
+        
+        # Size priority (larger is better, but must fit)
+        size_score = size if ram <= usable_ram else -1
+        
+        # Quantization priority based on RAM headroom
+        if ram_headroom > 10:
+            # Plenty of RAM - prefer full precision
+            quant_score = 3 if is_full else (2 if quant == "Q4_K_M" else 1)
+        elif ram_headroom > 5:
+            # Moderate RAM - prefer Q4_K_M or full precision
+            quant_score = 3 if (is_full or quant == "Q4_K_M") else 1
+        else:
+            # Tight RAM - prefer quantized
+            quant_score = 2 if quant == "Q4_K_M" else (1 if quant else 0)
+        
+        return (size_score, quant_score)
+    
+    fitting_tags.sort(key=tag_priority, reverse=True)
+    
+    if fitting_tags:
+        return fitting_tags[0].get("tag_name")
+    
+    return None
 
 
 def discover_huggingface_models(query: str = "llama", limit: int = 30) -> List[Dict[str, Any]]:
@@ -449,6 +944,7 @@ def is_restricted_model(model: ModelInfo) -> bool:
     restricted_keywords = [
         "qwen",  # Chinese (Alibaba)
         "deepseek",  # Chinese
+        "deepcoder",  # Chinese (based on DeepSeek)
         "baai",  # Chinese (Beijing Academy of Artificial Intelligence)
         "bge-",  # Chinese (BAAI models)
     ]
@@ -501,12 +997,13 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
     According to Docker Model Runner docs (https://docs.docker.com/ai/model-runner/):
     - Models are pulled from Docker Hub and stored locally
     - The API exposes OpenAI-compatible endpoints
-    - Models can be checked via the API or docker search
+    - Models can be checked via the Docker Hub API or Docker Model Runner API
     
     This function checks:
-    1. Docker Model Runner API (if available) - most accurate
-    2. Known working models with size variants
-    3. Docker Hub search as fallback
+    1. Docker Hub API (cached list) - most accurate for what's available to pull
+    2. Docker Model Runner API (installed models) - shows what's already pulled
+    3. Known working models with size variants
+    4. Docker Hub search as fallback
     """
     # Convert model name to Docker Hub format for checking
     model_name_to_check = model.docker_name
@@ -530,7 +1027,14 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
     model_lower = model_name_to_check.lower()
     base_name = model_name_to_check.split(":")[0] if ":" in model_name_to_check else model_name_to_check
     
-    # First, try to use cached API models list (fetched during DMR check)
+    # First, try to use cached Docker Hub models list (most accurate for what's available to pull)
+    if hasattr(hw_info, 'available_docker_hub_models') and hw_info.available_docker_hub_models:
+        base_name_lower = base_name.lower()
+        for hub_model in hw_info.available_docker_hub_models:
+            if base_name_lower == hub_model.lower():
+                return True
+    
+    # Second, try to use cached API models list (fetched during DMR check)
     # According to docs: https://docs.docker.com/ai/model-runner/api-reference/
     if hasattr(hw_info, 'available_api_models') and hw_info.available_api_models:
         for api_model_id in hw_info.available_api_models:
@@ -569,7 +1073,7 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
         "ai/llama3.3": ["70b"],  # Only 70B variant exists
         "ai/llama3.1": ["70b"],  # Only 70B variant exists
         "ai/nomic-embed-text-v1.5": [None],  # No size variant
-        "ai/qwen2.5-coder": ["7b"],  # Only 7B variant exists
+        "ai/granite-4.0-h-nano": ["nano"],  # Granite 4.0 nano variant
         "ai/phi4": ["14b"],  # Only 14B variant exists
     }
     
@@ -602,24 +1106,41 @@ def verify_model_available(model: ModelInfo, hw_info: hardware.HardwareInfo) -> 
                 # No specific size requested, check if any variant exists
                 return len(available_sizes) > 0
     
-    # For unknown models, try to search Docker Hub
-    # This is slower but more accurate for models not in our known list
-    try:
-        search_name = base_name.replace("ai/", "")
-        code, stdout, _ = utils.run_command(["docker", "search", base_name, "--limit", "10"], timeout=15)
-        if code == 0:
-            lines = stdout.strip().split("\n")
-            for line in lines[1:]:  # Skip header
-                if line.strip():
-                    parts = line.split()
-                    if parts and base_name.lower() in parts[0].lower():
-                        # Found in search - model exists in Docker Hub
-                        # Note: We can't verify size variants via search, so return True
-                        # The actual pull will fail if the size variant doesn't exist
-                        return True
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError) as e:
-        # Silently fail for Docker Hub search - it's just a fallback
-        pass
+    # For unknown models, try to fetch from Docker Hub API directly (if not cached)
+    if not hasattr(hw_info, 'available_docker_hub_models') or not hw_info.available_docker_hub_models:
+        docker_hub_models = fetch_available_models_from_docker_hub()
+        if docker_hub_models:
+            base_name_lower = base_name.lower()
+            for hub_model in docker_hub_models:
+                if base_name_lower == hub_model.lower():
+                    return True
+    
+    # Last resort: try Docker search command to find variants
+    # This is useful for discovering if a model exists even if not in our cached lists
+    # Extract base model name for search (e.g., 'phi4' from 'ai/phi4' or 'ai.docker.com/microsoft/phi4:14b')
+    search_base = base_name.replace("ai/", "").lower()
+    if "/" in search_base:
+        # Extract just the model name part
+        search_base = search_base.split("/")[-1]
+    if ":" in search_base:
+        search_base = search_base.split(":")[0]
+    
+    variants = discover_model_variants(f"ai/{search_base}", hw_info)
+    if variants:
+        # Check if any variant matches our model name
+        base_name_lower = base_name.lower()
+        for variant in variants:
+            variant_lower = variant.lower()
+            # Exact match
+            if base_name_lower == variant_lower:
+                return True
+            # Check if the base model name is in the variant (e.g., 'phi4' in 'ai/phi4')
+            if search_base in variant_lower.replace("ai/", ""):
+                return True
+        # If we found variants for this model family, the model likely exists
+        # Docker Model Runner may use simplified naming (e.g., 'ai/phi4' instead of 'ai/phi4:14b')
+        if variants:
+            return True
     
     # Model not found in API, known list, or search
     return False
@@ -743,6 +1264,581 @@ def get_curated_top_models(tier: hardware.HardwareTier, limit: int = 10, hw_info
     return curated[:limit]
 
 
+def get_docker_hub_model_name(docker_name: str) -> str:
+    """Convert docker_name to Docker Hub format (ai/model-name)."""
+    if docker_name.startswith("ai.docker.com/"):
+        # Convert ai.docker.com/org/model:tag -> ai/model
+        remaining = docker_name[len("ai.docker.com/"):]
+        parts = remaining.split("/")
+        if len(parts) > 1:
+            model_part = parts[1]
+        else:
+            model_part = parts[0]
+        # Remove tag
+        if ":" in model_part:
+            model_part = model_part.split(":")[0]
+        return f"ai/{model_part}"
+    elif docker_name.startswith("ai/"):
+        # Already in correct format, just remove tag if present
+        if ":" in docker_name:
+            return docker_name.split(":")[0]
+        return docker_name
+    else:
+        # Fallback: try to extract model name
+        return docker_name
+
+
+def find_modelinfo_by_docker_hub_name(docker_hub_name: str) -> Optional[ModelInfo]:
+    """Find ModelInfo object from catalog that matches a Docker Hub model name."""
+    hub_name_lower = docker_hub_name.lower()
+    # Extract base name (e.g., "phi4" from "ai/phi4")
+    base_name = hub_name_lower.replace("ai/", "").split(":")[0]
+    
+    for model in MODEL_CATALOG:
+        catalog_hub_name = get_docker_hub_model_name(model.docker_name).lower()
+        catalog_base = catalog_hub_name.replace("ai/", "").split(":")[0]
+        
+        # Try exact match first
+        if hub_name_lower == catalog_hub_name:
+            return model
+        
+        # Try base name match (e.g., "phi4" matches "phi4")
+        if base_name == catalog_base:
+            return model
+        
+        # Try partial match (e.g., "phi4" in "phi4:14b")
+        if base_name in catalog_base or catalog_base in base_name:
+            return model
+    
+    return None
+
+
+def get_recommended_models_by_category(hw_info: Optional[hardware.HardwareInfo] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Get recommended models organized by category, with role information and tier filtering.
+    
+    Returns a dictionary mapping category names to lists of model dicts with:
+    - name: Docker Hub model name (ai/model-name)
+    - roles: List of roles this model supports
+    - model_info: ModelInfo object if found in catalog (None if not in catalog)
+    
+    Limits to top 3-5 models per category and filters by hardware tier.
+    """
+    # Fetch all available models from Docker Hub
+    docker_hub_models = []
+    if hw_info and hasattr(hw_info, 'available_docker_hub_models') and hw_info.available_docker_hub_models:
+        docker_hub_models = hw_info.available_docker_hub_models
+    else:
+        docker_hub_models = fetch_available_models_from_docker_hub()
+    
+    # Define category mappings based on model name patterns
+    categories: Dict[str, List[Dict[str, Any]]] = {
+        "Reasoning & Agent Models": [],
+        "Coding Models": [],
+        "Small/Efficient Models": [],
+        "Multimodal Models": [],
+        "General Chat/Instruction Models": [],
+        "Embedding Models": [],
+        "Safety Models": []
+    }
+    
+    # Map models to categories based on Docker Hub names
+    # Order matters - check more specific categories first
+    seen_models = set()
+    tier = hw_info.tier if hw_info else hardware.HardwareTier.C
+    
+    for model_name in docker_hub_models:
+        if model_name in seen_models:
+            continue
+        
+        model_lower = model_name.lower()
+        
+        # Find ModelInfo from catalog to get roles and tier info
+        model_info = find_modelinfo_by_docker_hub_name(model_name)
+        roles = model_info.roles if model_info else []
+        
+        # Filter by tier if model_info exists
+        if model_info and tier not in model_info.tiers:
+            # Skip models not suitable for this tier
+            continue
+        
+        # Safety Models (check first - most specific)
+        if "safeguard" in model_lower:
+            categories["Safety Models"].append({
+                "name": model_name,
+                "roles": roles,
+                "model_info": model_info
+            })
+            seen_models.add(model_name)
+        
+        # Embedding Models (check before general models)
+        elif any(x in model_lower for x in ["embed", "mxbai", "nomic-embed", "embeddinggemma", "all-minilm", "arctic-embed"]):
+            categories["Embedding Models"].append({
+                "name": model_name,
+                "roles": roles,
+                "model_info": model_info
+            })
+            seen_models.add(model_name)
+        
+        # Multimodal Models
+        elif any(x in model_lower for x in ["gemma3n", "moondream", "smolvlm", "granite-docling"]):
+            categories["Multimodal Models"].append({
+                "name": model_name,
+                "roles": roles,
+                "model_info": model_info
+            })
+            seen_models.add(model_name)
+        
+        # Reasoning & Agent Models
+        elif any(x in model_lower for x in ["gpt-oss", "seed-oss"]):
+            if "safeguard" not in model_lower:  # Exclude safeguard variant
+                categories["Reasoning & Agent Models"].append({
+                    "name": model_name,
+                    "roles": roles,
+                    "model_info": model_info
+                })
+                seen_models.add(model_name)
+        
+        # Coding Models
+        elif any(x in model_lower for x in ["devstral", "phi4", "codestral", "granite-4.0", "codellama", "codegemma", "starcoder"]):
+            categories["Coding Models"].append({
+                "name": model_name,
+                "roles": roles,
+                "model_info": model_info
+            })
+            seen_models.add(model_name)
+        
+        # Small/Efficient Models
+        elif any(x in model_lower for x in ["smollm", "granite-4.0-h-micro", "functiongemma", "granite-4.0-nano", "granite-4.0-h-nano", "granite-4.0-h-tiny"]):
+            categories["Small/Efficient Models"].append({
+                "name": model_name,
+                "roles": roles,
+                "model_info": model_info
+            })
+            seen_models.add(model_name)
+        
+        # General Chat/Instruction Models (catch-all for remaining chat models)
+        elif any(x in model_lower for x in ["llama3", "mistral", "granite-4.0"]):
+            if "embed" not in model_lower and "coder" not in model_lower and "vl" not in model_lower:
+                categories["General Chat/Instruction Models"].append({
+                    "name": model_name,
+                    "roles": roles,
+                    "model_info": model_info
+                })
+                seen_models.add(model_name)
+    
+    # Sort and limit to top 3-5 models per category
+    # Prioritize models with ModelInfo (from catalog) and sort by RAM if available
+    for category in categories:
+        models = categories[category]
+        # Sort: models with ModelInfo first, then by RAM (descending), then alphabetically
+        models.sort(key=lambda m: (
+            m["model_info"] is None,  # False (catalog models) first
+            -m["model_info"].ram_gb if m["model_info"] else 0,  # Higher RAM first
+            m["name"].lower()  # Alphabetical
+        ))
+        # Limit to top 5 models
+        categories[category] = models[:5]
+    
+    # Remove empty categories
+    return {k: v for k, v in categories.items() if v}
+
+
+def display_recommended_models_by_category(hw_info: Optional[hardware.HardwareInfo] = None):
+    """Display recommended models organized by category with role indicators."""
+    categories = get_recommended_models_by_category(hw_info)
+    
+    if not categories:
+        ui.print_warning("No recommended models found")
+        return
+    
+    print(ui.colorize("Recommended Models by Category:", ui.Colors.GREEN + ui.Colors.BOLD))
+    print()
+    
+    for category_name, models in categories.items():
+        print(category_name)
+        for model_dict in models:
+            model_name = model_dict["name"]
+            roles = model_dict["roles"]
+            if roles:
+                roles_str = ", ".join(roles)
+                print(f"-{model_name} (roles: {roles_str})")
+            else:
+                print(f"-{model_name}")
+        print()
+
+
+def get_tier_optimized_recommendation(hw_info: hardware.HardwareInfo) -> Dict[str, str]:
+    """
+    Get tier-optimized recommendation - best model from each relevant category.
+    
+    Returns a dictionary mapping category names to Docker Hub model names (ai/model-name).
+    Selects one model from each relevant category based on hardware tier and RAM constraints.
+    """
+    categories = get_recommended_models_by_category(hw_info)
+    recommendation: Dict[str, str] = {}
+    
+    if not categories:
+        return recommendation
+    
+    # Priority order for categories (most important first)
+    category_priority = [
+        "Coding Models",
+        "Embedding Models",
+        "General Chat/Instruction Models",
+        "Reasoning & Agent Models",
+        "Small/Efficient Models",
+        "Multimodal Models",
+        "Safety Models"
+    ]
+    
+    total_ram_used = 0.0
+    available_ram = hw_info.ram_gb
+    
+    # Select best model from each category, considering RAM constraints
+    for category in category_priority:
+        if category not in categories:
+            continue
+        
+        models = categories[category]
+        if not models:
+            continue
+        
+        # Find best model that fits in remaining RAM
+        best_model = None
+        for model_dict in models:
+            model_info = model_dict.get("model_info")
+            if model_info:
+                model_ram = model_info.ram_gb
+                # Check if this model fits
+                if total_ram_used + model_ram <= available_ram * 0.9:  # Leave 10% buffer
+                    if best_model is None or model_ram > best_model[1]:
+                        best_model = (model_dict["name"], model_ram, model_info)
+            else:
+                # Model not in catalog, estimate RAM based on category
+                estimated_ram = 4.0  # Default estimate
+                if "embed" in category.lower():
+                    estimated_ram = 0.5
+                elif "small" in category.lower() or "efficient" in category.lower():
+                    estimated_ram = 2.0
+                
+                if total_ram_used + estimated_ram <= available_ram * 0.9:
+                    if best_model is None:
+                        best_model = (model_dict["name"], estimated_ram, None)
+        
+        if best_model:
+            recommendation[category] = best_model[0]
+            total_ram_used += best_model[1]
+    
+    return recommendation
+
+
+def _generate_model_description(model_name: str, roles: List[str], category: str) -> str:
+    """Generate a descriptive text for a model based on its name and category."""
+    name_lower = model_name.lower()
+    base_name = model_name.replace("ai/", "").replace("-", " ").replace("_", " ").title()
+    
+    # Try to infer model characteristics from name
+    desc_parts = []
+    model_type = ""
+    
+    # Model type indicators (most specific first)
+    if "gpt-oss" in name_lower:
+        model_type = "OpenAI's open-weight reasoning model"
+    elif "seed-oss" in name_lower:
+        model_type = "Seed AI's reasoning model"
+    elif "granite" in name_lower:
+        model_type = "IBM's Granite coding model"
+    elif "devstral" in name_lower or "codestral" in name_lower:
+        model_type = "Mistral's coding model"
+    elif "phi" in name_lower:
+        model_type = "Microsoft's reasoning model"
+    elif "llama" in name_lower:
+        model_type = "Meta's Llama model"
+    elif "mistral" in name_lower:
+        model_type = "Mistral AI model"
+    elif "gemma" in name_lower and "function" in name_lower:
+        model_type = "Google's function-calling model"
+    elif "gemma" in name_lower:
+        model_type = "Google's Gemma model"
+    elif "granite" in name_lower:
+        model_type = "IBM's Granite model"
+    elif "smollm" in name_lower or "smol" in name_lower:
+        model_type = "Lightweight efficient model"
+    elif "functiongemma" in name_lower:
+        model_type = "Function-calling model"
+    elif "embed" in name_lower or "nomic-embed" in name_lower:
+        model_type = "Embedding model"
+    elif "safeguard" in name_lower:
+        model_type = "Safety reasoning model"
+    elif "moondream" in name_lower:
+        model_type = "Vision-language model"
+    else:
+        model_type = f"{base_name} model"
+    
+    desc_parts.append(model_type)
+    
+    # Inference engine/optimization variants (detect before size to avoid conflicts)
+    variant_info = ""
+    if "-vllm" in name_lower:
+        variant_info = "vLLM engine (faster inference)"
+    elif "-tensorrt" in name_lower or "-trt" in name_lower:
+        variant_info = "TensorRT optimized"
+    elif "-onnx" in name_lower:
+        variant_info = "ONNX runtime"
+    elif "-gguf" in name_lower:
+        variant_info = "GGUF format"
+    elif "-ggml" in name_lower:
+        variant_info = "GGML format"
+    elif "-flash" in name_lower or "-flash-attention" in name_lower:
+        variant_info = "Flash Attention optimized"
+    elif "-quantized" in name_lower or "-q" in name_lower:
+        variant_info = "Quantized"
+    elif "-preview" in name_lower:
+        variant_info = "Preview version"
+    elif "-beta" in name_lower:
+        variant_info = "Beta version"
+    
+    if variant_info:
+        desc_parts.append(variant_info)
+    
+    # Size indicators (add to description if found)
+    size_info = ""
+    if "70b" in name_lower or "70-b" in name_lower:
+        size_info = "70B"
+    elif "32b" in name_lower or "32-b" in name_lower:
+        size_info = "32B"
+    elif "22b" in name_lower or "22-b" in name_lower:
+        size_info = "22B"
+    elif "14b" in name_lower or "14-b" in name_lower:
+        size_info = "14B"
+    elif "7b" in name_lower or "7-b" in name_lower:
+        size_info = "7B"
+    elif "3b" in name_lower or "3-b" in name_lower:
+        size_info = "3B"
+    elif "1.5b" in name_lower or "1.5-b" in name_lower:
+        size_info = "1.5B"
+    
+    if size_info:
+        desc_parts.append(f"{size_info} parameters")
+    
+    # Category-specific use case (only if not redundant)
+    category_lower = category.lower()
+    if "reasoning" in category_lower or "agent" in category_lower:
+        if "reasoning" not in model_type.lower() and "agent" not in model_type.lower():
+            desc_parts.append("for reasoning and agent tasks")
+    elif "coding" in category_lower:
+        if "coding" not in model_type.lower() and "code" not in model_type.lower():
+            desc_parts.append("for code generation")
+    elif "multimodal" in category_lower:
+        if "vision" not in model_type.lower() and "multimodal" not in model_type.lower():
+            desc_parts.append("supports text, image, and video")
+    
+    # RAM estimate based on category and size
+    ram_estimate = 4.0
+    if "embed" in category_lower or "embed" in name_lower:
+        ram_estimate = 0.5
+    elif "small" in category_lower or "efficient" in category_lower or "smol" in name_lower:
+        ram_estimate = 2.0
+    elif size_info == "70B":
+        ram_estimate = 35.0
+    elif size_info == "32B":
+        ram_estimate = 18.0
+    elif size_info == "22B":
+        ram_estimate = 12.0
+    elif size_info == "14B":
+        ram_estimate = 8.0
+    elif size_info == "7B":
+        ram_estimate = 4.0
+    elif size_info == "3B":
+        ram_estimate = 1.8
+    elif size_info == "1.5B":
+        ram_estimate = 1.0
+    
+    # Build description
+    description = ", ".join(desc_parts)
+    
+    # Add RAM and roles
+    description += f" | ~{ram_estimate:.1f}GB RAM"
+    if roles:
+        description += f" | roles: {', '.join(roles)}"
+    
+    return description
+
+
+def customize_from_categories(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
+    """
+    Let user customize model selection by picking from category lists.
+    
+    Returns a list of ModelInfo objects for selected models.
+    """
+    categories = get_recommended_models_by_category(hw_info)
+    
+    if not categories:
+        ui.print_warning("No models available for customization")
+        return []
+    
+    ui.print_subheader("Customize Model Selection")
+    ui.print_info("Select models from each category (press Enter to skip a category):")
+    print()
+    
+    selected_models: List[ModelInfo] = []
+    seen_names = set()
+    
+    for category_name, models in categories.items():
+        if not models:
+            continue
+        
+        print(ui.colorize(f"{category_name}:", ui.Colors.CYAN + ui.Colors.BOLD))
+        
+        # Prepare choices
+        choices = []
+        for i, model_dict in enumerate(models, 1):
+            model_name = model_dict["name"]
+            roles = model_dict.get("roles", [])
+            model_info = model_dict.get("model_info")
+            
+            if model_info:
+                # Use catalog description
+                desc = f"{model_info.description} | ~{model_info.ram_gb:.1f}GB RAM"
+                if roles:
+                    desc += f" | roles: {', '.join(roles)}"
+            else:
+                # Generate description from model name
+                desc = _generate_model_description(model_name, roles, category_name)
+            
+            choices.append((model_name, desc, False))
+        
+        # Add "Skip" option
+        choices.append(("Skip", "Skip this category", False))
+        
+        # Let user select
+        indices = ui.prompt_multi_choice(
+            f"Select models from {category_name} (or 's' to skip):",
+            choices,
+            min_selections=0
+        )
+        
+        # Process selections
+        for idx in indices:
+            if idx < len(models):  # Not the "Skip" option
+                model_dict = models[idx]
+                model_name = model_dict["name"]
+                model_info = model_dict.get("model_info")
+                
+                # If we have ModelInfo, use it; otherwise create a basic one
+                if model_info:
+                    # Check if this is a base model that needs variant selection
+                    base_name = model_info.base_model_name or get_docker_hub_model_name(model_info.docker_name).replace("ai/", "")
+                    if not model_info.selected_variant and base_name:
+                        # Discover and select best variant
+                        tags = discover_model_tags(base_name, hw_info)
+                        if tags:
+                            selected_tag = select_best_variant(tags, hw_info)
+                            if selected_tag:
+                                model_info.selected_variant = selected_tag
+                                model_info.base_model_name = base_name
+                                # Update RAM estimate based on selected variant
+                                for tag in tags:
+                                    if tag.get("tag_name") == selected_tag:
+                                        model_info.ram_gb = tag.get("estimated_ram_gb", model_info.ram_gb)
+                                        break
+                    
+                    if model_info.docker_name not in seen_names:
+                        selected_models.append(model_info)
+                        seen_names.add(model_info.docker_name)
+                else:
+                    # Create a basic ModelInfo for models not in catalog
+                    hub_name = get_docker_hub_model_name(model_name)
+                    base_name = hub_name.replace("ai/", "")
+                    
+                    # Discover and select best variant
+                    tags = discover_model_tags(base_name, hw_info)
+                    selected_tag = None
+                    estimated_ram = 4.0
+                    if tags:
+                        selected_tag = select_best_variant(tags, hw_info)
+                        if selected_tag:
+                            for tag in tags:
+                                if tag.get("tag_name") == selected_tag:
+                                    estimated_ram = tag.get("estimated_ram_gb", 4.0)
+                                    break
+                    
+                    basic_model = ModelInfo(
+                        name=model_name.replace("ai/", "").replace("-", " ").title(),
+                        docker_name=hub_name,
+                        description=f"Docker Hub model: {model_name}",
+                        ram_gb=estimated_ram,
+                        context_length=8192,
+                        roles=model_dict.get("roles", ["chat"]),
+                        tiers=[hw_info.tier],
+                        base_model_name=base_name,
+                        selected_variant=selected_tag
+                    )
+                    if basic_model.docker_name not in seen_names:
+                        selected_models.append(basic_model)
+                        seen_names.add(basic_model.docker_name)
+        
+        print()
+    
+    return selected_models
+
+
+def get_top_models_by_role(tier: hardware.HardwareTier, hw_info: Optional[hardware.HardwareInfo] = None) -> Dict[str, List[ModelInfo]]:
+    """
+    Get top models for each role, automatically selecting variants based on hardware tier.
+    
+    Returns a dictionary mapping role names to lists of models, sorted by quality within each role.
+    Automatically picks the best size variant (3B, 8B, 14B, 70B, etc.) for the tier.
+    
+    Uses docker search to discover available variants and verify models exist.
+    """
+    # Get all models for this tier
+    available = get_models_for_tier(tier)
+    
+    # Filter out restricted models and unavailable models
+    available = [m for m in available if not is_restricted_model(m) and not is_docker_hub_unavailable(m)]
+    
+    # Verify models exist using multiple methods (Docker Hub API, docker search, etc.)
+    if hw_info:
+        verified_available = []
+        ui.print_info("Verifying model availability and discovering variants...")
+        for model in available:
+            if verify_model_available(model, hw_info):
+                verified_available.append(model)
+            else:
+                # Try variant discovery as a fallback
+                variants = discover_model_variants(model.docker_name, hw_info)
+                if variants:
+                    # Model exists in some form, keep it
+                    verified_available.append(model)
+        available = verified_available
+        if available:
+            ui.print_success(f"Verified {len(available)} model(s) available for your tier")
+    
+    # Group models by role
+    models_by_role: Dict[str, List[ModelInfo]] = {
+        "chat": [],
+        "edit": [],
+        "autocomplete": [],
+        "embed": [],
+        "agent": []
+    }
+    
+    # Categorize models by their roles
+    for model in available:
+        for role in model.roles:
+            if role in models_by_role:
+                models_by_role[role].append(model)
+    
+    # For each role, sort by quality (RAM descending) to get best models first
+    # This automatically selects the best variant for the tier
+    for role in models_by_role:
+        models_by_role[role].sort(key=lambda m: m.ram_gb, reverse=True)
+    
+    return models_by_role
+
+
 def get_recommended_models(tier: hardware.HardwareTier, hw_info: Optional[hardware.HardwareInfo] = None) -> Dict[str, ModelInfo]:
     """Get recommended models for each role based on tier and chip capabilities.
     Excludes models from restricted countries (China, Russia) due to political conflicts.
@@ -816,7 +1912,12 @@ def get_recommended_models(tier: hardware.HardwareTier, hw_info: Optional[hardwa
 
 
 def select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
-    """Interactive model selection from curated top models based on hardware tier."""
+    """
+    Interactive model selection with new UX flow:
+    1. Show categories with top models
+    2. Show tier-optimized recommendation
+    3. User confirms or customizes
+    """
     # Input validation
     if not hw_info:
         raise ValueError("hw_info is required")
@@ -827,86 +1928,118 @@ def select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
     ui.print_info(f"Available RAM: ~{hw_info.ram_gb:.1f}GB")
     print()
     
-    # Get curated top 10 models for this tier (with verification)
-    curated_models = get_curated_top_models(hw_info.tier, limit=10, hw_info=hw_info)
+    # Step 1: Get tier-optimized recommendation
+    recommendation = get_tier_optimized_recommendation(hw_info)
     
-    if not curated_models:
-        ui.print_error("No verified models available for your hardware tier.")
-        ui.print_info("This may mean Docker Model Runner doesn't have models compatible with your tier.")
+    if not recommendation:
+        ui.print_warning("Could not generate recommendations for your hardware tier.")
         ui.print_info("You can try the model discovery feature to search for available models.")
         if ui.prompt_yes_no("Would you like to search for available models?", default=False):
             return discover_and_select_models(hw_info)
         return []
     
-    # Show recommended configuration first (with verification)
-    recommendations = get_recommended_models(hw_info.tier, hw_info=hw_info)
-    if recommendations:
-        print(ui.colorize("  Recommended Configuration:", ui.Colors.GREEN + ui.Colors.BOLD))
-        total_ram = 0.0
-        for role, model in recommendations.items():
-            print(f"    • {role.capitalize()}: {model.name} (~{model.ram_gb}GB)")
-            total_ram += model.ram_gb
-        print(f"    Total RAM: ~{total_ram:.1f}GB")
-        print()
-        
-        # Quick option to use recommended
-        if ui.prompt_yes_no("Use recommended configuration?", default=True):
-            selected = list(recommendations.values())
-            # Remove duplicates
-            unique = []
-            seen_names = set()
-            for m in selected:
-                if m.docker_name not in seen_names:
-                    unique.append(m)
-                    seen_names.add(m.docker_name)
-            return unique
-    
-    # Show curated top models
-    ui.print_subheader("Top 10 Models for Your Hardware")
-    ui.print_info("Select from the best models optimized for your system:")
-    if len(curated_models) < 10:
-        ui.print_info(f"(Showing {len(curated_models)} available models for your tier)")
+    # Step 3: Display recommended selection
+    ui.print_subheader("Recommended Selection (Auto-selected for your tier)")
     print()
     
-    # Prepare choices with role indicators
-    choices = []
-    for m in curated_models:
-        # Build description with role info
-        roles_str = ", ".join(m.roles)
-        
-        # Indicate if model is compatible with current tier
-        tier_indicator = ""
-        if hw_info.tier in m.tiers:
-            tier_indicator = "✓ Tier compatible"
-        else:
-            tier_indicator = "⚠ Higher tier (may be slow)"
-        
-        desc = f"{m.description} | {roles_str} | ~{m.ram_gb}GB RAM | {tier_indicator}"
-        
-        # Mark recommended models
-        is_recommended = any(m.docker_name == rec.docker_name for rec in recommendations.values())
-        choices.append((m.name, desc, is_recommended))
+    # Convert recommendation (category -> model_name) to ModelInfo objects
+    categories_data = get_recommended_models_by_category(hw_info)
+    recommended_models: List[ModelInfo] = []
+    total_ram = 0.0
     
-    # Let user select
-    indices = ui.prompt_multi_choice(
-        "Select models to install (comma-separated numbers, or 'a' for all):",
-        choices,
-        min_selections=1
+    for category, model_name in recommendation.items():
+        # Find the model in categories data
+        if category in categories_data:
+            for model_dict in categories_data[category]:
+                if model_dict["name"] == model_name:
+                    model_info = model_dict.get("model_info")
+                    if model_info:
+                        # Check if this is a base model that needs variant selection
+                        base_name = model_info.base_model_name
+                        if not base_name:
+                            # Try to extract base name from docker_name
+                            hub_name = get_docker_hub_model_name(model_info.docker_name)
+                            base_name = hub_name.replace("ai/", "").split(":")[0]
+                            model_info.base_model_name = base_name
+                        
+                        if not model_info.selected_variant and base_name:
+                            # Discover and select best variant
+                            ui.print_info(f"Discovering variants for {model_info.name}...")
+                            tags = discover_model_tags(base_name, hw_info)
+                            if tags:
+                                selected_tag = select_best_variant(tags, hw_info)
+                                if selected_tag:
+                                    model_info.selected_variant = selected_tag
+                                    # Update RAM estimate based on selected variant
+                                    for tag in tags:
+                                        if tag.get("tag_name") == selected_tag:
+                                            model_info.ram_gb = tag.get("estimated_ram_gb", model_info.ram_gb)
+                                            break
+                                    ui.print_success(f"Selected {selected_tag} variant for {model_info.name} (best for your hardware)")
+                                else:
+                                    ui.print_warning(f"Could not select variant for {model_info.name}, using base model")
+                            else:
+                                ui.print_warning(f"Could not discover variants for {model_info.name}, using base model")
+                        
+                        recommended_models.append(model_info)
+                        total_ram += model_info.ram_gb
+                    else:
+                        # Create basic ModelInfo for models not in catalog
+                        hub_name = get_docker_hub_model_name(model_name)
+                        base_name = hub_name.replace("ai/", "")
+                        
+                        # Discover and select best variant
+                        tags = discover_model_tags(base_name, hw_info)
+                        selected_tag = None
+                        estimated_ram = 4.0
+                        if tags:
+                            selected_tag = select_best_variant(tags, hw_info)
+                            if selected_tag:
+                                for tag in tags:
+                                    if tag.get("tag_name") == selected_tag:
+                                        estimated_ram = tag.get("estimated_ram_gb", 4.0)
+                                        break
+                        
+                        basic_model = ModelInfo(
+                            name=model_name.replace("ai/", "").replace("-", " ").title(),
+                            docker_name=hub_name,
+                            description=f"Docker Hub model: {model_name}",
+                            ram_gb=estimated_ram,
+                            context_length=8192,
+                            roles=model_dict.get("roles", ["chat"]),
+                            tiers=[hw_info.tier],
+                            base_model_name=base_name,
+                            selected_variant=selected_tag
+                        )
+                        recommended_models.append(basic_model)
+                        total_ram += basic_model.ram_gb
+                    break
+    
+    # Display recommended models
+    if recommended_models:
+        for model in recommended_models:
+            roles_str = ", ".join(model.roles) if model.roles else "general"
+            variant_info = ""
+            if model.selected_variant:
+                variant_info = f" ({model.selected_variant} variant)"
+            print(f"  • {model.name}{variant_info} ({roles_str}) - ~{model.ram_gb:.1f}GB RAM")
+        print(f"  Total RAM: ~{total_ram:.1f}GB")
+        print()
+    
+    # Step 4: User confirms, customizes, or cancels
+    choice = ui.prompt_choice(
+        "What would you like to do?",
+        ["Use recommended selection", "Customize selection", "Cancel setup"],
+        default=0
     )
     
-    selected_models = [curated_models[i] for i in indices]
-    
-    # Show summary
-    if selected_models:
-        print()
-        ui.print_success(f"Selected {len(selected_models)} model(s):")
-        total_ram = 0.0
-        for m in selected_models:
-            print(f"  • {m.name} (~{m.ram_gb}GB)")
-            total_ram += m.ram_gb
-        print(f"  Total RAM required: ~{total_ram:.1f}GB")
-    
-    return selected_models
+    if choice == 0:
+        return recommended_models
+    elif choice == 1:
+        return customize_from_categories(hw_info)
+    else:
+        ui.print_info("Setup cancelled.")
+        return []
 
 
 def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
@@ -951,13 +2084,63 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         # Legacy format: ai.docker.com/org/model:tag (convert directly to ai/model-name)
         model_name_to_pull = model.docker_name
         
+        # Check if we have a selected variant that needs to be applied
+        base_model_name = None
+        if model.selected_variant:
+            # We have a selected variant, use it
+            base_model_name = model.base_model_name or get_docker_hub_model_name(model.docker_name).replace("ai/", "").split(":")[0]
+            if base_model_name:
+                model_name_to_pull = f"ai/{base_model_name}:{model.selected_variant}"
+        elif model.base_model_name:
+            # We have a base model name but no variant selected yet - discover and select
+            base_model_name = model.base_model_name
+            ui.print_info(f"Discovering variants for {model.name}...")
+            tags = discover_model_tags(base_model_name, hw_info)
+            if tags:
+                selected_tag = select_best_variant(tags, hw_info)
+                if selected_tag:
+                    model.selected_variant = selected_tag
+                    model_name_to_pull = f"ai/{base_model_name}:{selected_tag}"
+                    ui.print_success(f"Auto-selected variant: {selected_tag} (best for your hardware)")
+                    # Update RAM estimate
+                    for tag in tags:
+                        if tag.get("tag_name") == selected_tag:
+                            model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
+                            break
+                else:
+                    ui.print_warning(f"Could not select variant for {model.name}, using base model")
+                    model_name_to_pull = f"ai/{base_model_name}"
+            else:
+                ui.print_warning(f"Could not discover variants for {model.name}, using base model")
+                model_name_to_pull = f"ai/{base_model_name}"
+        else:
+            # Try to extract base name from docker_name if it's in ai/ format
+            if model.docker_name.startswith("ai/"):
+                base_model_name = model.docker_name.replace("ai/", "").split(":")[0]
+                # Only try variant discovery if it looks like a base model (no size variant in name)
+                if not re.search(r'[0-9]+\s*b', base_model_name, re.IGNORECASE):
+                    ui.print_info(f"Discovering variants for {model.name}...")
+                    tags = discover_model_tags(base_model_name, hw_info)
+                    if tags:
+                        selected_tag = select_best_variant(tags, hw_info)
+                        if selected_tag:
+                            model.selected_variant = selected_tag
+                            model.base_model_name = base_model_name
+                            model_name_to_pull = f"ai/{base_model_name}:{selected_tag}"
+                            ui.print_success(f"Auto-selected variant: {selected_tag} (best for your hardware)")
+                            # Update RAM estimate
+                            for tag in tags:
+                                if tag.get("tag_name") == selected_tag:
+                                    model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
+                                    break
+        
         # Convert legacy ai.docker.com format directly to Docker Hub format
         # No DNS check needed - ai.docker.com doesn't exist, always convert
-        if model.docker_name.startswith("ai.docker.com/"):
+        if model_name_to_pull.startswith("ai.docker.com/"):
             # Convert to Docker Hub format
             # ai.docker.com/org/model:tag -> ai/model-name
             # Remove ai.docker.com/ prefix
-            remaining = model.docker_name[len("ai.docker.com/"):]
+            remaining = model_name_to_pull[len("ai.docker.com/"):]
             
             # Remove organization prefix (meta/, mistral/, microsoft/, etc.)
             parts = remaining.split("/")
@@ -984,6 +2167,15 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                 # Convert to Docker Hub format: ai/modelname
                 model_name_to_pull = f"ai/{model_part}"
         
+        # Log the actual command being executed
+        variant_info = ""
+        if model.selected_variant:
+            variant_info = f" ({model.selected_variant} variant)"
+        ui.print_info(f"Command: {ui.colorize(f'docker model pull {model_name_to_pull}', ui.Colors.CYAN)}")
+        if variant_info:
+            ui.print_info(f"Selected variant{variant_info} based on your hardware ({hw_info.ram_gb:.1f}GB RAM)")
+        print()
+        
         # Run docker model pull
         # We don't capture output so user can see download progress
         
@@ -1002,15 +2194,95 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
             
             # Stream output in real-time and capture for analysis
             if process.stdout:
-                for line in process.stdout:
-                    line = line.strip()
-                    if line:
-                        full_output.append(line)
-                        # Show progress lines
-                        if "pulling" in line.lower() or "download" in line.lower() or "%" in line:
-                            print(f"    {line}")
-                        elif "complete" in line.lower() or "done" in line.lower():
-                            print(ui.colorize(f"    {line}", ui.Colors.GREEN))
+                # Try to parse progress and display with rich if available
+                if _ensure_rich_available():
+                    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, DownloadColumn, TransferSpeedColumn
+                    from rich.console import Console
+                    console = Console()
+                    progress_bar = None
+                    task_id = None
+                    
+                    # Parse Docker output for progress information
+                    for line in process.stdout:
+                        line = line.strip()
+                        if line:
+                            full_output.append(line)
+                            
+                            # Try to extract progress from Docker output
+                            # Format: "Downloaded X of Y" or "Downloaded X/Y"
+                            progress_match = re.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re.IGNORECASE)
+                            if progress_match:
+                                downloaded_val = float(progress_match.group(1))
+                                downloaded_unit = (progress_match.group(2) or progress_match.group(4) or "B").upper()
+                                total_val = float(progress_match.group(3))
+                                total_unit = (progress_match.group(4) or "B").upper()
+                                
+                                # Convert to bytes for consistent calculation
+                                unit_multipliers = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+                                downloaded_bytes = downloaded_val * unit_multipliers.get(downloaded_unit, 1)
+                                total_bytes = total_val * unit_multipliers.get(total_unit, 1)
+                                
+                                if total_bytes > 0 and progress_bar is None:
+                                    # Initialize progress bar on first progress update
+                                    progress_bar = Progress(
+                                        SpinnerColumn(),
+                                        TextColumn("[progress.description]{task.description}"),
+                                        BarColumn(),
+                                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                                        DownloadColumn(),
+                                        TransferSpeedColumn(),
+                                        TimeRemainingColumn(),
+                                        console=console
+                                    )
+                                    progress_bar.start()
+                                    task_id = progress_bar.add_task(
+                                        f"[cyan]Downloading {model.name}...",
+                                        total=total_bytes
+                                    )
+                                
+                                if progress_bar and task_id is not None:
+                                    progress_bar.update(task_id, completed=downloaded_bytes)
+                            elif "complete" in line.lower() or "done" in line.lower() or "pulled" in line.lower():
+                                if progress_bar:
+                                    progress_bar.stop()
+                                    console.print(f"[green]✓ {line}[/green]")
+                                else:
+                                    console.print(f"[green]✓ {line}[/green]")
+                            elif "error" in line.lower() or "failed" in line.lower():
+                                if progress_bar:
+                                    progress_bar.stop()
+                                console.print(f"[red]✗ {line}[/red]")
+                    
+                    # Clean up progress bar if still running
+                    if progress_bar:
+                        progress_bar.stop()
+                else:
+                    # Fallback to simple line-by-line output with carriage return for updates
+                    last_line = ""
+                    for line in process.stdout:
+                        line = line.strip()
+                        if line:
+                            full_output.append(line)
+                            # Show progress lines with carriage return to update in place
+                            if "pulling" in line.lower() or "download" in line.lower() or "%" in line:
+                                # Use carriage return to overwrite previous line
+                                if "Downloaded" in line:
+                                    sys.stdout.write(f"\r    {line}")
+                                    sys.stdout.flush()
+                                    last_line = line
+                                else:
+                                    if last_line:
+                                        print()  # New line for non-download messages
+                                        last_line = ""
+                                    print(f"    {line}")
+                            elif "complete" in line.lower() or "done" in line.lower():
+                                if last_line:
+                                    print()  # New line before completion message
+                                print(ui.colorize(f"    {line}", ui.Colors.GREEN))
+                                last_line = ""
+                    
+                    if last_line:
+                        print()  # Final newline
             
             process.wait(timeout=3600)  # 1 hour timeout
             code = process.returncode
@@ -1107,18 +2379,32 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
     return successfully_pulled if successfully_pulled else model_list
 
 
-def get_model_id_for_continue(docker_name: str, hw_info: Optional[hardware.HardwareInfo] = None) -> str:
+def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInfo] = None) -> str:
     """
     Convert Docker Model Runner model name to Continue.dev compatible format.
     
     Docker Model Runner API returns models as: ai/llama3.2:latest
-    The model catalog uses: ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M
+    The model catalog uses: ai.docker.com/meta/llama3.2:3b-instruct
     
     This function converts to the actual API model ID format.
+    Preserves variant tags if selected.
     """
-    # Input validation
-    if not docker_name or not isinstance(docker_name, str):
-        raise ValueError("docker_name must be a non-empty string")
+    # Input validation - accept either ModelInfo or string for backward compatibility
+    if isinstance(model, str):
+        docker_name = model
+        selected_variant = None
+        base_model_name = None
+    elif isinstance(model, ModelInfo):
+        docker_name = model.docker_name
+        selected_variant = model.selected_variant
+        base_model_name = model.base_model_name
+    else:
+        raise ValueError("model must be ModelInfo or string")
+    
+    # If we have a selected variant, use it
+    if selected_variant and base_model_name:
+        # Format: ai/base_model_name:variant_tag
+        return f"ai/{base_model_name}:{selected_variant}"
     
     # First, check if we can get the actual model ID from the API
     if hw_info and hasattr(hw_info, 'available_api_models') and hw_info.available_api_models:
@@ -1145,28 +2431,30 @@ def get_model_id_for_continue(docker_name: str, hw_info: Optional[hardware.Hardw
         remaining = model_id[len("ai.docker.com/"):]
         parts = remaining.split("/")
         if len(parts) > 1:
-            # Has org prefix (meta/, qwen/, etc.), remove it
+            # Has org prefix (meta/, mistral/, etc.), remove it
             model_part = parts[1]
         else:
             model_part = parts[0]
         
-        # Remove size/tag variants and convert to base model name
-        # ai.docker.com/meta/llama3.2:3b-instruct-q4_K_M -> ai/llama3.2
+        # Preserve variant tag if present (e.g., :70B-Q4_K_M)
+        variant_tag = None
         if ":" in model_part:
-            model_part = model_part.split(":")[0]
+            model_part, variant_tag = model_part.split(":", 1)
         
-        # Remove size indicators (3b, 8b, etc.) from model name
-        model_part = re.sub(r'[-_]?[0-9]+b', '', model_part, flags=re.IGNORECASE)
-        model_part = re.sub(r'[-_]?instruct[-_]?q[0-9]_[KM]', '', model_part, flags=re.IGNORECASE)
+        # Remove size indicators (3b, 8b, etc.) from model name only if no variant tag
+        if not variant_tag:
+            model_part = re.sub(r'[-_]?[0-9]+b', '', model_part, flags=re.IGNORECASE)
         
         # Convert to Docker Hub format: ai/modelname
         model_id = f"ai/{model_part}"
         
-        # Add :latest tag (Docker Model Runner uses this)
-        if ":" not in model_id:
+        # Add variant tag or :latest
+        if variant_tag:
+            model_id = f"{model_id}:{variant_tag}"
+        elif ":" not in model_id:
             model_id = f"{model_id}:latest"
     
-    # If it already starts with ai/, ensure it has :latest tag
+    # If it already starts with ai/, preserve existing tag or add :latest
     elif model_id.startswith("ai/"):
         if ":" not in model_id:
             model_id = f"{model_id}:latest"

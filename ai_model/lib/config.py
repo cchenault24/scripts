@@ -152,7 +152,7 @@ def generate_continue_config(
     yaml_lines.append("models:")
     
     for i, model in enumerate(chat_models):
-        model_id = models.get_model_id_for_continue(model.docker_name, hw_info)
+        model_id = models.get_model_id_for_continue(model, hw_info)
         yaml_lines.extend([
             f"  - name: {model.name}",
             f"    provider: openai",
@@ -185,7 +185,7 @@ def generate_continue_config(
     # Add autocomplete model (if different from chat models)
     autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
     for model in autocomplete_only:
-        model_id = models.get_model_id_for_continue(model.docker_name, hw_info)
+        model_id = models.get_model_id_for_continue(model, hw_info)
         yaml_lines.extend([
             f"  - name: {model.name} (Autocomplete)",
             f"    provider: openai",
@@ -273,7 +273,7 @@ def generate_continue_config(
     json_config: Dict[str, Any] = {"models": []}
     
     for model in chat_models:
-        model_id = models.get_model_id_for_continue(model.docker_name, hw_info)
+        model_id = models.get_model_id_for_continue(model, hw_info)
         json_config["models"].append({
             "name": model.name,
             "provider": "openai",
@@ -284,7 +284,7 @@ def generate_continue_config(
         })
     
     for model in autocomplete_only:
-        model_id = models.get_model_id_for_continue(model.docker_name, hw_info)
+        model_id = models.get_model_id_for_continue(model, hw_info)
         json_config["models"].append({
             "name": f"{model.name} (Autocomplete)",
             "provider": "openai", 

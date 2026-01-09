@@ -46,6 +46,9 @@ def main() -> int:
         ui.print_info("Setup cancelled. Run again when ready!")
         return 0
     
+    # Install rich in background for better progress bars (non-blocking)
+    models._install_rich_background()
+    
     # Step 1: Hardware detection
     print()
     hw_info = hardware.detect_hardware()

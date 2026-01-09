@@ -9,7 +9,7 @@ import platform
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List
+from typing import Any, Dict, List
 
 from . import ui
 from . import utils
@@ -46,6 +46,8 @@ class HardwareInfo:
     docker_model_runner_available: bool = False
     dmr_api_endpoint: str = "http://localhost:12434/v1"  # Default, will be updated by docker module
     available_api_models: List[str] = field(default_factory=list)  # Models available via API
+    available_docker_hub_models: List[str] = field(default_factory=list)  # Models available on Docker Hub
+    discovered_model_tags: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # Cached model tag discovery results
     tier: HardwareTier = HardwareTier.C
     
     def get_tier_label(self) -> str:
@@ -185,14 +187,14 @@ def detect_hardware() -> HardwareInfo:
     
     info = HardwareInfo()
     
-    # Validate that we got some basic info
-    if not info.os_name:
-        ui.print_warning("Could not detect OS name")
-    
     # OS Detection
     info.os_name = platform.system()
     info.os_version = platform.release()
     info.cpu_arch = platform.machine()
+    
+    # Validate that we got some basic info
+    if not info.os_name:
+        ui.print_warning("Could not detect OS name")
     
     # CPU Detection
     if info.os_name == "Darwin":  # macOS
