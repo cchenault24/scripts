@@ -1022,6 +1022,108 @@ def select_best_model_with_fallback(
     return None
 
 
+def get_display_name_from_model(model_name: str, category: str = "", variant: Optional[str] = None) -> str:
+    """
+    Generate a human-readable display name from a model name.
+    
+    Args:
+        model_name: Model name (e.g., "llama3.2", "mistral", "granite-4.0-h-small")
+        category: Optional category hint (e.g., "general", "coding", "reasoning", "multimodal")
+        variant: Optional variant tag (e.g., "7B-Q4_K_M") - size will be extracted and included
+    
+    Returns:
+        Human-readable display name (e.g., "Llama 3.2", "Mistral:7B", "Granite 4.0 H-Small")
+    """
+    model_lower = model_name.lower()
+    
+    # Llama models
+    if "llama3.3" in model_lower:
+        base_name = "Llama 3.3"
+    elif "llama3.2" in model_lower:
+        base_name = "Llama 3.2"
+    elif "llama3.1" in model_lower:
+        base_name = "Llama 3.1"
+    elif "llama" in model_lower:
+        base_name = "Llama"
+    # Granite models
+    elif "granite-4.0-h-small" in model_lower or "granite4.0hsmall" in model_lower:
+        base_name = "Granite 4.0 H-Small"
+    elif "granite-4.0-h-micro" in model_lower or "granite4.0hmicro" in model_lower:
+        base_name = "Granite 4.0 H-Micro"
+    elif "granite-4.0-h-nano" in model_lower or "granite4.0hnano" in model_lower:
+        base_name = "Granite 4.0 H-Nano"
+    elif "granite-4.0-h-tiny" in model_lower or "granite4.0htiny" in model_lower:
+        base_name = "Granite 4.0 H-Tiny"
+    elif "granite" in model_lower:
+        base_name = "Granite"
+    # Mistral models
+    elif "mistral" in model_lower:
+        base_name = "Mistral"
+    # Codestral/Devstral
+    elif "codestral" in model_lower:
+        base_name = "Codestral"
+    elif "devstral" in model_lower:
+        base_name = "Devstral"
+    # Phi models
+    elif "phi4" in model_lower or "phi-4" in model_lower:
+        base_name = "Phi-4"
+    elif "phi" in model_lower:
+        base_name = "Phi"
+    # Embedding models
+    elif "nomic-embed" in model_lower or "nomicembed" in model_lower:
+        base_name = "Nomic Embed"
+    elif "granite-embedding" in model_lower or "graniteembedding" in model_lower:
+        base_name = "Granite Embedding"
+    elif "mxbai-embed" in model_lower or "mxbaiembed" in model_lower:
+        base_name = "MxBai Embed"
+    # Other models
+    elif "gemma" in model_lower:
+        base_name = "Gemma"
+    elif "moondream" in model_lower:
+        base_name = "Moondream"
+    elif "smolvlm" in model_lower:
+        base_name = "SmolVLM"
+    elif "tinyllama" in model_lower or "tiny-llama" in model_lower:
+        base_name = "TinyLlama"
+    else:
+        # Fallback: capitalize and format the model name
+        base_name = model_name.replace("-", " ").replace("_", " ").title()
+    
+    # Extract size from variant tag if provided (e.g., "7B-Q4_K_M" -> "7B")
+    size_suffix = ""
+    if variant:
+        # Match patterns like "7B", "13B", "70B", "3B", "1B", etc.
+        size_match = re.search(r'(\d+(?:\.\d+)?)\s*[Bb]', variant)
+        if size_match:
+            size_value = size_match.group(1)
+            # Format: "7B", "13B", "70B", etc. (remove decimal if .0)
+            if size_value.endswith('.0'):
+                size_value = size_value[:-2]
+            size_suffix = f":{size_value}B"
+    
+    # Add category suffix if provided
+    if category:
+        category_lower = category.lower()
+        if category_lower == "general":
+            return f"{base_name}{size_suffix} (General)"
+        elif category_lower == "coding":
+            return f"{base_name}{size_suffix} (Coding)"
+        elif category_lower == "reasoning":
+            return f"{base_name}{size_suffix} (Reasoning)"
+        elif category_lower == "multimodal":
+            return f"{base_name}{size_suffix} (Multimodal)"
+        elif category_lower == "utility":
+            return f"{base_name}{size_suffix} (Utility)"
+        elif category_lower == "embedding":
+            return f"{base_name}{size_suffix} (Embeddings)"
+    
+    # If variant size but no category, still include size
+    if size_suffix:
+        return f"{base_name}{size_suffix}"
+    
+    return base_name
+
+
 def discover_best_model_by_criteria(
     target_size: Optional[float],
     category: str,
@@ -2378,7 +2480,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if primary_result:
             model_name, variant = primary_result
             model_info = ModelInfo(
-                name="Llama 3.3 (Reasoning)",
+                name=get_display_name_from_model(model_name, "reasoning", variant),
                 docker_name=f"ai/{model_name}",
                 description="34B reasoning model",
                 ram_gb=calculate_model_ram(34.0, "Q4"),
@@ -2395,7 +2497,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if coding_result:
             model_name, variant = coding_result
             model_info = ModelInfo(
-                name="Granite 4.0 (Coding)",
+                name=get_display_name_from_model(model_name, "coding", variant),
                 docker_name=f"ai/{model_name}",
                 description="22B coding model",
                 ram_gb=calculate_model_ram(22.0, "Q5"),
@@ -2412,7 +2514,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if multimodal_result:
             model_name, variant = multimodal_result
             model_info = ModelInfo(
-                name="Llama 3.2 (Multimodal)",
+                name=get_display_name_from_model(model_name, "multimodal", variant),
                 docker_name=f"ai/{model_name}",
                 description="13B multimodal model",
                 ram_gb=calculate_model_ram(13.0, "Q5"),
@@ -2430,7 +2532,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if primary_result:
             model_name, variant = primary_result
             model_info = ModelInfo(
-                name="Llama 3.3 (Reasoning)",
+                name=get_display_name_from_model(model_name, "reasoning", variant),
                 docker_name=f"ai/{model_name}",
                 description="34B reasoning model",
                 ram_gb=calculate_model_ram(34.0, "Q4"),
@@ -2446,7 +2548,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if coding_result:
             model_name, variant = coding_result
             model_info = ModelInfo(
-                name="Granite 4.0 (Coding)",
+                name=get_display_name_from_model(model_name, "coding", variant),
                 docker_name=f"ai/{model_name}",
                 description="13B coding model",
                 ram_gb=calculate_model_ram(13.0, "Q5"),
@@ -2462,7 +2564,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if multimodal_result:
             model_name, variant = multimodal_result
             model_info = ModelInfo(
-                name="Phi-4 (Multimodal)",
+                name=get_display_name_from_model(model_name, "multimodal", variant),
                 docker_name=f"ai/{model_name}",
                 description="7B multimodal model",
                 ram_gb=calculate_model_ram(7.0, "Q4"),
@@ -2480,7 +2582,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if primary_result:
             model_name, variant = primary_result
             model_info = ModelInfo(
-                name="Llama 3.2 (General)",
+                name=get_display_name_from_model(model_name, "general", variant),
                 docker_name=f"ai/{model_name}",
                 description="13B general model",
                 ram_gb=calculate_model_ram(13.0, "Q4"),
@@ -2496,7 +2598,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if coding_result:
             model_name, variant = coding_result
             model_info = ModelInfo(
-                name="Phi-4 (Coding)",
+                name=get_display_name_from_model(model_name, "coding", variant),
                 docker_name=f"ai/{model_name}",
                 description="7B coding model",
                 ram_gb=calculate_model_ram(7.0, "Q4"),
@@ -2512,7 +2614,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if multimodal_result:
             model_name, variant = multimodal_result
             model_info = ModelInfo(
-                name="Granite Nano (Multimodal)",
+                name=get_display_name_from_model(model_name, "multimodal", variant),
                 docker_name=f"ai/{model_name}",
                 description="3B multimodal model",
                 ram_gb=calculate_model_ram(3.0, "Q4"),
@@ -2530,7 +2632,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if primary_result:
             model_name, variant = primary_result
             model_info = ModelInfo(
-                name="Llama 3.2 (General)",
+                name=get_display_name_from_model(model_name, "general", variant),
                 docker_name=f"ai/{model_name}",
                 description="7B general model",
                 ram_gb=calculate_model_ram(7.0, "Q4"),
@@ -2546,7 +2648,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if coding_result:
             model_name, variant = coding_result
             model_info = ModelInfo(
-                name="Granite Nano (Coding)",
+                name=get_display_name_from_model(model_name, "coding", variant),
                 docker_name=f"ai/{model_name}",
                 description="3B coding model",
                 ram_gb=calculate_model_ram(3.0, "Q4"),
@@ -2562,7 +2664,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if utility_result:
             model_name, variant = utility_result
             model_info = ModelInfo(
-                name="TinyLlama (Utility)",
+                name=get_display_name_from_model(model_name, "utility", variant),
                 docker_name=f"ai/{model_name}",
                 description="1B utility model",
                 ram_gb=calculate_model_ram(1.0, "Q4"),
@@ -2597,7 +2699,7 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
         if embed_result:
             model_name, variant = embed_result
             embed_model = ModelInfo(
-                name="Nomic Embed (Embeddings)",
+                name=get_display_name_from_model(model_name, "embedding", variant),
                 docker_name=f"ai/{model_name}",
                 description="Embedding model",
                 ram_gb=calculate_model_ram(0.3, "Q4"),  # Small embedding model
