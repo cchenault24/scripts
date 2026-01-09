@@ -3495,14 +3495,11 @@ def pull_models_docker(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                             pass
             
             if model_found:
-                # Check if parameters match expected (allow some tolerance)
-                expected_params = model.ram_gb  # Rough estimate: 8B model ~5GB, 3B model ~2GB
+                # Report success with parameter count if available
+                # Note: We don't validate parameter count against RAM size because they are different metrics
+                # (parameter count vs memory usage). The model was successfully downloaded, which is what matters.
                 if actual_params:
-                    if abs(actual_params - expected_params) > 2.0:  # More than 2GB difference
-                        ui.print_warning(f"{model.name} downloaded, but got {actual_params}B model instead of expected ~{expected_params}GB model")
-                        ui.print_info(f"Actual model: {actual_params}B parameters")
-                    else:
-                        ui.print_success(f"{model.name} downloaded successfully ({actual_params}B parameters)")
+                    ui.print_success(f"{model.name} downloaded successfully ({actual_params}B parameters)")
                 else:
                     ui.print_success(f"{model.name} downloaded successfully")
                 successfully_pulled.append(model)

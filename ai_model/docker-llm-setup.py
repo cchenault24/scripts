@@ -137,11 +137,15 @@ def main() -> int:
     print()
     config_path = config.generate_continue_config(pulled_models, hw_info)
     
-    # Step 11: Save setup summary
+    # Step 11: Generate global-rule.md
+    print()
+    rule_path = config.generate_global_rule()
+    
+    # Step 12: Save setup summary
     print()
     summary_path = config.save_setup_summary(pulled_models, hw_info)
     
-    # Step 12: Show next steps
+    # Step 13: Show next steps
     print()
     vscode.show_next_steps(config_path, pulled_models, hw_info)
     

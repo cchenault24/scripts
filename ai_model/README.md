@@ -29,6 +29,7 @@ This project provides an automated setup solution for running LLMs locally using
 - Recommends appropriate models based on your system
 - Pulls and configures models via Docker Model Runner
 - Generates Continue.dev configuration files for VS Code
+- Generates global rules file for assistant behavior
 - Sets up the complete development environment
 
 The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but also supports Linux and Windows systems with NVIDIA GPUs.
@@ -43,6 +44,7 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 - **Portfolio Recommendations**: Suggests model portfolios based on hardware tier
 - **Docker Integration**: Full Docker Model Runner integration for model management
 - **Continue.dev Configuration**: Generates both YAML and JSON config files
+- **Global Rules**: Automatically generates `global-rule.md` with assistant behavior rules
 - **VS Code Integration**: Optional automatic extension installation and setup
 
 ### Advanced Features
@@ -140,7 +142,8 @@ The script will:
 3. Guide you through model selection
 4. Pull selected models
 5. Generate Continue.dev configuration
-6. Provide next steps
+6. Generate global rules file
+7. Provide next steps
 
 ### Preset Selection
 
@@ -172,7 +175,8 @@ python3 docker-llm-setup.py
 6. RAM usage validation
 7. Model pulling
 8. Configuration generation
-9. Next steps display
+9. Global rules generation
+10. Next steps display
 
 ### Uninstall Script
 
@@ -271,6 +275,7 @@ Docker and Docker Model Runner management:
 #### `lib/config.py`
 Continue.dev configuration generation:
 - **generate_continue_config()**: Generates config.yaml and config.json
+- **generate_global_rule()**: Generates global-rule.md with assistant behavior rules
 - **save_setup_summary()**: Saves setup summary JSON
 - **generate_yaml()**: YAML generation utility
 
@@ -302,7 +307,7 @@ Preset Selection → Model Recommendations
     ↓
 Model Selection → RAM Validation
     ↓
-Model Pulling → Configuration Generation
+Model Pulling → Configuration Generation → Global Rules Generation
     ↓
 VS Code Setup → Next Steps
 ```
@@ -314,14 +319,43 @@ VS Code Setup → Next Steps
 - **macOS/Linux**: `~/.continue/config.yaml`
 - **Windows**: `%USERPROFILE%\.continue\config.yaml`
 
+### Global Rules Location
+
+- **macOS/Linux**: `~/.continue/rules/global-rule.md`
+- **Windows**: `%USERPROFILE%\.continue\rules\global-rule.md`
+
 ### Config Structure
 
 The generated config includes:
 - **Models**: Chat, edit, autocomplete, and embedding models
+  - All models include `supportsToolCalls: false` to fix @codebase compatibility with local models
+  - Chat models have roles: `chat`, `edit`, `apply`
+  - Autocomplete models have `autocompleteOptions` with optimized settings
+  - Embedding models have role: `embed`
+  - All models use `defaultCompletionOptions.contextLength` for context window
 - **API Endpoint**: Docker Model Runner API (typically `http://localhost:12434/v1`)
-- **Context Providers**: Codebase, folder, file, terminal, etc.
-- **Slash Commands**: Edit, comment, share
-- **Privacy**: Anonymous telemetry disabled
+- **Context Providers**: Codebase, folder, file, terminal, diff, problems, open (using new `context` format)
+- **Experimental Settings** (extension-specific): 
+  - `streamAfterToolRejection: true` - Prevents model from stopping mid-response if it tries to use a tool inappropriately (fixes palindrome/response interruption issues)
+  - Note: `codebaseUseToolCallingOnly` removed - using `supportsToolCalls: false` on models instead
+- **UI Settings** (extension-specific): 
+  - `showChatScrollbar: true` - Shows scrollbar in chat interface
+  - `wrapCodeblocks: true` - Wraps long code blocks for better readability
+  - `formatMarkdown: true` - Enables markdown formatting
+  - `textToSpeechOutput: false` - Disables TTS (not needed for coding)
+
+**Note**: The script no longer includes `systemMessage` in the config.yaml. All assistant behavior is controlled by the `global-rule.md` file.
+
+### Global Rules Structure
+
+The generated `global-rule.md` includes:
+- **CRITICAL RESPONSE RULE**: Guidelines for when to provide code vs. English explanations
+- **Output Format**: Rules for response formatting (no metadata, direct answers)
+- **React Components**: Guidelines for functional vs. class components
+- **TypeScript**: Type safety and best practices
+- **Redux**: State management patterns
+- **Material-UI**: Component usage guidelines
+- **Code Quality**: Production-ready code standards
 
 ### Manual Configuration
 
@@ -333,17 +367,49 @@ models:
     provider: openai
     model: ai/llama3.2
     apiBase: http://localhost:12434/v1
-    contextLength: 131072
     roles:
       - chat
       - edit
       - apply
+    defaultCompletionOptions:
+      contextLength: 131072
+    supportsToolCalls: false
+
+  - name: Llama 3.2 3B (Autocomplete)
+    provider: openai
+    model: ai/llama3.2:3b
+    apiBase: http://localhost:12434/v1
+    roles:
+      - autocomplete
+    autocompleteOptions:
+      debounceDelay: 300
+      modelTimeout: 3000
+    defaultCompletionOptions:
+      contextLength: 131072
+    supportsToolCalls: false
+
+context:
+  - provider: codebase
+  - provider: file
+  - provider: code
+  - provider: terminal
+  - provider: diff
+
+experimental:
+  streamAfterToolRejection: true
+
+ui:
+  showChatScrollbar: true
+  wrapCodeblocks: true
+  formatMarkdown: true
+  textToSpeechOutput: false
 ```
 
 ### Backup Files
 
 The script automatically backs up existing configs to:
 - `~/.continue/config.yaml.backup`
+- `~/.continue/rules/global-rule.md.backup`
 
 ## 🖥️ Hardware Tiers
 
@@ -497,9 +563,11 @@ docker model rm <model-name>
 # Remove config files
 rm ~/.continue/config.yaml
 rm ~/.continue/config.json
+rm ~/.continue/rules/global-rule.md
 
-# Restore backup
+# Restore backups
 cp ~/.continue/config.yaml.backup ~/.continue/config.yaml
+cp ~/.continue/rules/global-rule.md.backup ~/.continue/rules/global-rule.md
 ```
 
 ## 💻 Development
@@ -597,11 +665,31 @@ MIT License - See LICENSE file for details.
 
 ## 📝 Changelog
 
+### Version 2.0.0
+- **Fixed @codebase compatibility**: Added `supportsToolCalls: false` to all models to fix "Error parsing chat history" error
+- **Removed deprecated setting**: Removed `codebaseUseToolCallingOnly` from experimental (replaced with model-level `supportsToolCalls: false`)
+- **Updated to official schema**: 
+  - Changed `contextProviders` to `context` (new format)
+  - Moved `contextLength` to `defaultCompletionOptions.contextLength`
+  - Moved autocomplete settings to model-level `autocompleteOptions`
+  - Removed deprecated fields: `tabAutocompleteModel`, `embeddingsProvider`, `slashCommands`, `allowAnonymousTelemetry`
+- **Improved model configuration**: All models now properly configured with roles, completion options, and tool calling settings
+
+### Version 1.1.0
+- Added experimental settings to config.yaml:
+  - `streamAfterToolRejection: true` - Prevents response interruption on tool rejection
+- Added UI settings to config.yaml:
+  - Enhanced readability settings (scrollbar, codeblock wrapping, markdown formatting)
+  - Disabled text-to-speech output
+- Added autocomplete settings to model-level `autocompleteOptions`:
+  - Optimized `debounceDelay: 300` and `modelTimeout: 3000` for local llama3.3 model performance on M4 Pro
+
 ### Version 1.0.0
 - Initial release
 - Hardware detection and tier classification
 - Model catalog with variant discovery
 - Continue.dev configuration generation
+- Global rules file generation
 - VS Code integration
 - Uninstaller script
 - Apple Silicon optimization

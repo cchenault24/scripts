@@ -244,31 +244,41 @@ def generate_continue_config(
             f"    provider: openai",
             f"    model: {model_id}",
             f"    apiBase: {api_base_clean}",
-            f"    contextLength: {model.context_length}",
         ])
         
         # Add roles
         roles = ["chat", "edit", "apply"]
         if "agent" in model.roles:
             roles.append("agent")
+        if "autocomplete" in model.roles:
+            roles.append("autocomplete")
+        if "embed" in model.roles:
+            roles.append("embed")
         yaml_lines.append("    roles:")
         for role in roles:
             yaml_lines.append(f"      - {role}")
         
-        # Add system message for primary model
-        if i == 0:
+        # Add autocompleteOptions if model has autocomplete role
+        if "autocomplete" in model.roles:
             yaml_lines.extend([
-                "    systemMessage: |",
-                "      You are an expert coding assistant. You help with:",
-                "      - Writing clean, efficient code",
-                "      - Debugging and fixing issues", 
-                "      - Explaining code and concepts",
-                "      - Refactoring and optimization",
-                "      Be concise, accurate, and provide working code examples.",
+                "    autocompleteOptions:",
+                "      debounceDelay: 300",
+                "      modelTimeout: 3000",
             ])
+        
+        # Add defaultCompletionOptions with contextLength
+        yaml_lines.extend([
+            "    defaultCompletionOptions:",
+            f"      contextLength: {model.context_length}",
+        ])
+        
+        # Disable native tool calling to fix @codebase compatibility
+        # Let Continue.dev handle @codebase with system message tools instead
+        yaml_lines.append("    supportsToolCalls: false")
+        
         yaml_lines.append("")
     
-    # Add autocomplete model (if different from chat models)
+    # Add autocomplete models (with autocompleteOptions)
     autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
     for model in autocomplete_only:
         model_id = models.get_model_id_for_continue(model, hw_info)
@@ -279,60 +289,71 @@ def generate_continue_config(
             f"    apiBase: {api_base_clean}",
             "    roles:",
             "      - autocomplete",
+            "    autocompleteOptions:",
+            "      debounceDelay: 300",
+            "      modelTimeout: 3000",
+            "    defaultCompletionOptions:",
+            f"      contextLength: {model.context_length}",
+            "    supportsToolCalls: false",
             "",
         ])
     
-    # Tab autocomplete configuration
-    if autocomplete_models:
-        auto_model = autocomplete_models[0]
-        model_id = models.get_model_id_for_continue(auto_model.docker_name, hw_info)
+    # Add embedding models (if different from chat and autocomplete models)
+    embed_only = [m for m in embed_models if m not in chat_models and m not in autocomplete_models]
+    for model in embed_only:
+        model_id = models.get_model_id_for_continue(model, hw_info)
         yaml_lines.extend([
-            "# Tab autocomplete settings",
-            "tabAutocompleteModel:",
-            f"  provider: openai",
-            f"  model: {model_id}",
-            f"  apiBase: {api_base_clean}",
+            f"  - name: {model.name} (Embedding)",
+            f"    provider: openai",
+            f"    model: {model_id}",
+            f"    apiBase: {api_base_clean}",
+            "    roles:",
+            "      - embed",
+            "    defaultCompletionOptions:",
+            f"      contextLength: {model.context_length}",
+            "    supportsToolCalls: false",
             "",
         ])
     
-    # Embeddings configuration
-    if embed_models:
-        embed_model = embed_models[0]
-        model_id = models.get_model_id_for_continue(embed_model.docker_name, hw_info)
-        yaml_lines.extend([
-            "# Embeddings for semantic code search (@Codebase)",
-            "embeddingsProvider:",
-            f"  provider: openai",
-            f"  model: {model_id}",
-            f"  apiBase: {api_base_clean}",
-            "",
-        ])
-    
-    # Context providers
+    # Context providers (using new schema format)
     yaml_lines.extend([
         "# Context providers for code understanding",
-        "contextProviders:",
-        "  - name: codebase",
-        "    params: {}",
-        "  - name: folder",
-        "  - name: file",
-        "  - name: code",
-        "  - name: terminal",
-        "  - name: diff",
-        "  - name: problems",
-        "  - name: open",
+        "# Note: contextProviders is deprecated, use 'context' instead",
+        "context:",
+        "  - provider: codebase",
+        "  - provider: folder",
+        "  - provider: file",
+        "  - provider: code",
+        "  - provider: terminal",
+        "  - provider: diff",
+        "  - provider: problems",
+        "  - provider: open",
         "",
-        "# Slash commands",
-        "slashCommands:",
-        "  - name: edit",
-        "    description: Edit selected code",
-        "  - name: comment",
-        "    description: Add comments to code",
-        "  - name: share",
-        "    description: Share conversation",
+    ])
+    
+    # Experimental settings (extension-specific, not in official schema)
+    # These may still work but are not documented in the official schema
+    yaml_lines.extend([
+        "# Experimental settings (extension-specific)",
+        "# Note: These settings are not in the official schema but may still be supported",
+        "# streamAfterToolRejection: prevents model from stopping mid-response if it tries to use a tool inappropriately",
+        "# Note: codebaseUseToolCallingOnly removed - using supportsToolCalls: false on models instead",
+        "experimental:",
+        "  streamAfterToolRejection: true",
         "",
-        "# Privacy settings",
-        "allowAnonymousTelemetry: false",
+    ])
+    
+    # UI settings (extension-specific, not in official schema)
+    # These may still work but are not documented in the official schema
+    yaml_lines.extend([
+        "# UI settings (extension-specific)",
+        "# Note: These settings are not in the official schema but may still be supported",
+        "# Improves readability and disables unnecessary features like TTS",
+        "ui:",
+        "  showChatScrollbar: true",
+        "  wrapCodeblocks: true",
+        "  formatMarkdown: true",
+        "  textToSpeechOutput: false",
         "",
     ])
     
@@ -360,19 +381,39 @@ def generate_continue_config(
     # Also create a JSON version for compatibility
     json_path = output_path.parent / "config.json"
     
-    # Build JSON config
+    # Build JSON config (using new schema format)
     json_config: Dict[str, Any] = {"models": []}
     
     for model in chat_models:
         model_id = models.get_model_id_for_continue(model, hw_info)
-        json_config["models"].append({
+        roles = ["chat", "edit", "apply"]
+        if "agent" in model.roles:
+            roles.append("agent")
+        if "autocomplete" in model.roles:
+            roles.append("autocomplete")
+        if "embed" in model.roles:
+            roles.append("embed")
+        
+        model_config = {
             "name": model.name,
             "provider": "openai",
             "model": model_id,
             "apiBase": api_base_clean,
-            "contextLength": model.context_length,
-            "roles": ["chat", "edit", "apply"] + (["agent"] if "agent" in model.roles else []),
-        })
+            "defaultCompletionOptions": {
+                "contextLength": model.context_length,
+            },
+            "roles": roles,
+            "supportsToolCalls": False,
+        }
+        
+        # Add autocompleteOptions if model has autocomplete role
+        if "autocomplete" in model.roles:
+            model_config["autocompleteOptions"] = {
+                "debounceDelay": 300,
+                "modelTimeout": 3000,
+            }
+        
+        json_config["models"].append(model_config)
     
     for model in autocomplete_only:
         model_id = models.get_model_id_for_continue(model, hw_info)
@@ -382,41 +423,144 @@ def generate_continue_config(
             "model": model_id,
             "apiBase": api_base_clean,
             "roles": ["autocomplete"],
+            "autocompleteOptions": {
+                "debounceDelay": 300,
+                "modelTimeout": 3000,
+            },
+            "defaultCompletionOptions": {
+                "contextLength": model.context_length,
+            },
+            "supportsToolCalls": False,
         })
     
-    if autocomplete_models:
-        auto_model = autocomplete_models[0]
-        model_id = models.get_model_id_for_continue(auto_model.docker_name, hw_info)
-        json_config["tabAutocompleteModel"] = {
+    # Add embedding models
+    embed_only = [m for m in embed_models if m not in chat_models and m not in autocomplete_models]
+    for model in embed_only:
+        model_id = models.get_model_id_for_continue(model, hw_info)
+        json_config["models"].append({
+            "name": f"{model.name} (Embedding)",
             "provider": "openai",
             "model": model_id,
             "apiBase": api_base_clean,
-        }
+            "roles": ["embed"],
+            "defaultCompletionOptions": {
+                "contextLength": model.context_length,
+            },
+            "supportsToolCalls": False,
+        })
     
-    if embed_models:
-        embed_model = embed_models[0]
-        model_id = models.get_model_id_for_continue(embed_model.docker_name, hw_info)
-        json_config["embeddingsProvider"] = {
-            "provider": "openai",
-            "model": model_id,
-            "apiBase": api_base_clean,
-        }
-    
-    json_config["contextProviders"] = [
-        {"name": "codebase", "params": {}},
-        {"name": "folder"},
-        {"name": "file"},
-        {"name": "code"},
-        {"name": "terminal"},
-        {"name": "diff"},
-        {"name": "problems"},
+    # Context providers (new format)
+    json_config["context"] = [
+        {"provider": "codebase"},
+        {"provider": "folder"},
+        {"provider": "file"},
+        {"provider": "code"},
+        {"provider": "terminal"},
+        {"provider": "diff"},
+        {"provider": "problems"},
+        {"provider": "open"},
     ]
     
-    json_config["allowAnonymousTelemetry"] = False
+    # Experimental and UI settings (extension-specific)
+    json_config["experimental"] = {
+        "streamAfterToolRejection": True,
+    }
+    
+    json_config["ui"] = {
+        "showChatScrollbar": True,
+        "wrapCodeblocks": True,
+        "formatMarkdown": True,
+        "textToSpeechOutput": False,
+    }
     
     with open(json_path, "w") as f:
         json.dump(json_config, f, indent=2)
     
     ui.print_info(f"JSON config also saved to {json_path}")
+    
+    return output_path
+
+
+def generate_global_rule(
+    output_path: Optional[Path] = None
+) -> Path:
+    """
+    Generate Continue.dev global-rule.md file.
+    
+    Args:
+        output_path: Optional output path (default: ~/.continue/rules/global-rule.md)
+    
+    Returns:
+        Path to saved global-rule.md file
+    """
+    if output_path is None:
+        output_path = Path.home() / ".continue" / "rules" / "global-rule.md"
+    
+    # Create directory if needed
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Backup existing rule if present
+    if output_path.exists():
+        backup_path = output_path.with_suffix(".md.backup")
+        shutil.copy(output_path, backup_path)
+        ui.print_info(f"Backed up existing global-rule.md to {backup_path}")
+    
+    # Generate global-rule.md content
+    rule_content = """---
+description: Senior-level coding assistant rules for React, TypeScript, Redux, and Material-UI projects
+---
+
+CRITICAL RESPONSE RULE: 
+- General questions (definitions, explanations, concepts) → Answer ONLY with clear English text
+- Code requests (implementation, debugging, refactoring) → Provide code with explanation
+- When in doubt, default to English explanation first, then ask if code is needed
+
+DO NOT write code for questions like "What is X?", "How does Y work?", "Explain Z"
+ONLY write code when explicitly asked to implement, fix, or create something.
+
+Output Format:
+- Respond directly to the question asked
+- Do not prefix responses with role labels, agent names, or tool descriptions
+- Do not include metadata like "Agent:", "Tool:", "Creating file:", etc.
+- Match response type to question type (English for questions, code for implementations)
+
+Act as a senior-level coding assistant with deep expertise in React, TypeScript, Redux, and Material-UI. Provide guidance that reflects industry best practices and production-ready code quality.
+
+This project uses React, TypeScript, Redux, and Material-UI. Always provide context-aware assistance based on these technologies.
+
+Context Handling: Include project-wide context for architectural decisions and patterns. Keep context focused for specific coding tasks to balance comprehensiveness with performance.
+
+Code Review: Apply strict standards by default - flag potential issues, enforce best practices, and point out style inconsistencies. Be adaptive for quick fixes or exploratory work where appropriate. Review code with the rigor expected at senior engineer level.
+
+TypeScript: Balance type safety with practicality. Use type inference where clear, explicit types where needed. Match existing type patterns in the codebase. Avoid `any` type - prefer `unknown` for type-safe alternatives. Use `never` appropriately for exhaustiveness checking and functions that never return. Demonstrate senior-level TypeScript expertise including advanced types when appropriate.
+
+Redux: Always match the existing Redux patterns used in the codebase. Do not suggest alternative patterns. Apply best practices for state management, action creators, and selectors.
+
+Material-UI: Match the existing Material-UI version and component patterns currently used in the codebase. Do not suggest upgrades or newer approaches.
+
+Code Formatting: Always suggest proper formatting based on Prettier/ESLint rules configured in the project.
+
+Dependencies: Prefer native/built-in solutions over external dependencies when reasonable. When external dependencies are needed, match the project's existing dependency patterns. Consider long-term maintenance implications.
+
+Code Review Priority: When reviewing code, prioritize in this order: 1) Security vulnerabilities and bugs, 2) Performance implications, 3) Maintainability and readability, 4) Accessibility compliance. Identify issues a senior engineer would catch.
+
+React Components: Use functional components with hooks for all new code. When reviewing existing class components, only suggest refactoring if explicitly asked to modernize the code or if the class component has hooks-related bugs or limitations. Otherwise, work within the existing component pattern.
+
+Error Handling: Point out missing error handling and edge cases, but don't automatically add it unless explicitly asked. Match the error handling patterns already established in the codebase. Consider production-level error scenarios.
+
+Refactoring: Briefly mention improvement opportunities while staying focused on the main question. Suggest improvements for code quality and bugs, but not for style or preference changes. Think about scalability and maintainability.
+
+Verbosity: Be concise for simple tasks and detailed for complex architectural decisions. Adapt explanation depth based on the complexity of the request. Communicate with the clarity expected between senior engineers.
+
+Testing: Assume testing is handled separately. Do not mention testing considerations unless explicitly asked.
+
+Code Quality: Provide production-ready code that considers edge cases, performance, accessibility, and long-term maintainability. Avoid overly clever solutions in favor of clear, maintainable code.
+"""
+    
+    # Write global-rule.md
+    with open(output_path, "w") as f:
+        f.write(rule_content)
+    
+    ui.print_success(f"Global rule file saved to {output_path}")
     
     return output_path
