@@ -177,11 +177,15 @@ def main() -> int:
     print()
     rule_path = config.generate_global_rule()
     
-    # Step 13: Save setup summary
+    # Step 13: Generate .continueignore
+    print()
+    ignore_path = config.generate_continueignore(base_directory=ollama_dir)
+    
+    # Step 14: Save setup summary
     print()
     summary_path = config.save_setup_summary(pulled_models, hw_info)
     
-    # Step 14: Show next steps
+    # Step 15: Show next steps
     print()
     ide.show_next_steps(config_path, pulled_models, hw_info, target_ide=target_ide)
     

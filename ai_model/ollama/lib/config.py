@@ -496,6 +496,240 @@ def generate_continue_config(
     return output_path
 
 
+def generate_continueignore(
+    output_path: Optional[Path] = None,
+    base_directory: Optional[Path] = None
+) -> Path:
+    """
+    Generate .continueignore file to ignore non-source code files and directories.
+    
+    Args:
+        output_path: Optional output path (default: base_directory/.continueignore)
+        base_directory: Optional base directory where .continueignore should be created
+                        (default: parent of lib/ directory, i.e., ai_model/ollama/)
+    
+    Returns:
+        Path to saved .continueignore file
+    """
+    if output_path is None:
+        if base_directory is None:
+            # Default: assume config.py is in lib/, so go up one level to get ollama/ directory
+            base_directory = Path(__file__).resolve().parent.parent
+        output_path = base_directory / ".continueignore"
+    
+    # Create directory if needed
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Backup existing .continueignore if present
+    if output_path.exists():
+        backup_path = output_path.with_suffix(".continueignore.backup")
+        shutil.copy(output_path, backup_path)
+        ui.print_info(f"Backed up existing .continueignore to {backup_path}")
+    
+    # Generate .continueignore content
+    ignore_content = """# Version control
+.git/
+.svn/
+.hg/
+.gitignore
+.gitattributes
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+.python-version
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js and JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.yarn/
+.pnp.*
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.js
+.next/
+.nuxt/
+.output/
+.turbo/
+.parcel-cache/
+.cache/
+.eslintcache
+.stylelintcache
+
+# Java and JVM languages
+target/
+.gradle/
+.mvn/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+
+# Go
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Rust
+target/
+Cargo.lock
+
+# PHP
+vendor/
+composer.lock
+
+# Ruby
+vendor/bundle/
+.bundle/
+*.gem
+*.rbc
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+.ENV/
+.conda/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Testing and coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
+.nyc_output/
+coverage/
+*.lcov
+.jest/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+tmp/
+temp/
+.tmp/
+
+# Documentation builds
+docs/_build/
+site/
+_book/
+.docusaurus/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.envrc
+
+# Build and output directories
+out/
+output/
+bin/
+obj/
+lib/
+libs/
+*.a
+*.o
+*.dylib
+*.dll
+
+# Package manager locks and caches
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+composer.lock
+Pipfile.lock
+poetry.lock
+Gemfile.lock
+Podfile.lock
+
+# Framework-specific
+.sass-cache/
+.angular/
+.vuepress/dist/
+.serverless/
+.aws-sam/
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Compiled assets
+*.min.js
+*.min.css
+*.map
+assets/dist/
+public/dist/
+static/dist/
+"""
+    
+    # Write .continueignore
+    with open(output_path, "w") as f:
+        f.write(ignore_content)
+    
+    ui.print_success(f".continueignore file saved to {output_path}")
+    
+    return output_path
+
+
 def generate_global_rule(
     output_path: Optional[Path] = None
 ) -> Path:
