@@ -1,6 +1,24 @@
-# Docker Model Runner + Continue.dev Setup
+# Local LLM Setup for Continue.dev
 
-A comprehensive, interactive Python script for setting up locally hosted Large Language Models (LLMs) via Docker Model Runner (DMR) and configuring Continue.dev for VS Code and IntelliJ IDEA. Optimized for Mac with Apple Silicon (M1/M2/M3/M4) and supports Linux/Windows with NVIDIA GPUs.
+A comprehensive, interactive Python script for setting up locally hosted Large Language Models (LLMs) and configuring Continue.dev for VS Code and IntelliJ IDEA. Optimized for Mac with Apple Silicon (M1/M2/M3/M4) and supports Linux/Windows with NVIDIA GPUs.
+
+## Installation Options
+
+This project supports two local LLM backends:
+
+### Option 1: Docker Model Runner (Recommended for Docker users)
+- **Requires**: Docker Desktop 4.40+ (with Docker Model Runner enabled)
+- **Setup**: `python3 docker/docker-llm-setup.py`
+- **Pros**: Integrated with Docker, official Docker images
+- **Cons**: Requires Docker Desktop
+
+### Option 2: Ollama (Recommended for standalone installation)
+- **Requires**: Ollama installed (https://ollama.com)
+- **Setup**: `python3 ollama/ollama-llm-setup.py`
+- **Pros**: Lightweight, dedicated LLM runtime, easier setup
+- **Cons**: Separate installation required
+
+Both options generate the same Continue.dev configuration and work identically in VS Code and IntelliJ IDEA.
 
 ## 📋 Table of Contents
 
@@ -24,16 +42,16 @@ A comprehensive, interactive Python script for setting up locally hosted Large L
 
 ## 🎯 Overview
 
-This project provides an automated setup solution for running LLMs locally using Docker Model Runner, a feature introduced in Docker Desktop 4.40+. It automatically:
+This project provides an automated setup solution for running LLMs locally using either Docker Model Runner or Ollama. It automatically:
 
 - Detects your hardware capabilities (CPU, RAM, GPU)
 - Recommends appropriate models based on your system
-- Pulls and configures models via Docker Model Runner
+- Pulls and configures models via Docker Model Runner or Ollama (your choice)
 - Generates Continue.dev configuration files for VS Code and IntelliJ IDEA
 - Generates global rules file for assistant behavior
 - Sets up the complete development environment
 
-The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but also supports Linux and Windows systems with NVIDIA GPUs.
+The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but also supports Linux and Windows systems with NVIDIA GPUs. Both Docker Model Runner and Ollama backends are fully supported.
 
 ## ✨ Features
 
@@ -43,7 +61,9 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 - **Tier Classification**: Classifies hardware into tiers (S, A, B, C, D) for model recommendations
 - **Model Selection**: Interactive model selection with hardware-aware recommendations
 - **Portfolio Recommendations**: Suggests model portfolios based on hardware tier
-- **Docker Integration**: Full Docker Model Runner integration for model management
+- **Backend Support**: Full support for both Docker Model Runner and Ollama
+- **Docker Integration**: Full Docker Model Runner integration for model management (Docker option)
+- **Ollama Integration**: Full Ollama integration for model management (Ollama option)
 - **Continue.dev Configuration**: Generates both YAML and JSON config files
 - **Global Rules**: Automatically generates `global-rule.md` with assistant behavior rules
 - **VS Code Integration**: Optional automatic extension installation and setup
@@ -53,9 +73,9 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 
 - **Variant Discovery**: Automatically discovers and selects optimal model variants (quantization levels)
 - **RAM Validation**: Validates model selections against available system memory
-- **API Endpoint Detection**: Automatically detects Docker Model Runner API endpoints
+- **API Endpoint Detection**: Automatically detects API endpoints (Docker Model Runner or Ollama)
 - **Backup & Restore**: Backs up existing Continue.dev configs before overwriting
-- **Progress Tracking**: Enhanced progress bars with optional `rich` library support
+- **Progress Tracking**: Enhanced progress bars with real-time download progress (percentage, speed, time remaining) for both Docker and Ollama backends, with optional `rich` library support (auto-installed if needed)
 - **Error Handling**: Comprehensive error handling with user-friendly messages
 
 ### Platform Support
@@ -69,7 +89,9 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 ### System Requirements
 
 - **Python**: 3.8 or higher
-- **Docker Desktop**: 4.40 or later (with Docker Model Runner enabled)
+- **Backend** (choose one):
+  - **Docker Desktop**: 4.40 or later (with Docker Model Runner enabled) - for Docker option
+  - **Ollama**: Latest version (https://ollama.com) - for Ollama option
 - **Operating System**:
   - macOS 12.0+ (recommended for Apple Silicon)
   - Linux (with NVIDIA drivers for GPU support)
@@ -87,7 +109,7 @@ The script works with Python standard library only, but can optionally use:
 
 - `rich>=13.7.0`: Enhanced terminal output with progress bars (auto-installed if available)
 - `pyyaml>=6.0`: YAML parsing (not required - script has built-in YAML generator)
-- `requests>=2.31.0`: HTTP requests (not required - uses subprocess for docker commands)
+- `requests>=2.31.0`: HTTP requests (not required - uses subprocess for backend commands)
 
 ## 🚀 Installation
 
@@ -106,10 +128,12 @@ git clone <repository-url> ai_model
 python3 --version  # Should be 3.8+
 ```
 
-### 3. Install Docker Desktop
+### 3. Choose Your Backend
 
-1. Download from [docker.com/desktop](https://docker.com/desktop)
-2. Install and start Docker Desktop
+#### Option A: Docker Model Runner
+
+1. Install Docker Desktop from [docker.com/desktop](https://docker.com/desktop)
+2. Start Docker Desktop
 3. Enable Docker Model Runner:
    - Open Docker Desktop
    - Go to Settings → Features in development (or Beta features)
@@ -121,26 +145,39 @@ python3 --version  # Should be 3.8+
    docker desktop enable model-runner --tcp 12434
    ```
 
-### 4. Verify Docker Model Runner
+4. Verify Docker Model Runner:
+   ```bash
+   docker model list
+   ```
 
-```bash
-docker model list
-```
+#### Option B: Ollama
 
-If this command works, Docker Model Runner is enabled.
+1. Install Ollama from [ollama.com](https://ollama.com)
+2. Verify installation:
+   ```bash
+   ollama --version
+   ollama list
+   ```
 
 ## 🎬 Quick Start
 
-### Basic Setup
+### Docker Model Runner Setup
 
 ```bash
 cd ai_model
-python3 docker-llm-setup.py
+python3 docker/docker-llm-setup.py
+```
+
+### Ollama Setup
+
+```bash
+cd ai_model
+python3 ollama/ollama-llm-setup.py
 ```
 
 The script will:
 1. Detect your hardware
-2. Check Docker and Docker Model Runner
+2. Check backend (Docker Model Runner or Ollama)
 3. Guide you through model selection
 4. Pull selected models
 5. Generate Continue.dev configuration
@@ -162,17 +199,27 @@ Choose "Custom" preset to manually select models based on your needs.
 
 ## 📖 Usage
 
-### Setup Script
+### Setup Scripts
+
+#### Docker Model Runner Setup
 
 ```bash
-python3 docker-llm-setup.py
+cd ai_model
+python3 docker/docker-llm-setup.py
 ```
 
-**Interactive Flow:**
+#### Ollama Setup
+
+```bash
+cd ai_model
+python3 ollama/ollama-llm-setup.py
+```
+
+**Interactive Flow (both options):**
 1. Hardware detection
 2. IDE selection (VS Code, IntelliJ IDEA, or Both)
-3. Docker verification
-4. Docker Model Runner check
+3. Backend verification (Docker Model Runner or Ollama)
+4. API check
 5. Preset selection (or Custom)
 6. Model selection (with recommendations)
 7. RAM usage validation
@@ -181,31 +228,45 @@ python3 docker-llm-setup.py
 10. Global rules generation
 11. Next steps display
 
-### Uninstall Script
+### Uninstall Scripts
+
+#### Docker Model Runner Uninstall
 
 ```bash
-python3 docker-llm-uninstall.py
+python3 docker/docker-llm-uninstall.py
 ```
 
-**Options:**
+#### Ollama Uninstall
+
 ```bash
-# Skip Docker checks (useful if Docker is hanging)
-python3 docker-llm-uninstall.py --skip-docker-checks
+python3 ollama/ollama-llm-uninstall.py
+```
+
+**Options (both uninstallers):**
+```bash
+# Skip backend checks (useful if backend is hanging)
+python3 docker/docker-llm-uninstall.py --skip-docker-checks
+python3 ollama/ollama-llm-uninstall.py --skip-docker-checks
 
 # Skip model removal
-python3 docker-llm-uninstall.py --skip-models
+python3 docker/docker-llm-uninstall.py --skip-models
+python3 ollama/ollama-llm-uninstall.py --skip-models
 
 # Skip config file removal
-python3 docker-llm-uninstall.py --skip-config
+python3 docker/docker-llm-uninstall.py --skip-config
+python3 ollama/ollama-llm-uninstall.py --skip-config
 
 # Skip both VS Code extension and IntelliJ plugin removal
-python3 docker-llm-uninstall.py --skip-extension
+python3 docker/docker-llm-uninstall.py --skip-extension
+python3 ollama/ollama-llm-uninstall.py --skip-extension
 
 # Skip only VS Code extension removal
-python3 docker-llm-uninstall.py --skip-vscode
+python3 docker/docker-llm-uninstall.py --skip-vscode
+python3 ollama/ollama-llm-uninstall.py --skip-vscode
 
 # Skip only IntelliJ plugin removal
-python3 docker-llm-uninstall.py --skip-intellij
+python3 docker/docker-llm-uninstall.py --skip-intellij
+python3 ollama/ollama-llm-uninstall.py --skip-intellij
 ```
 
 ### IDE-Specific Uninstallation
@@ -257,9 +318,11 @@ cp ~/.continue/rules/global-rule.md.backup ~/.continue/rules/global-rule.md
   - Windows: `%APPDATA%\JetBrains\*\plugins\Continue`
 - **Manual removal**: If automatic removal fails, you can delete the plugin directory directly or use IntelliJ's UI
 
-### Docker Model Runner Commands
+### Backend Commands
 
 After setup, you can manage models directly:
+
+**Docker Model Runner:**
 
 ```bash
 # List installed models
@@ -275,35 +338,68 @@ docker model run ai/llama3.2
 docker model rm ai/llama3.2
 ```
 
+**Ollama:**
+
+```bash
+# List installed models
+ollama list
+
+# Pull a model
+ollama pull llama3.2:3b
+
+# Run a model interactively
+ollama run llama3.2:3b
+
+# Remove a model
+ollama rm llama3.2:3b
+```
+
 ## 📁 Project Structure
 
 ```
 ai_model/
-├── docker-llm-setup.py          # Main setup script
-├── docker-llm-uninstall.py     # Uninstaller script
-├── requirements-docker-setup.txt  # Optional dependencies
-├── README.md                    # This file
-└── lib/                         # Library modules
-    ├── __init__.py              # Package initialization
-    ├── config.py                # Continue.dev config generation
-    ├── docker.py                # Docker & DMR management
-    ├── hardware.py              # Hardware detection & classification
-    ├── models.py                # Model catalog & selection
-    ├── ui.py                    # Terminal UI utilities
-    ├── utils.py                 # General utilities
-    └── ide.py                   # IDE integration (VS Code & IntelliJ)
+├── docker/                      # Docker Model Runner implementation
+│   ├── docker-llm-setup.py      # Docker setup script
+│   ├── docker-llm-uninstall.py  # Docker uninstaller script
+│   ├── requirements-docker-setup.txt
+│   └── lib/                     # Docker-specific modules
+│       ├── __init__.py
+│       ├── config.py
+│       ├── docker.py
+│       ├── hardware.py
+│       ├── ide.py
+│       ├── models.py
+│       ├── ui.py
+│       └── utils.py
+├── ollama/                      # Ollama implementation
+│   ├── ollama-llm-setup.py      # Ollama setup script
+│   ├── ollama-llm-uninstall.py  # Ollama uninstaller script
+│   ├── requirements-ollama-setup.txt
+│   └── lib/                     # Ollama-specific modules
+│       ├── __init__.py
+│       ├── config.py
+│       ├── ollama.py
+│       ├── hardware.py
+│       ├── ide.py
+│       ├── models.py
+│       ├── ui.py
+│       └── utils.py
+├── lib/                         # Shared hardware detection module
+│   └── hardware.py              # Hardware detection & classification
+└── README.md                    # This file
 ```
 
 ## 🏗️ Architecture
 
 ### Module Overview
 
-#### `docker-llm-setup.py`
-Main entry point. Orchestrates the setup workflow:
+#### `docker-llm-setup.py` / `ollama-llm-setup.py`
+Main entry points. Orchestrate the setup workflow:
 - Hardware detection
 - IDE selection (VS Code, IntelliJ, or Both)
-- Docker verification
+- Backend verification (Docker Model Runner or Ollama)
 - Model selection
+- Model pulling with progress tracking
 - Configuration generation
 - User guidance
 
@@ -315,21 +411,30 @@ Hardware detection and classification:
 - **calculate_os_overhead()**: Calculates OS memory overhead
 - **get_estimated_model_memory()**: Estimates available RAM for models
 
-#### `lib/models.py`
+#### `lib/models.py` (Docker & Ollama)
 Model catalog and selection:
 - **ModelInfo**: Dataclass for model metadata
 - **MODEL_CATALOG**: Comprehensive model catalog
 - **select_preset()**: Preset selection based on hardware tier
 - **select_models()**: Interactive model selection
 - **generate_portfolio_recommendation()**: Hardware-aware recommendations
-- **pull_models_docker()**: Pulls models via Docker Model Runner
+- **pull_models_docker()**: Pulls models via Docker Model Runner (Docker version)
+- **pull_models_ollama()**: Pulls models via Ollama with rich progress bars (Ollama version)
 - **validate_model_selection()**: Validates RAM usage
+- **discover_ollama_model_tags()**: Discovers available model variants from Ollama API
+- **parse_tag_info()**: Parses Ollama model tags to extract size and quantization info
 
-#### `lib/docker.py`
+#### `lib/docker.py` (Docker only)
 Docker and Docker Model Runner management:
 - **check_docker()**: Verifies Docker installation
 - **check_docker_model_runner()**: Verifies DMR availability
 - **fetch_available_models_from_api()**: Fetches models from DMR API
+
+#### `lib/ollama.py` (Ollama only)
+Ollama management:
+- **check_ollama()**: Verifies Ollama installation and API availability
+- **install_ollama()**: Prompts user to install Ollama if not found
+- **get_installation_instructions()**: Provides platform-specific installation instructions
 
 #### `lib/config.py`
 Continue.dev configuration generation:
@@ -403,7 +508,9 @@ The generated config includes:
   - Autocomplete models have `autocompleteOptions` with optimized settings
   - Embedding models have role: `embed`
   - All models use `defaultCompletionOptions.contextLength` for context window
-- **API Endpoint**: Docker Model Runner API (typically `http://localhost:12434/v1`)
+- **API Endpoint**: 
+  - Docker Model Runner: `http://localhost:12434/v1`
+  - Ollama: `http://localhost:11434/v1`
 - **Context Providers**: Codebase, folder, file, terminal, diff, problems, open (using new `context` format)
 
 **Note**: The config strictly follows the Continue.dev schema. Fields not in the official schema (like `supportsToolCalls`, `experimental`, and `ui`) have been removed to ensure validation compliance.
@@ -425,6 +532,7 @@ The generated `global-rule.md` includes:
 
 You can manually edit the generated config:
 
+**Docker Model Runner Example:**
 ```yaml
 name: Docker Model Runner Local LLM
 version: 1.0.0
@@ -440,25 +548,24 @@ models:
       - apply
     defaultCompletionOptions:
       contextLength: 131072
+```
 
-  - name: Llama 3.2 3B (Autocomplete)
+**Ollama Example:**
+```yaml
+name: Ollama Local LLM
+version: 1.0.0
+
+models:
+  - name: Llama 3.2
     provider: openai
-    model: ai/llama3.2:3b
-    apiBase: http://localhost:12434/v1
+    model: llama3.2:3b
+    apiBase: http://localhost:11434/v1
     roles:
-      - autocomplete
-    autocompleteOptions:
-      debounceDelay: 300
-      modelTimeout: 3000
+      - chat
+      - edit
+      - apply
     defaultCompletionOptions:
       contextLength: 131072
-
-context:
-  - provider: codebase
-  - provider: file
-  - provider: code
-  - provider: terminal
-  - provider: diff
 ```
 
 ### Backup Files
@@ -614,24 +721,40 @@ Valid roles per Continue.dev schema:
 
 ### Models Not Pulling
 
-**Problem**: `docker model pull` fails or hangs
+**Problem**: Model pull fails or hangs
 
-**Solutions**:
+**Docker Model Runner Solutions**:
 1. Check Docker Desktop is running
 2. Verify internet connection
 3. Check Docker Hub access
 4. Try pulling manually: `docker model pull ai/llama3.2`
 5. Check Docker logs: Docker Desktop → Troubleshoot → View logs
 
+**Ollama Solutions**:
+1. Check Ollama is running: `ollama list`
+2. Verify internet connection
+3. Check Ollama service: `ollama serve` (if not running as service)
+4. Try pulling manually: `ollama pull llama3.2:3b`
+5. Check Ollama logs: `ollama logs` or system logs
+6. Verify model name format (Ollama uses `model:tag` format, e.g., `llama3.2:3b`)
+
 ### API Endpoint Not Reachable
 
 **Problem**: Continue.dev can't connect to model API
 
-**Solutions**:
+**Docker Model Runner Solutions**:
 1. Verify model is running: `docker model list`
 2. Start model: `docker model run <model-name>`
 3. Check API endpoint: `curl http://localhost:12434/v1/models`
 4. Verify port 12434 is not blocked by firewall
+5. Check Docker Desktop is running
+
+**Ollama Solutions**:
+1. Verify Ollama service is running: `ollama list`
+2. Start Ollama service if needed: `ollama serve` (or start as system service)
+3. Check API endpoint: `curl http://localhost:11434/v1/models`
+4. Verify port 11434 is not blocked by firewall
+5. Check Ollama is installed: `ollama --version`
 
 ### Insufficient RAM
 
@@ -665,8 +788,12 @@ Valid roles per Continue.dev schema:
 4. Check IntelliJ IDEA Event Log: Help → Show Log in Finder/Explorer
 5. Verify plugin is installed: Preferences → Plugins → Installed → Search "Continue"
 6. Reinstall Continue plugin if needed
-7. Check that model server is running: `docker model list`
-8. Verify API endpoint is accessible: `curl http://localhost:12434/v1/models`
+7. Check that model server is running:
+   - Docker: `docker model list`
+   - Ollama: `ollama list`
+8. Verify API endpoint is accessible:
+   - Docker: `curl http://localhost:12434/v1/models`
+   - Ollama: `curl http://localhost:11434/v1/models`
 9. If models still don't appear:
    - Check IntelliJ IDEA version compatibility (plugin may require specific version)
    - Try invalidating caches: File → Invalidate Caches / Restart
@@ -696,7 +823,7 @@ Valid roles per Continue.dev schema:
 ### Full Uninstallation
 
 ```bash
-python3 docker-llm-uninstall.py
+python3 docker/docker-llm-uninstall.py
 ```
 
 This will:
@@ -714,41 +841,41 @@ Use flags to skip specific steps:
 
 ```bash
 # Only remove models
-python3 docker-llm-uninstall.py --skip-config --skip-extension
+python3 docker/docker-llm-uninstall.py --skip-config --skip-extension
 
 # Only remove config files
-python3 docker-llm-uninstall.py --skip-models --skip-extension
+python3 docker/docker-llm-uninstall.py --skip-models --skip-extension
 
 # Uninstall from VS Code only
-python3 docker-llm-uninstall.py --skip-intellij
+python3 docker/docker-llm-uninstall.py --skip-intellij
 
 # Uninstall from IntelliJ only
-python3 docker-llm-uninstall.py --skip-vscode
+python3 docker/docker-llm-uninstall.py --skip-vscode
 
 # Skip both IDE plugins but remove models/config
-python3 docker-llm-uninstall.py --skip-extension
+python3 docker/docker-llm-uninstall.py --skip-extension
 ```
 
 ### Command-Line Options
 
 ```bash
 # Skip Docker checks (useful if Docker is hanging)
-python3 docker-llm-uninstall.py --skip-docker-checks
+python3 docker/docker-llm-uninstall.py --skip-docker-checks
 
 # Skip model removal
-python3 docker-llm-uninstall.py --skip-models
+python3 docker/docker-llm-uninstall.py --skip-models
 
 # Skip config file removal
-python3 docker-llm-uninstall.py --skip-config
+python3 docker/docker-llm-uninstall.py --skip-config
 
 # Skip both VS Code extension and IntelliJ plugin removal
-python3 docker-llm-uninstall.py --skip-extension
+python3 docker/docker-llm-uninstall.py --skip-extension
 
 # Skip only VS Code extension removal
-python3 docker-llm-uninstall.py --skip-vscode
+python3 docker/docker-llm-uninstall.py --skip-vscode
 
 # Skip only IntelliJ plugin removal
-python3 docker-llm-uninstall.py --skip-intellij
+python3 docker/docker-llm-uninstall.py --skip-intellij
 ```
 
 ### IDE-Specific Uninstallation
@@ -813,7 +940,7 @@ cd ai_model
 python3 --version
 
 # (Optional) Install development dependencies
-pip install -r requirements-docker-setup.txt
+pip install -r docker/requirements-docker-setup.txt
 ```
 
 ### Code Structure
@@ -890,10 +1017,34 @@ MIT License - See LICENSE file for details.
 ## 🔗 References
 
 - **Docker Model Runner**: [docs.docker.com/ai/model-runner/](https://docs.docker.com/ai/model-runner/)
+- **Ollama**: [ollama.com](https://ollama.com)
 - **Continue.dev**: [docs.continue.dev](https://docs.continue.dev)
 - **Docker Desktop**: [docker.com/desktop](https://docker.com/desktop)
 
 ## 📝 Changelog
+
+### Version 3.0.0
+- **Full Ollama support**: Complete parallel implementation of Ollama backend alongside Docker Model Runner
+  - New `ollama/` directory with parallel structure to `docker/`
+  - Independent setup and uninstall scripts for Ollama
+  - Full feature parity with Docker implementation
+- **Enhanced Ollama progress bars**: Fixed rich progress bar display for Ollama model downloads
+  - Now properly parses Ollama's text format output (with ANSI escape codes)
+  - Handles mixed units (KB/MB/GB) during download progress
+  - Shows real-time download progress with percentage, speed, and time remaining
+  - Progress bars work correctly throughout the entire download process
+- **Improved Ollama integration**: Better model variant discovery and selection
+  - Enhanced parsing of Ollama model tags and quantization levels
+  - Improved fallback logic for model pulling
+  - Automatic Ollama installation detection and prompts
+- **Dual-backend architecture**: Users can now choose between Docker Model Runner or Ollama
+  - Both backends generate identical Continue.dev configurations
+  - Same hardware detection and model recommendations
+  - Independent operation - no conflicts between backends
+- **Documentation updates**: Comprehensive README updates to reflect both backends equally
+  - Updated all sections to cover both Docker and Ollama
+  - Enhanced troubleshooting guides for both backends
+  - Clear installation instructions for both options
 
 ### Version 2.1.0
 - **Conservative model selection**: Downgraded all tier recommendations by one size tier for better stability
