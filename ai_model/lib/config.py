@@ -235,10 +235,17 @@ def generate_continue_config(
     autocomplete_models.sort(key=lambda m: m.ram_gb)
     
     # Build models section
+    # YAML indentation rules:
+    # - Top-level keys: no indentation
+    # - List items under a key: 2 spaces then dash
+    # - Properties of list items: 4 spaces
+    # - Nested list items: 6 spaces then dash
+    # - Nested properties: 6 spaces
     yaml_lines.append("models:")
     
     for i, model in enumerate(chat_models):
         model_id = models.get_model_id_for_continue(model, hw_info)
+        # Model list item: 2 spaces before dash, 4 spaces for properties
         yaml_lines.extend([
             f"  - name: {model.name}",
             f"    provider: openai",
@@ -254,12 +261,14 @@ def generate_continue_config(
             roles.append("autocomplete")
         if "embed" in model.roles:
             roles.append("embed")
+        # Roles property: 4 spaces, nested list items: 6 spaces before dash
         yaml_lines.append("    roles:")
         for role in roles:
             yaml_lines.append(f"      - {role}")
         
         # Add autocompleteOptions if model has autocomplete role
         if "autocomplete" in model.roles:
+            # autocompleteOptions property: 4 spaces, nested properties: 6 spaces
             yaml_lines.extend([
                 "    autocompleteOptions:",
                 "      debounceDelay: 300",
@@ -267,6 +276,7 @@ def generate_continue_config(
             ])
         
         # Add defaultCompletionOptions with contextLength
+        # defaultCompletionOptions property: 4 spaces, nested properties: 6 spaces
         yaml_lines.extend([
             "    defaultCompletionOptions:",
             f"      contextLength: {model.context_length}",
@@ -279,6 +289,7 @@ def generate_continue_config(
         yaml_lines.append("")
     
     # Add autocomplete models (with autocompleteOptions)
+    # Same indentation rules: 2 spaces before dash, 4 spaces for properties, 6 spaces for nested items
     autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
     for model in autocomplete_only:
         model_id = models.get_model_id_for_continue(model, hw_info)
@@ -299,6 +310,7 @@ def generate_continue_config(
         ])
     
     # Add embedding models (if different from chat and autocomplete models)
+    # Same indentation rules: 2 spaces before dash, 4 spaces for properties, 6 spaces for nested items
     embed_only = [m for m in embed_models if m not in chat_models and m not in autocomplete_models]
     for model in embed_only:
         model_id = models.get_model_id_for_continue(model, hw_info)
