@@ -589,7 +589,11 @@ def fetch_with_retry(
     return None
 
 
-def score_variant(tag_info: Dict[str, Any], hw_info: hardware.HardwareInfo) -> float:
+def score_variant(
+    tag_info: Dict[str, Any], 
+    hw_info: hardware.HardwareInfo,
+    target_size: Optional[float] = None
+) -> float:
     """
     Score a model variant based on hardware fit, quality, and performance.
     
@@ -598,9 +602,15 @@ def score_variant(tag_info: Dict[str, Any], hw_info: hardware.HardwareInfo) -> f
     - Quality: F16 > Q8 > Q5 > Q4 > Q3 > Q2 (higher quantization = better quality)
     - Performance: Prefer vLLM variants (faster inference)
     
+    When target_size is specified, weights are adjusted to prioritize size match:
+    - Quality weight is reduced (from 60% to 30%)
+    - Fit weight is increased (from 30% to 50%)
+    - Prefers quantized models (Q4/Q5) over F16 when targeting specific sizes
+    
     Args:
         tag_info: Parsed tag dictionary from parse_tag_info()
         hw_info: Hardware information for RAM constraints
+        target_size: Optional target model size in billions (adjusts scoring weights)
     
     Returns:
         Score (higher is better), or -1 if variant doesn't fit in RAM
@@ -615,9 +625,15 @@ def score_variant(tag_info: Dict[str, Any], hw_info: hardware.HardwareInfo) -> f
     if ram_needed > usable_ram:
         return -1.0  # Doesn't fit
     
-    # Fit score: how well it uses available RAM (0-1, higher if closer to budget but not over)
+    # Fit score: how well it uses available RAM
+    # When target_size specified, don't penalize larger models that fit
     ram_usage_ratio = ram_needed / usable_ram if usable_ram > 0 else 0
-    fit_score = 1.0 - abs(ram_usage_ratio - 0.7)  # Prefer ~70% usage
+    if target_size is not None:
+        # Prefer models that fit well, but don't penalize larger models
+        fit_score = min(1.0, ram_usage_ratio)  # Linear up to 100% usage
+    else:
+        # Original behavior: prefer ~70% usage
+        fit_score = 1.0 - abs(ram_usage_ratio - 0.7)
     fit_score = max(0.0, min(1.0, fit_score))  # Clamp to [0, 1]
     
     # Quality score based on quantization
@@ -642,13 +658,45 @@ def score_variant(tag_info: Dict[str, Any], hw_info: hardware.HardwareInfo) -> f
     else:
         quality_score = quality_scores.get(quantization, 5.0)
     
+    # When targeting specific sizes, strongly prefer quantized models (Q4/Q5) over F16
+    # Quantized models are more likely to match target sizes, F16 models are often smaller variants
+    if target_size is not None:
+        size = tag_info.get("size", 0)
+        if size > 0:
+            size_ratio = size / target_size if target_size > 0 else 1.0
+            
+            # Strongly boost quantized models when they're close to target size
+            if quantization in ["Q4", "Q4_K_M", "Q4_0", "Q5"]:
+                # Large boost for quantized models when targeting sizes (they fit better)
+                if 0.8 <= size_ratio <= 1.2:  # Within 20% of target
+                    quality_score += 3.0  # Significant boost
+                else:
+                    quality_score += 1.5  # Still boost, but less
+            elif quantization in ["Q8", "Q8_0"]:
+                # Moderate boost for Q8 (good quality, still quantized)
+                if 0.8 <= size_ratio <= 1.2:
+                    quality_score += 2.0
+            elif quantization == "F16":
+                # Penalize F16 when targeting sizes - F16 models are often smaller variants
+                # Only keep F16 if it's very close to target (within 10%)
+                if size_ratio < 0.9:
+                    quality_score -= 3.0  # Strong penalty for F16 that's too small
+                elif size_ratio > 1.1:
+                    quality_score -= 1.0  # Small penalty for F16 that's too large
+    
     # Performance score: prefer vLLM variants (check tag name)
     tag_name = tag_info.get("tag_name", "").lower()
     performance_score = 1.5 if "vllm" in tag_name else 1.0
     
     # Combined score: weighted sum
-    # Fit: 30%, Quality: 60%, Performance: 10%
-    total_score = (fit_score * 0.3) + (quality_score * 0.6) + (performance_score * 0.1)
+    # Adjust weights based on whether target_size is specified
+    if target_size is not None:
+        # When targeting size: prioritize fit, reduce quality weight
+        # Fit: 50%, Quality: 30%, Performance: 20%
+        total_score = (fit_score * 0.5) + (quality_score * 0.3) + (performance_score * 0.2)
+    else:
+        # Original weights: Fit: 30%, Quality: 60%, Performance: 10%
+        total_score = (fit_score * 0.3) + (quality_score * 0.6) + (performance_score * 0.1)
     
     return total_score
 
@@ -657,15 +705,15 @@ def calculate_model_ram(params: float, quantization: Optional[str] = None) -> fl
     """
     Calculate RAM requirements for a model based on parameters and quantization.
     
-    Formula:
-    - Q2: 0.7×params
-    - Q3: 1.0×params
-    - Q4: 1.2×params
-    - Q5: 1.5×params
-    - Q8: 2.4×params
-    - F16: 2.0×params
-    - F32: 4.0×params
-    - Add 20% overhead: ram = base_ram * 1.2
+    Formula (corrected for accuracy):
+    - Q2: 0.35×params (2 bits per param + overhead)
+    - Q3: 0.5×params (3 bits per param + overhead)
+    - Q4: 0.6×params (4-5 bits per param + overhead) - e.g., 13B Q4 ≈ 7.8GB
+    - Q5: 0.75×params (5-6 bits per param + overhead)
+    - Q8: 1.0×params (8 bits per param + overhead)
+    - F16: 2.0×params (16 bits per param + overhead)
+    - F32: 4.0×params (32 bits per param + overhead)
+    - Includes overhead for activations, KV cache, and system buffers
     
     Args:
         params: Model size in billions of parameters
@@ -677,32 +725,29 @@ def calculate_model_ram(params: float, quantization: Optional[str] = None) -> fl
     if params <= 0:
         return 0.0
     
-    # Determine base RAM multiplier based on quantization
+    # Determine base RAM multiplier based on quantization (corrected values)
     quant_lower = (quantization or "").lower()
     
     if "q2" in quant_lower:
-        base_multiplier = 0.7
+        base_multiplier = 0.35  # ~2 bits per param
     elif "q3" in quant_lower:
-        base_multiplier = 1.0
+        base_multiplier = 0.5   # ~3 bits per param
     elif "q4" in quant_lower or "q4_k_m" in quant_lower or "q4_0" in quant_lower:
-        base_multiplier = 1.2
+        base_multiplier = 0.6   # ~4-5 bits per param (13B Q4 ≈ 7.8GB)
     elif "q5" in quant_lower:
-        base_multiplier = 1.5
+        base_multiplier = 0.75  # ~5-6 bits per param
     elif "q8" in quant_lower or "q8_0" in quant_lower:
-        base_multiplier = 2.4
-    elif "f16" in quant_lower or "f16" in quant_lower:
-        base_multiplier = 2.0
+        base_multiplier = 1.0   # ~8 bits per param
+    elif "f16" in quant_lower:
+        base_multiplier = 2.0   # 16 bits per param
     elif "f32" in quant_lower:
-        base_multiplier = 4.0
+        base_multiplier = 4.0   # 32 bits per param
     else:
         # Default to F16 if no quantization specified
         base_multiplier = 2.0
     
-    # Calculate base RAM
-    base_ram = params * base_multiplier
-    
-    # Add 20% overhead
-    ram_gb = base_ram * 1.2
+    # Calculate base RAM (multiplier already includes typical overhead)
+    ram_gb = params * base_multiplier
     
     return ram_gb
 
@@ -1059,35 +1104,43 @@ def discover_best_model_by_criteria(
             if ram_needed > ram_budget:
                 continue
             
-            # Score based on size match and quality
-            score = score_variant(tag, hw_info)
+            # If target_size specified, enforce minimum size constraint (within 50% of target)
+            # Reject models that are too small - they're likely wrong choices
+            if target_size is not None and size is not None and size > 0:
+                min_acceptable_size = target_size * 0.5  # Must be at least 50% of target
+                if size < min_acceptable_size:
+                    continue  # Skip models that are too small
+            
+            # Score based on size match and quality (pass target_size to adjust weights)
+            score = score_variant(tag, hw_info, target_size)
             if score <= 0:
                 continue
             
             # If target_size specified, prioritize exact match, then closest
             # Heavily penalize models that are much smaller than target
+            # Size match scores are multiplied by 100x to dominate over quality scores
             size_match_score = 0
             if target_size is not None:
                 size_diff = abs(size - target_size)
                 if size_diff == 0:
-                    size_match_score = 10000  # Exact match bonus (increased)
+                    size_match_score = 1000000  # Exact match bonus (100x increase)
                 elif size_diff <= 1.0:
-                    size_match_score = 5000 - (size_diff * 500)  # Close match (increased)
+                    size_match_score = 500000 - (size_diff * 50000)  # Close match (100x increase)
                 elif size < target_size:
                     # Heavily penalize models that are much smaller than target
                     # Prefer models closer to target, but allow smaller if nothing else fits
                     if size_diff <= 3.0:
-                        size_match_score = 2000 - (size_diff * 200)  # Somewhat close
+                        size_match_score = 200000 - (size_diff * 20000)  # Somewhat close (100x)
                     elif size_diff <= 6.0:
-                        size_match_score = 500 - (size_diff * 50)  # Far but acceptable
+                        size_match_score = 50000 - (size_diff * 5000)  # Far but acceptable (100x)
                     else:
-                        size_match_score = 10 - size_diff  # Too small, heavy penalty
+                        size_match_score = 1000 - size_diff  # Too small, heavy penalty
                 else:
                     # Slightly larger is okay, but not ideal
                     if size_diff <= 2.0:
-                        size_match_score = 3000 - (size_diff * 200)  # Slightly larger is fine
+                        size_match_score = 300000 - (size_diff * 20000)  # Slightly larger (100x)
                     else:
-                        size_match_score = 1000 - (size_diff * 50)  # Much larger is less ideal
+                        size_match_score = 100000 - (size_diff * 5000)  # Much larger (100x)
             else:
                 # No target size - prefer larger models that fit
                 size_match_score = size * 10
@@ -2331,10 +2384,10 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
     Generate portfolio-based model recommendations for hardware tier.
     
     Portfolio allocation (UPGRADED for larger models):
-    - Primary model: 60% RAM budget (main workhorse - increased for larger models)
-    - Specialized: 30% RAM budget (coding, reasoning, vision - increased for larger models)
-    - Utility: 5% RAM budget (embeddings, small helpers - reduced, embeddings are small)
-    - Reserve: 5% free RAM (reduced to accommodate larger models)
+    - Primary model: 70% RAM budget (main workhorse - aggressive allocation for larger models)
+    - Specialized: 25% RAM budget (coding, reasoning, vision - adjusted for balance)
+    - Utility: 3% RAM budget (embeddings, small helpers - minimal, embeddings are small)
+    - Reserve: 2% free RAM (minimal reserve, models can share memory)
     
     Tier-specific portfolios (UPGRADED - one size larger than before):
     - Tier S (>64GB): 70B reasoning (Q4) + 34B coding (Q5) + multimodal (F16) + embed (~50GB)
@@ -2351,10 +2404,10 @@ def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[Mo
     """
     usable_ram = hw_info.get_estimated_model_memory()
     
-    # Calculate RAM budgets (upgraded for larger models)
-    primary_budget = usable_ram * 0.60  # Increased from 0.50 for larger primary models
-    specialized_budget = usable_ram * 0.30  # Reduced from 0.35 for better balance
-    utility_budget = usable_ram * 0.05  # Reduced from 0.10 (embeddings are small)
+    # Calculate RAM budgets (upgraded for larger models - more aggressive)
+    primary_budget = usable_ram * 0.70  # Increased to 70% for larger primary models
+    specialized_budget = usable_ram * 0.25  # Adjusted to 25% for balance
+    utility_budget = usable_ram * 0.03  # Reduced to 3% (embeddings are small)
     
     recommended = []
     
