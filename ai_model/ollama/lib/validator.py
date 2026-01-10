@@ -25,6 +25,7 @@ from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL, AUTOCOMPLE
 
 # Ollama API configuration
 OLLAMA_API_BASE = "http://localhost:11434"
+OLLAMA_REGISTRY = "https://registry.ollama.ai"
 
 # Timeout and delay constants (in seconds)
 API_TIMEOUT = 5  # Timeout for API health checks
@@ -33,6 +34,148 @@ OLLAMA_LIST_TIMEOUT = 10  # Timeout for 'ollama list' command
 MODEL_PULL_TIMEOUT = 3600  # Timeout for model pull (1 hour)
 PROCESS_KILL_TIMEOUT = 5  # Timeout for process termination
 VERIFICATION_DELAY = 1  # Delay before verifying model after pull
+
+# Retry configuration
+MAX_PULL_RETRIES = 3
+RETRY_BASE_DELAY = 2  # Base delay for exponential backoff (seconds)
+
+# Pre-flight test model (very small, ~400MB)
+PREFLIGHT_TEST_MODEL = "qwen:0.5b"
+
+
+class PullErrorType:
+    """Classification of pull errors for targeted troubleshooting."""
+    SSH_KEY = "ssh_key"  # "ssh: no key found" error
+    NETWORK = "network"  # Connection refused, timeout, DNS issues
+    AUTH = "auth"  # Authentication/authorization errors
+    SERVICE = "service"  # Ollama service not running
+    REGISTRY = "registry"  # Registry unreachable
+    DISK = "disk"  # Disk full or permission issues
+    MODEL_NOT_FOUND = "model_not_found"  # Model doesn't exist
+    UNKNOWN = "unknown"
+
+
+def classify_pull_error(error_msg: str) -> str:
+    """
+    Classify the type of pull error for targeted troubleshooting.
+    
+    Args:
+        error_msg: The error message from a failed pull
+        
+    Returns:
+        PullErrorType constant indicating the error category
+    """
+    error_lower = error_msg.lower()
+    
+    # SSH key error - often caused by SSH agent interference
+    if "ssh:" in error_lower or "no key found" in error_lower or "ssh_auth" in error_lower:
+        return PullErrorType.SSH_KEY
+    
+    # Network errors
+    if any(x in error_lower for x in [
+        "connection refused", "connection reset", "timeout",
+        "network unreachable", "no route to host", "dns",
+        "could not resolve", "failed to connect"
+    ]):
+        return PullErrorType.NETWORK
+    
+    # Authentication errors
+    if any(x in error_lower for x in [
+        "unauthorized", "403", "401", "forbidden", "authentication"
+    ]):
+        return PullErrorType.AUTH
+    
+    # Service not running
+    if any(x in error_lower for x in [
+        "is ollama running", "service unavailable", "connection refused localhost"
+    ]):
+        return PullErrorType.SERVICE
+    
+    # Registry issues
+    if any(x in error_lower for x in [
+        "registry", "manifest unknown", "pull access denied"
+    ]):
+        return PullErrorType.REGISTRY
+    
+    # Disk issues
+    if any(x in error_lower for x in [
+        "no space left", "disk full", "permission denied", "read-only"
+    ]):
+        return PullErrorType.DISK
+    
+    # Model not found
+    if any(x in error_lower for x in [
+        "not found", "does not exist", "unknown model"
+    ]):
+        return PullErrorType.MODEL_NOT_FOUND
+    
+    return PullErrorType.UNKNOWN
+
+
+def get_troubleshooting_steps(error_type: str) -> List[str]:
+    """
+    Get specific troubleshooting steps based on error type.
+    
+    Args:
+        error_type: PullErrorType constant
+        
+    Returns:
+        List of troubleshooting steps
+    """
+    steps = {
+        PullErrorType.SSH_KEY: [
+            "SSH agent may be interfering with Ollama. Try:",
+            "  1. Unset SSH agent: unset SSH_AUTH_SOCK",
+            "  2. Restart Ollama: pkill ollama && ollama serve &",
+            "  3. Retry the pull: ollama pull <model>",
+            "  4. If issue persists, reinstall Ollama: brew reinstall ollama",
+        ],
+        PullErrorType.NETWORK: [
+            "Network connectivity issue detected. Try:",
+            "  1. Check internet connection: curl https://ollama.com",
+            "  2. Disable VPN if active",
+            "  3. Check proxy settings: echo $HTTP_PROXY $HTTPS_PROXY",
+            "  4. Test registry: curl https://registry.ollama.ai/v2/",
+        ],
+        PullErrorType.AUTH: [
+            "Authentication error. This is unusual for public models:",
+            "  1. Clear Ollama cache: rm -rf ~/.ollama/models/*",
+            "  2. Restart Ollama: pkill ollama && ollama serve &",
+            "  3. If on corporate network, check proxy/firewall settings",
+        ],
+        PullErrorType.SERVICE: [
+            "Ollama service is not running. Try:",
+            "  1. Start Ollama: ollama serve (or open Ollama app)",
+            "  2. Check status: ollama list",
+            "  3. Check logs: tail -f ~/.ollama/logs/server.log",
+        ],
+        PullErrorType.REGISTRY: [
+            "Cannot reach Ollama registry. Try:",
+            "  1. Check registry status: curl https://registry.ollama.ai/v2/",
+            "  2. Wait and retry (registry may be temporarily down)",
+            "  3. Check if model name is correct: ollama search <model>",
+        ],
+        PullErrorType.DISK: [
+            "Disk space or permission issue. Try:",
+            "  1. Check disk space: df -h ~/.ollama",
+            "  2. Clear old models: ollama rm <old-model>",
+            "  3. Check permissions: ls -la ~/.ollama",
+        ],
+        PullErrorType.MODEL_NOT_FOUND: [
+            "Model not found in registry. Try:",
+            "  1. Search for model: ollama search <model-name>",
+            "  2. Check model name spelling and tag",
+            "  3. Try without tag: ollama pull <model-name>",
+        ],
+        PullErrorType.UNKNOWN: [
+            "Unknown error. Try these general steps:",
+            "  1. Restart Ollama: pkill ollama && ollama serve &",
+            "  2. Clear cache: rm -rf ~/.ollama/models/*",
+            "  3. Reinstall Ollama from ollama.com",
+            "  4. Check Ollama GitHub issues for similar problems",
+        ],
+    }
+    return steps.get(error_type, steps[PullErrorType.UNKNOWN])
 
 
 @dataclass
@@ -295,16 +438,56 @@ def pull_model_with_verification(
     return result
 
 
-def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
+def run_preflight_check(show_progress: bool = True) -> Tuple[bool, str, Optional[str]]:
     """
-    Execute ollama pull command.
+    Run a pre-flight check by pulling a tiny test model.
+    
+    This helps identify issues before attempting larger downloads.
+    
+    Returns:
+        Tuple of (success, message, error_type):
+        - success: True if pre-flight check passed
+        - message: Status or error message
+        - error_type: PullErrorType if failed, None if successful
+    """
+    if show_progress:
+        ui.print_info(f"Running pre-flight check with {PREFLIGHT_TEST_MODEL}...")
+    
+    # First check if Ollama API is responding
+    if not is_ollama_api_available():
+        return False, "Ollama API not responding. Is Ollama running?", PullErrorType.SERVICE
+    
+    # Try pulling the tiny test model
+    success, error_msg = _pull_model_single_attempt(PREFLIGHT_TEST_MODEL, show_progress=False)
+    
+    if success:
+        # Clean up test model to save space
+        utils.run_command(["ollama", "rm", PREFLIGHT_TEST_MODEL], timeout=30)
+        if show_progress:
+            ui.print_success("Pre-flight check passed!")
+        return True, "Pre-flight check passed", None
+    
+    # Classify the error
+    error_type = classify_pull_error(error_msg)
+    
+    if show_progress:
+        ui.print_error(f"Pre-flight check failed: {error_msg[:150]}")
+        ui.print_warning(f"Error type: {error_type}")
+        print()
+        for step in get_troubleshooting_steps(error_type):
+            print(f"  {step}")
+    
+    return False, error_msg, error_type
+
+
+def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
+    """
+    Execute a single ollama pull attempt without retries.
     
     Returns:
         Tuple of (success, error_message):
         - success: True if the command succeeded
         - error_message: Error details if failed, empty string if successful
-    
-    Ensures proper process cleanup on timeout or error.
     """
     process = None
     output_lines: List[str] = []
@@ -332,7 +515,7 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
                         elif "success" in line.lower() or "done" in line.lower():
                             print()
                             ui.print_success(f"    {line}")
-                        elif "error" in line.lower():
+                        elif "error" in line.lower() or "ssh:" in line.lower():
                             print()
                             ui.print_error(f"    {line}")
             
@@ -353,7 +536,7 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
                 if not error_msg and output_lines:
                     # Look for error in output
                     for line in output_lines:
-                        if "error" in line.lower() or "failed" in line.lower():
+                        if "error" in line.lower() or "failed" in line.lower() or "ssh:" in line.lower():
                             error_msg = line
                             break
                 return False, error_msg or "Unknown error during pull"
@@ -390,6 +573,84 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
                 process.wait(timeout=PROCESS_KILL_TIMEOUT)
             except subprocess.TimeoutExpired:
                 pass
+
+
+def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
+    """
+    Execute ollama pull command with retry logic and exponential backoff.
+    
+    Returns:
+        Tuple of (success, error_message):
+        - success: True if the command succeeded
+        - error_message: Error details if failed, empty string if successful
+    
+    Implements:
+    - Up to MAX_PULL_RETRIES attempts
+    - Exponential backoff between retries
+    - SSH agent cleanup on SSH-related errors
+    - Proper process cleanup on timeout or error
+    """
+    last_error = ""
+    
+    for attempt in range(MAX_PULL_RETRIES):
+        if attempt > 0:
+            # Exponential backoff
+            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            if show_progress:
+                ui.print_info(f"Retrying in {delay}s... (attempt {attempt + 1}/{MAX_PULL_RETRIES})")
+            time.sleep(delay)
+            
+            # If previous attempt had SSH error, try to clear SSH agent
+            if "ssh:" in last_error.lower() or "no key found" in last_error.lower():
+                if show_progress:
+                    ui.print_info("Clearing SSH agent interference...")
+                _clear_ssh_agent_interference()
+        
+        success, error_msg = _pull_model_single_attempt(model_name, show_progress)
+        
+        if success:
+            return True, ""
+        
+        last_error = error_msg
+        error_type = classify_pull_error(error_msg)
+        
+        # Don't retry certain errors
+        if error_type in [PullErrorType.MODEL_NOT_FOUND, PullErrorType.DISK]:
+            if show_progress:
+                ui.print_warning(f"Not retrying - error type: {error_type}")
+            break
+        
+        if show_progress and attempt < MAX_PULL_RETRIES - 1:
+            ui.print_warning(f"Attempt {attempt + 1} failed: {error_msg[:100]}")
+    
+    return False, last_error
+
+
+def _clear_ssh_agent_interference() -> None:
+    """
+    Attempt to clear SSH agent interference that can cause pull failures.
+    
+    The "ssh: no key found" error often happens when SSH_AUTH_SOCK is set
+    but the agent isn't working properly, causing Ollama to fail.
+    """
+    import os
+    
+    # Temporarily unset SSH_AUTH_SOCK for child processes
+    if "SSH_AUTH_SOCK" in os.environ:
+        try:
+            # Create a clean environment for the next attempt
+            # Note: This won't affect the parent process
+            del os.environ["SSH_AUTH_SOCK"]
+        except Exception:
+            pass
+    
+    # Also try to restart Ollama's connection state by pinging the API
+    try:
+        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
+            pass
+    except Exception:
+        pass
 
 
 def pull_models_with_tracking(
@@ -525,14 +786,33 @@ def display_setup_result(result: SetupResult) -> None:
         
         print()
     
-    # If complete failure, provide diagnostic guidance
+    # If complete failure, provide diagnostic guidance based on error type
     if result.complete_failure:
-        print(ui.colorize("Troubleshooting:", ui.Colors.YELLOW + ui.Colors.BOLD))
-        print("  1. Check if Ollama is running: ollama list")
-        print("  2. Test network: ollama search granite")
-        print("  3. Try pulling manually: ollama pull <model-name>")
-        print("  4. If on corporate network, check proxy/SSL settings")
+        # Try to classify the most common error
+        most_common_error = ""
+        if result.failed_models:
+            _, first_error = result.failed_models[0]
+            most_common_error = first_error
+        
+        error_type = classify_pull_error(most_common_error)
+        
+        print(ui.colorize(f"Error Type: {error_type}", ui.Colors.YELLOW + ui.Colors.BOLD))
         print()
+        
+        steps = get_troubleshooting_steps(error_type)
+        for step in steps:
+            print(f"  {step}")
+        print()
+        
+        # Additional SSH-specific guidance if relevant
+        if error_type == PullErrorType.SSH_KEY:
+            print(ui.colorize("Quick Fix for SSH errors:", ui.Colors.CYAN + ui.Colors.BOLD))
+            print("  Run these commands in order:")
+            print("    unset SSH_AUTH_SOCK")
+            print("    pkill ollama")
+            print("    ollama serve &")
+            print("    ollama pull <model-name>")
+            print()
     
     # Show retry commands for failed models
     if result.failed_models:
@@ -672,7 +952,8 @@ def test_ollama_connectivity() -> Tuple[bool, str, Dict[str, Any]]:
 
 def validate_pre_install(
     models: List[RecommendedModel],
-    hw_info: hardware.HardwareInfo
+    hw_info: hardware.HardwareInfo,
+    run_preflight: bool = False
 ) -> Tuple[bool, List[str]]:
     """
     Pre-installation validation.
@@ -681,6 +962,12 @@ def validate_pre_install(
     - Ollama is installed and running
     - Models fit in available RAM
     - Network connectivity (with detailed diagnostics)
+    - Optional: Pre-flight pull test with tiny model
+    
+    Args:
+        models: List of models to validate
+        hw_info: Hardware information
+        run_preflight: If True, runs a pre-flight test by pulling a tiny model
     
     Returns: (is_valid, list_of_warnings)
     """
@@ -689,6 +976,8 @@ def validate_pre_install(
     # Check Ollama API
     if not is_ollama_api_available():
         warnings.append("Ollama API is not available. Please ensure Ollama is running.")
+        # Can't continue validation if API is down
+        return False, warnings
     
     # Check RAM
     from .model_selector import get_usable_ram
@@ -720,6 +1009,180 @@ def validate_pre_install(
             "Proceed if models are already cached or behind proxy."
         )
     
+    # Optional pre-flight check
+    if run_preflight:
+        preflight_ok, preflight_msg, error_type = run_preflight_check(show_progress=True)
+        if not preflight_ok:
+            warnings.append(f"Pre-flight check failed: {preflight_msg[:100]}")
+            if error_type:
+                warnings.append(f"Error type: {error_type}")
+                # Add troubleshooting steps
+                steps = get_troubleshooting_steps(error_type)
+                for step in steps[:3]:  # Show first 3 steps
+                    warnings.append(step)
+            return False, warnings
+    
     is_valid = not any("API is not available" in w for w in warnings)
     
     return is_valid, warnings
+
+
+def run_diagnostics(verbose: bool = True) -> Dict[str, Any]:
+    """
+    Run comprehensive diagnostics to identify pull issues.
+    
+    This function checks:
+    - Ollama installation and version
+    - Ollama service status
+    - Network connectivity
+    - Registry access
+    - SSH agent status
+    - Environment variables
+    
+    Args:
+        verbose: If True, print diagnostic output
+        
+    Returns:
+        Dict with diagnostic results
+    """
+    import os
+    
+    results: Dict[str, Any] = {
+        "ollama_installed": False,
+        "ollama_version": "",
+        "ollama_service_running": False,
+        "api_accessible": False,
+        "registry_reachable": False,
+        "ssh_agent_active": False,
+        "proxy_configured": False,
+        "issues_found": [],
+        "recommendations": [],
+    }
+    
+    if verbose:
+        ui.print_header("🔍 Ollama Diagnostics")
+        print()
+    
+    # Check 1: Ollama installation
+    code, stdout, _ = utils.run_command(["ollama", "--version"], timeout=5)
+    if code == 0:
+        results["ollama_installed"] = True
+        results["ollama_version"] = stdout.strip()
+        if verbose:
+            ui.print_success(f"Ollama installed: {stdout.strip()}")
+    else:
+        results["issues_found"].append("Ollama not installed")
+        results["recommendations"].append("Install Ollama from https://ollama.com")
+        if verbose:
+            ui.print_error("Ollama not installed")
+            return results
+    
+    # Check 2: Ollama service
+    if is_ollama_api_available():
+        results["ollama_service_running"] = True
+        results["api_accessible"] = True
+        if verbose:
+            ui.print_success("Ollama service is running")
+    else:
+        results["issues_found"].append("Ollama service not running")
+        results["recommendations"].append("Start Ollama: ollama serve (or open Ollama app)")
+        if verbose:
+            ui.print_error("Ollama service not running")
+    
+    # Check 3: List models
+    code, stdout, stderr = utils.run_command(["ollama", "list"], timeout=10)
+    if code == 0:
+        if verbose:
+            model_count = len(stdout.strip().split("\n")) - 1  # Subtract header
+            ui.print_success(f"Ollama list works ({max(0, model_count)} models installed)")
+    else:
+        results["issues_found"].append(f"ollama list failed: {stderr[:100]}")
+        if verbose:
+            ui.print_error(f"ollama list failed: {stderr[:100]}")
+    
+    # Check 4: Registry access
+    try:
+        req = urllib.request.Request("https://registry.ollama.ai/v2/")
+        with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
+            # 401 is expected (no auth), 200 or 404 are also fine
+            results["registry_reachable"] = True
+            if verbose:
+                ui.print_success(f"Registry reachable (HTTP {response.status})")
+    except urllib.error.HTTPError as e:
+        if e.code in [401, 404]:  # These are expected
+            results["registry_reachable"] = True
+            if verbose:
+                ui.print_success(f"Registry reachable (HTTP {e.code} - expected)")
+        else:
+            results["issues_found"].append(f"Registry returned HTTP {e.code}")
+            if verbose:
+                ui.print_warning(f"Registry returned HTTP {e.code}")
+    except Exception as e:
+        results["issues_found"].append(f"Cannot reach registry: {e}")
+        results["recommendations"].append("Check network/firewall settings")
+        if verbose:
+            ui.print_error(f"Cannot reach registry: {e}")
+    
+    # Check 5: SSH agent
+    ssh_sock = os.environ.get("SSH_AUTH_SOCK", "")
+    if ssh_sock:
+        results["ssh_agent_active"] = True
+        if verbose:
+            ui.print_warning(f"SSH agent active: {ssh_sock}")
+            ui.print_info("  This may cause 'ssh: no key found' errors")
+            ui.print_info("  Fix: unset SSH_AUTH_SOCK")
+        results["recommendations"].append("Try: unset SSH_AUTH_SOCK (may fix SSH errors)")
+    else:
+        if verbose:
+            ui.print_success("No SSH agent interference detected")
+    
+    # Check 6: Proxy configuration
+    proxy_vars = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY"]
+    active_proxies = {k: v for k, v in os.environ.items() if k in proxy_vars and v}
+    if active_proxies:
+        results["proxy_configured"] = True
+        if verbose:
+            ui.print_warning(f"Proxy configured: {list(active_proxies.keys())}")
+            ui.print_info("  This may affect model downloads")
+    else:
+        if verbose:
+            ui.print_success("No proxy configured")
+    
+    # Check 7: Try a test pull (only if everything else looks OK)
+    if results["ollama_service_running"] and results["registry_reachable"]:
+        if verbose:
+            print()
+            ui.print_info("Testing model pull capability...")
+        
+        # Try to pull a very small model
+        success, error = _pull_model_single_attempt("all-minilm", show_progress=False)
+        if success:
+            if verbose:
+                ui.print_success("Test pull successful!")
+            # Clean up
+            utils.run_command(["ollama", "rm", "all-minilm"], timeout=30)
+        else:
+            error_type = classify_pull_error(error)
+            results["issues_found"].append(f"Test pull failed: {error[:100]}")
+            results["recommendations"].extend(get_troubleshooting_steps(error_type)[:3])
+            if verbose:
+                ui.print_error(f"Test pull failed: {error[:100]}")
+                ui.print_info(f"Error type: {error_type}")
+    
+    # Summary
+    if verbose:
+        print()
+        if not results["issues_found"]:
+            ui.print_header("✅ All diagnostics passed!")
+        else:
+            ui.print_header(f"⚠️ Found {len(results['issues_found'])} issue(s)")
+            print()
+            for issue in results["issues_found"]:
+                ui.print_error(f"  • {issue}")
+            print()
+            if results["recommendations"]:
+                ui.print_info("Recommendations:")
+                for rec in results["recommendations"][:5]:
+                    print(f"  • {rec}")
+    
+    return results
