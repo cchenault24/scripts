@@ -42,9 +42,11 @@ def get_installation_instructions() -> str:
         if shutil.which("brew"):
             return "brew install ollama"
         else:
-            return "Download from https://ollama.com/download or install Homebrew first: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            # Use -k flag for corporate SSL compatibility
+            return "Download from https://ollama.com/download or install Homebrew first: /bin/bash -c \"$(curl -k -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     elif os_name == "Linux":
-        return "curl -fsSL https://ollama.com/install.sh | sh"
+        # Use -k flag for corporate SSL compatibility
+        return "curl -k -fsSL https://ollama.com/install.sh | sh"
     elif os_name == "Windows":
         return "Download installer from https://ollama.com/download"
     else:
@@ -71,7 +73,7 @@ def install_ollama() -> Tuple[bool, str]:
                 # Verify installation
                 ollama_path = shutil.which("ollama")
                 if ollama_path:
-                    version_code, version_out, _ = utils.run_command(["ollama", "--version"])
+                    version_code, version_out, _ = utils.run_command(["ollama", "--version"], clean_env=True)
                     if version_code == 0:
                         return True, version_out.strip()
                     return True, "installed"
@@ -115,7 +117,7 @@ def install_ollama() -> Tuple[bool, str]:
                 # Verify installation
                 ollama_path = shutil.which("ollama")
                 if ollama_path:
-                    version_code, version_out, _ = utils.run_command(["ollama", "--version"])
+                    version_code, version_out, _ = utils.run_command(["ollama", "--version"], clean_env=True)
                     if version_code == 0:
                         return True, version_out.strip()
                     return True, "installed"
@@ -132,11 +134,11 @@ def install_ollama() -> Tuple[bool, str]:
                 except subprocess.TimeoutExpired:
                     pass
             ui.print_error("Installation timed out")
-            ui.print_info("Please install manually: curl -fsSL https://ollama.com/install.sh | sh")
+            ui.print_info("Please install manually: curl -k -fsSL https://ollama.com/install.sh | sh")
             return False, "Installation timed out"
         except Exception as e:
             ui.print_error(f"Failed to install Ollama: {e}")
-            ui.print_info("Please install manually: curl -fsSL https://ollama.com/install.sh | sh")
+            ui.print_info("Please install manually: curl -k -fsSL https://ollama.com/install.sh | sh")
             return False, str(e)
         finally:
             # Ensure process is cleaned up
@@ -257,7 +259,7 @@ def check_ollama() -> Tuple[bool, str]:
     
     # If we get here, ollama_path should exist (either was already installed or just installed)
     # Check ollama version
-    code, stdout, stderr = utils.run_command(["ollama", "--version"])
+    code, stdout, stderr = utils.run_command(["ollama", "--version"], clean_env=True)
     if code != 0:
         ui.print_error(f"Failed to get Ollama version: {stderr}")
         return False, ""
@@ -359,12 +361,17 @@ def start_ollama_service() -> bool:
     # Start Ollama service
     ui.print_info("Starting Ollama service...")
     try:
+        # Create clean environment without SSH_AUTH_SOCK
+        # SSH_AUTH_SOCK causes Go's HTTP library to fail in Ollama
+        clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
+        
         # Start ollama serve in background
         process = subprocess.Popen(
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True
+            start_new_session=True,
+            env=clean_env  # Pass clean environment
         )
         
         # Wait for API to become available (up to 15 seconds)
@@ -457,7 +464,7 @@ def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
         ui.print_info(f"API endpoint (default): {hw_info.ollama_api_endpoint}")
     
     # Check for existing models using ollama list command
-    code, stdout, stderr = utils.run_command(["ollama", "list"])
+    code, stdout, stderr = utils.run_command(["ollama", "list"], clean_env=True)
     
     if code == 0:
         hw_info.ollama_available = True
@@ -752,3 +759,30 @@ def get_autostart_plist_path() -> Optional[Path]:
     if platform.system() != "Darwin":
         return None
     return Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+
+
+def check_ssh_environment_pollution() -> bool:
+    """
+    Check if SSH_AUTH_SOCK is set and warn user.
+    
+    SSH_AUTH_SOCK (set by macOS SSH agent for git) causes Ollama to fail with
+    "ssh: no key found" errors due to a bug in Go's HTTP library. This happens
+    because Go's HTTP client incorrectly tries to use SSH certificates for HTTPS
+    when this variable is set.
+    
+    Returns:
+        True if SSH_AUTH_SOCK is set (potential issue), False otherwise
+    """
+    ssh_auth_sock = os.environ.get('SSH_AUTH_SOCK')
+    
+    if ssh_auth_sock:
+        ui.print_warning("Detected SSH_AUTH_SOCK environment variable")
+        # Only show truncated path for privacy
+        display_path = ssh_auth_sock[:50] + "..." if len(ssh_auth_sock) > 50 else ssh_auth_sock
+        ui.print_info(f"Value: {display_path}")
+        ui.print_info("This can cause Ollama model pulls to fail with 'ssh: no key found' errors")
+        ui.print_info("The script will automatically use clean environment when calling Ollama")
+        print()
+        return True
+    
+    return False

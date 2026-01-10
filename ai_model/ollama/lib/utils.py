@@ -4,6 +4,7 @@ General utility functions.
 Provides common helper functions used across modules.
 """
 
+import os
 import ssl
 import subprocess
 from typing import List, Tuple
@@ -36,7 +37,12 @@ def get_unverified_ssl_context() -> ssl.SSLContext:
     return _UNVERIFIED_SSL_CONTEXT
 
 
-def run_command(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tuple[int, str, str]:
+def run_command(
+    cmd: List[str], 
+    capture: bool = True, 
+    timeout: int = 300,
+    clean_env: bool = False
+) -> Tuple[int, str, str]:
     """
     Run a shell command and return the result.
     
@@ -44,6 +50,11 @@ def run_command(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tup
         cmd: Command to run as a list of strings (e.g., ["ollama", "list"])
         capture: Whether to capture stdout/stderr (default: True)
         timeout: Maximum time to wait in seconds (default: 300)
+        clean_env: If True, remove SSH_AUTH_SOCK from environment (default: False)
+                   Use this when calling Ollama to avoid SSH agent interference.
+                   SSH_AUTH_SOCK (set by macOS SSH agent for git) causes Ollama
+                   (a Go binary) to fail with "ssh: no key found" errors when
+                   making HTTPS requests due to a bug in Go's HTTP library.
     
     Returns:
         Tuple of (returncode, stdout, stderr):
@@ -55,11 +66,19 @@ def run_command(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tup
         On timeout or command not found, returns (-1, "", error_message)
     """
     try:
+        # Determine environment
+        if clean_env:
+            # Remove SSH_AUTH_SOCK to prevent Go HTTP client bugs in Ollama
+            env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
+        else:
+            env = None  # Use current environment
+        
         result = subprocess.run(
             cmd,
             capture_output=capture,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            env=env  # Pass custom environment if clean_env=True
         )
         return result.returncode, result.stdout or "", result.stderr or ""
     except subprocess.TimeoutExpired:

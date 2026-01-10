@@ -9,6 +9,7 @@ Handles:
 """
 
 import json
+import os
 import subprocess
 import time
 import urllib.error
@@ -132,10 +133,10 @@ def get_troubleshooting_steps(error_type: str) -> List[str]:
         ],
         PullErrorType.NETWORK: [
             "Network connectivity issue detected. Try:",
-            "  1. Check internet connection: curl https://ollama.com",
+            "  1. Check internet connection: curl -k https://ollama.com",
             "  2. Disable VPN if active",
             "  3. Check proxy settings: echo $HTTP_PROXY $HTTPS_PROXY",
-            "  4. Test registry: curl https://registry.ollama.ai/v2/",
+            "  4. Test registry: curl -k https://registry.ollama.ai/v2/",
         ],
         PullErrorType.AUTH: [
             "Authentication error. This is unusual for public models:",
@@ -151,7 +152,7 @@ def get_troubleshooting_steps(error_type: str) -> List[str]:
         ],
         PullErrorType.REGISTRY: [
             "Cannot reach Ollama registry. Try:",
-            "  1. Check registry status: curl https://registry.ollama.ai/v2/",
+            "  1. Check registry status: curl -k https://registry.ollama.ai/v2/",
             "  2. Wait and retry (registry may be temporarily down)",
             "  3. Check if model name is correct: ollama search <model>",
         ],
@@ -234,7 +235,7 @@ def get_installed_models() -> List[str]:
         pass
     
     # Fallback to ollama list command
-    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=OLLAMA_LIST_TIMEOUT)
+    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=OLLAMA_LIST_TIMEOUT, clean_env=True)
     if code == 0:
         models = []
         lines = stdout.strip().split("\n")
@@ -462,7 +463,7 @@ def run_preflight_check(show_progress: bool = True) -> Tuple[bool, str, Optional
     
     if success:
         # Clean up test model to save space
-        utils.run_command(["ollama", "rm", PREFLIGHT_TEST_MODEL], timeout=30)
+        utils.run_command(["ollama", "rm", PREFLIGHT_TEST_MODEL], timeout=30, clean_env=True)
         if show_progress:
             ui.print_success("Pre-flight check passed!")
         return True, "Pre-flight check passed", None
@@ -493,6 +494,10 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
     output_lines: List[str] = []
     
     try:
+        # Create clean environment without SSH_AUTH_SOCK
+        # SSH_AUTH_SOCK causes Go's HTTP library to fail in Ollama
+        clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
+        
         if show_progress:
             # Show live progress with separate stdout/stderr for better error capture
             process = subprocess.Popen(
@@ -500,7 +505,8 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                env=clean_env  # Pass clean environment
             )
             
             # Read stdout for progress
@@ -544,7 +550,8 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
             # Silent pull - capture output
             code, stdout, stderr = utils.run_command(
                 ["ollama", "pull", model_name],
-                timeout=MODEL_PULL_TIMEOUT
+                timeout=MODEL_PULL_TIMEOUT,
+                clean_env=True  # Prevent SSH_AUTH_SOCK bug
             )
             if code == 0:
                 return True, ""
@@ -930,13 +937,13 @@ def test_ollama_connectivity() -> Tuple[bool, str, Dict[str, Any]]:
         ui.print_warning("  Cannot reach ollama.com - may be SSL/proxy issue")
     
     # Test 3: Try ollama search command
-    code, stdout, stderr = utils.run_command(["ollama", "search", "granite"], timeout=15)
+    code, stdout, stderr = utils.run_command(["ollama", "search", "granite"], timeout=15, clean_env=True)
     if code == 0 and stdout:
         details["search_works"] = True
         ui.print_success("  Ollama search is working")
     else:
         # Try an alternative test - list existing models
-        code2, stdout2, stderr2 = utils.run_command(["ollama", "list"], timeout=10)
+        code2, stdout2, stderr2 = utils.run_command(["ollama", "list"], timeout=10, clean_env=True)
         if code2 == 0:
             ui.print_info("  Ollama list works (search may not be available)")
         else:
@@ -1064,7 +1071,7 @@ def run_diagnostics(verbose: bool = True) -> Dict[str, Any]:
         print()
     
     # Check 1: Ollama installation
-    code, stdout, _ = utils.run_command(["ollama", "--version"], timeout=5)
+    code, stdout, _ = utils.run_command(["ollama", "--version"], timeout=5, clean_env=True)
     if code == 0:
         results["ollama_installed"] = True
         results["ollama_version"] = stdout.strip()
@@ -1090,7 +1097,7 @@ def run_diagnostics(verbose: bool = True) -> Dict[str, Any]:
             ui.print_error("Ollama service not running")
     
     # Check 3: List models
-    code, stdout, stderr = utils.run_command(["ollama", "list"], timeout=10)
+    code, stdout, stderr = utils.run_command(["ollama", "list"], timeout=10, clean_env=True)
     if code == 0:
         if verbose:
             model_count = len(stdout.strip().split("\n")) - 1  # Subtract header
@@ -1160,7 +1167,7 @@ def run_diagnostics(verbose: bool = True) -> Dict[str, Any]:
             if verbose:
                 ui.print_success("Test pull successful!")
             # Clean up
-            utils.run_command(["ollama", "rm", "all-minilm"], timeout=30)
+            utils.run_command(["ollama", "rm", "all-minilm"], timeout=30, clean_env=True)
         else:
             error_type = classify_pull_error(error)
             results["issues_found"].append(f"Test pull failed: {error[:100]}")

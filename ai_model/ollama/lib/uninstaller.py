@@ -373,7 +373,7 @@ def handle_config_removal(config_path: Path, manifest: Dict[str, Any]) -> bool:
 
 def get_installed_models() -> List[str]:
     """Get list of currently installed Ollama models."""
-    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=10)
+    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=10, clean_env=True)
     if code != 0:
         return []
     
@@ -390,7 +390,7 @@ def get_installed_models() -> List[str]:
 
 def remove_model(model_name: str) -> bool:
     """Remove a single Ollama model."""
-    code, stdout, stderr = utils.run_command(["ollama", "rm", model_name], timeout=600)
+    code, stdout, stderr = utils.run_command(["ollama", "rm", model_name], timeout=600, clean_env=True)
     if code == 0:
         return True
     else:

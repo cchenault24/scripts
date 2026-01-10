@@ -1053,6 +1053,31 @@ The smart model selector uses functional roles for portfolio building:
 5. Check Ollama logs: `ollama logs` or system logs
 6. Verify model name format (Ollama uses `model:tag` format, e.g., `llama3.2:3b`)
 
+### SSH Key Errors on macOS
+
+**Problem**: Model pulls fail with "ssh: no key found" error
+
+**Root Cause**: 
+- macOS SSH agent sets `SSH_AUTH_SOCK` environment variable for git/GitHub
+- This causes Ollama (written in Go) to malfunction when making HTTPS requests
+- It's a bug in Go's HTTP library, not Ollama trying to use SSH
+
+**Solution**:
+The setup script automatically handles this by using a clean environment when calling Ollama.
+
+If you still see this error:
+1. The script may not have been updated - pull latest version
+2. Manually unset the variable:
+   ```bash
+   unset SSH_AUTH_SOCK
+   pkill ollama
+   ollama serve &
+   ollama pull <model-name>
+   ```
+
+**Prevention**:
+This is handled automatically in the latest version of the script.
+
 ### API Endpoint Not Reachable
 
 **Problem**: Continue.dev can't connect to model API
