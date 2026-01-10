@@ -156,7 +156,13 @@ class TestOllamaServiceAPI:
     
     @patch('urllib.request.urlopen')
     def test_verify_running_uses_api(self, mock_urlopen):
-        """Test that verify_ollama_running uses the API."""
+        """
+        Test that verify_ollama_running uses the API with SSL context.
+        
+        Specification:
+        - Must call Ollama API to verify service is running
+        - Must use SSL context for corporate proxy compatibility
+        """
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.__enter__ = Mock(return_value=mock_response)
@@ -165,9 +171,16 @@ class TestOllamaServiceAPI:
         
         result = ollama.verify_ollama_running()
         
-        assert result is True
-        # Should have called urlopen
+        # Verify function behavior
+        assert result is True, "Should return True when API is available"
+        
+        # Verify API was called
         mock_urlopen.assert_called_once()
+        
+        # CRITICAL: Verify SSL context was passed
+        _, kwargs = mock_urlopen.call_args
+        assert "context" in kwargs, \
+            "CRITICAL: SSL context MUST be passed for corporate proxy compatibility"
 
 
 # =============================================================================

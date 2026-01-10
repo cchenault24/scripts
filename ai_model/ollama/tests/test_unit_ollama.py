@@ -90,27 +90,56 @@ class TestOllamaService:
     
     @patch('lib.utils.run_command')
     @patch('urllib.request.urlopen')
-    def test_start_ollama_service(self, mock_urlopen, mock_run):
-        """Test starting Ollama service."""
-        # First call fails (not running), subsequent calls succeed
-        import urllib.error
-        mock_urlopen.side_effect = [
-            urllib.error.URLError("Not running"),
-            MagicMock(status=200, __enter__=Mock(return_value=MagicMock(status=200)), __exit__=Mock(return_value=False))
-        ]
-        mock_run.return_value = (1, "", "")  # pgrep returns 1 (not found)
+    @patch('subprocess.Popen')
+    @patch('time.sleep')
+    def test_start_ollama_service(self, mock_sleep, mock_popen, mock_urlopen, mock_run):
+        """
+        Test starting Ollama service.
         
-        with patch('subprocess.Popen') as mock_popen:
-            mock_process = MagicMock()
-            mock_process.poll.return_value = None
-            mock_popen.return_value = mock_process
+        Specification: When Ollama is not running, the function should:
+        1. Check if Ollama process is already running (pgrep)
+        2. If not, spawn 'ollama serve' as background process
+        3. Wait for API to become available
+        """
+        import urllib.error
+        
+        # Simulate: first API check fails, second succeeds (service started)
+        mock_response_success = MagicMock()
+        mock_response_success.status = 200
+        mock_response_success.__enter__ = Mock(return_value=mock_response_success)
+        mock_response_success.__exit__ = Mock(return_value=False)
+        
+        mock_urlopen.side_effect = [
+            urllib.error.URLError("Not running"),  # First check - not running
+            mock_response_success,                  # Second check - now running
+        ]
+        
+        # pgrep returns 1 (not found) - no existing Ollama process
+        mock_run.return_value = (1, "", "")
+        
+        # Mock the Popen for 'ollama serve'
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None  # Process still running
+        mock_popen.return_value = mock_process
+        
+        # Call the function
+        try:
+            ollama.start_ollama_service()
             
-            # This test is complex due to the polling loop
-            # Just verify the function doesn't crash
-            try:
-                ollama.start_ollama_service()
-            except Exception:
-                pass  # May timeout in test, that's OK
+            # SPECIFICATION VERIFICATION:
+            # 1. Should have checked for existing process
+            assert mock_run.called, "Should have checked for existing Ollama process"
+            
+            # 2. Should have spawned ollama serve
+            assert mock_popen.called, "Should have spawned 'ollama serve' process"
+            popen_args = mock_popen.call_args[0][0] if mock_popen.call_args[0] else mock_popen.call_args[1].get('args', [])
+            assert 'ollama' in str(popen_args), "Should have called ollama command"
+            
+        except Exception as e:
+            # Function may timeout waiting for API, that's acceptable
+            # But we still verify the mocks were called
+            assert mock_run.called or mock_popen.called, \
+                f"Function failed without attempting to start Ollama: {e}"
 
 
 # =============================================================================
@@ -324,11 +353,23 @@ class TestAPIFetch:
 # =============================================================================
 
 class TestSSLContext:
-    """Tests for SSL context usage in API calls."""
+    """
+    Tests for SSL context usage in API calls.
+    
+    CRITICAL SPECIFICATION:
+    All urllib.request.urlopen() calls MUST include the context parameter
+    with an unverified SSL context. This is required for corporate proxies
+    and SSL interception environments.
+    """
     
     @patch('urllib.request.urlopen')
-    def test_api_uses_ssl_context(self, mock_urlopen):
-        """Test that API calls use unverified SSL context."""
+    def test_verify_running_uses_ssl_context(self, mock_urlopen):
+        """
+        Test that verify_ollama_running() uses unverified SSL context.
+        
+        Specification: All API calls MUST pass context=get_unverified_ssl_context()
+        This test FAILS if the context parameter is missing.
+        """
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.__enter__ = Mock(return_value=mock_response)
@@ -338,11 +379,38 @@ class TestSSLContext:
         # Call a function that makes API requests
         ollama.verify_ollama_running()
         
-        # Check that context was passed
+        # CRITICAL VERIFICATION: SSL context MUST be passed
+        assert mock_urlopen.called, "urlopen should have been called"
+        
         call_args = mock_urlopen.call_args
-        if call_args:
-            _, kwargs = call_args
-            assert "context" in kwargs, "SSL context should be passed to urlopen"
+        assert call_args is not None, "urlopen call_args should not be None"
+        
+        _, kwargs = call_args
+        assert "context" in kwargs, \
+            "CRITICAL: SSL context MUST be passed to urlopen for corporate proxy compatibility"
+        assert kwargs["context"] is not None, \
+            "SSL context cannot be None"
+    
+    @patch('urllib.request.urlopen')
+    def test_fetch_models_uses_ssl_context(self, mock_urlopen):
+        """
+        Test that fetch_available_models_from_api() uses unverified SSL context.
+        """
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.read.return_value = b'{"models": []}'
+        mock_response.__enter__ = Mock(return_value=mock_response)
+        mock_response.__exit__ = Mock(return_value=False)
+        mock_urlopen.return_value = mock_response
+        
+        # Call the function
+        ollama.fetch_available_models_from_api()
+        
+        # Verify SSL context was passed
+        if mock_urlopen.called:
+            _, kwargs = mock_urlopen.call_args
+            assert "context" in kwargs, \
+                "SSL context MUST be passed for corporate proxy compatibility"
 
 
 # =============================================================================

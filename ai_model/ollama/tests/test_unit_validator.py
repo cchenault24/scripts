@@ -95,11 +95,21 @@ class TestTroubleshootingSteps:
 # =============================================================================
 
 class TestAPIAvailability:
-    """Tests for Ollama API availability checks."""
+    """
+    Tests for Ollama API availability checks.
+    
+    CRITICAL: All API calls must use SSL context for corporate proxy compatibility.
+    """
     
     @patch('urllib.request.urlopen')
     def test_is_ollama_api_available_success(self, mock_urlopen):
-        """Test API availability when Ollama is running."""
+        """
+        Test API availability when Ollama is running.
+        
+        Specification:
+        - Returns True when API responds with HTTP 200
+        - Must use SSL context for corporate compatibility
+        """
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.__enter__ = Mock(return_value=mock_response)
@@ -107,16 +117,48 @@ class TestAPIAvailability:
         mock_urlopen.return_value = mock_response
         
         result = validator.is_ollama_api_available()
-        assert result is True
+        
+        # Verify result
+        assert result is True, "Should return True when API is available"
+        
+        # Verify SSL context was used
+        if mock_urlopen.called:
+            _, kwargs = mock_urlopen.call_args
+            assert "context" in kwargs, \
+                "CRITICAL: SSL context MUST be passed for corporate proxy compatibility"
     
     @patch('urllib.request.urlopen')
     def test_is_ollama_api_available_failure(self, mock_urlopen):
-        """Test API availability when Ollama is not running."""
+        """
+        Test API availability when Ollama is not running.
+        
+        Specification:
+        - Returns False when connection is refused
+        - Should not raise exception
+        """
         import urllib.error
         mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         
         result = validator.is_ollama_api_available()
-        assert result is False
+        
+        # Verify graceful failure
+        assert result is False, "Should return False when API is unavailable"
+    
+    @patch('urllib.request.urlopen')
+    def test_is_ollama_api_available_timeout(self, mock_urlopen):
+        """
+        Test API availability on timeout.
+        
+        Specification:
+        - Returns False on timeout
+        - Should not raise exception
+        """
+        import socket
+        mock_urlopen.side_effect = socket.timeout("Connection timed out")
+        
+        result = validator.is_ollama_api_available()
+        
+        assert result is False, "Should return False on timeout"
 
 
 # =============================================================================
