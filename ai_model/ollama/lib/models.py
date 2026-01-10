@@ -144,35 +144,13 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Codestral 22B",
-        ollama_name="codestral:22b-q5_k_m",
-        description="Mistral's Codestral 22B (Q5) - Excellent code generation, highest quality",
-        ram_gb=17.0,  # 22B * 0.75 for Q5
+        ollama_name="codestral:22b",
+        description="Mistral's Codestral 22B - Excellent code generation, high quality",
+        ram_gb=13.0,  # 22B with default quantization (typically Q4)
         context_length=32768,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
         recommended_for=["Best coding quality for Tier S/A", "Primary model"],
-        base_model_name="codestral"
-    ),
-    ModelInfo(
-        name="Codestral 22B Q4",
-        ollama_name="codestral:22b-q4_k_m",
-        description="Mistral's Codestral 22B (Q4) - Excellent code generation, balanced",
-        ram_gb=13.0,  # 22B * 0.6 for Q4
-        context_length=32768,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
-        recommended_for=["Tier A primary model", "Best balance quality/size"],
-        base_model_name="codestral"
-    ),
-    ModelInfo(
-        name="Codestral 22B Q8",
-        ollama_name="codestral:22b-q8",
-        description="Mistral's Codestral 22B (Q8) - Maximum quality, larger size",
-        ram_gb=22.0,  # 22B * 1.0 for Q8
-        context_length=32768,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[hardware.HardwareTier.S],
-        recommended_for=["Tier S ultra quality", "Maximum quality"],
         base_model_name="codestral"
     ),
     ModelInfo(
@@ -187,21 +165,10 @@ MODEL_CATALOG: List[ModelInfo] = [
         base_model_name="codestral"
     ),
     ModelInfo(
-        name="Devstral 27B",
-        ollama_name="devstral:27b-q4_k_m",
-        description="Mistral's Devstral 27B (Q4) - Fast and capable coding model",
-        ram_gb=16.0,  # 27B * 0.6 for Q4
-        context_length=32768,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
-        recommended_for=["Tier S primary", "Fast coding"],
-        base_model_name="devstral"
-    ),
-    ModelInfo(
         name="Phi-4 14B",
-        ollama_name="phi4:14b-q4_k_m",
-        description="Microsoft's Phi-4 14B (Q4) - State-of-the-art reasoning",
-        ram_gb=8.0,  # 14B * 0.6 for Q4
+        ollama_name="phi4:14b",
+        description="Microsoft's Phi-4 14B - State-of-the-art reasoning",
+        ram_gb=8.0,  # 14B with default quantization (typically Q4)
         context_length=16384,
         roles=["chat", "edit", "agent"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B],
@@ -214,9 +181,9 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Granite Code 8B",
-        ollama_name="granite-code:8b-q4",
-        description="IBM's Granite Code 8B (Q4) - Balanced coding model",
-        ram_gb=5.0,  # 8B * 0.6 for Q4
+        ollama_name="granite-code:8b",
+        description="IBM's Granite Code 8B - Balanced coding model",
+        ram_gb=5.0,  # 8B with default quantization (typically Q4)
         context_length=131072,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
@@ -229,9 +196,9 @@ MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
     ModelInfo(
         name="Granite Code 3B",
-        ollama_name="granite-code:3b-q4",
-        description="IBM's Granite Code 3B (Q4) - Fast autocomplete",
-        ram_gb=2.0,  # 3B * 0.6 for Q4
+        ollama_name="granite-code:3b",
+        description="IBM's Granite Code 3B - Fast autocomplete",
+        ram_gb=2.0,  # 3B with default quantization (typically Q4)
         context_length=131072,
         roles=["autocomplete", "chat", "edit"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
@@ -2617,7 +2584,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
         """Create a ModelInfo for portfolio options with only essential fields."""
         return ModelInfo(
             name=name,
-            ollama_name=ollama_name,  # Already contains full variant (e.g., "codestral:22b-q5_k_m")
+            ollama_name=ollama_name,  # Already contains full variant (e.g., "codestral:22b")
             description="",  # Not used in portfolio flow
             ram_gb=ram_gb,
             context_length=0,  # Not used
@@ -2643,9 +2610,9 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
         
         # Option 1: Multi-Model (Recommended for Tier S)
         option1_models = [
-            portfolio_model("Codestral 22B Q5", "codestral:22b-q5_k_m", 17.0, ["chat", "edit"]),
-            portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
-            portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Codestral 22B", "codestral:22b", 13.0, ["chat", "edit"]),
+            portfolio_model("Phi-4 14B", "phi4:14b", 8.0, ["chat", "edit", "agent"]),
+            portfolio_model("Granite Code 8B", "granite-code:8b", 5.0, ["chat", "edit", "autocomplete"]),
             create_embed_model()
         ]
         total_ram_1 = sum(m.ram_gb for m in option1_models)
@@ -2658,8 +2625,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
         
         # Option 2: Balanced
         option2_models = [
-            portfolio_model("Devstral 27B", "devstral:27b-q4_k_m", 16.0, ["chat", "edit", "autocomplete"]),
-            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            portfolio_model("Codestral 22B", "codestral:22b", 13.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
             create_embed_model()
         ]
         total_ram_2 = sum(m.ram_gb for m in option2_models)
@@ -2672,8 +2639,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
         
         # Option 3: Conservative
         option3_models = [
-            portfolio_model("Codestral 22B Q4", "codestral:22b-q4_k_m", 13.0, ["chat", "edit", "autocomplete"]),
-            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            portfolio_model("Codestral 22B", "codestral:22b", 13.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
             create_embed_model()
         ]
         total_ram_3 = sum(m.ram_gb for m in option3_models)
@@ -2696,9 +2663,9 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 1: Balanced (Recommended for 48GB)
             option1_models = [
-                portfolio_model("Codestral 22B Q4", "codestral:22b-q4_k_m", 13.0, ["chat", "edit"]),
-                portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete"]),
+                portfolio_model("Codestral 22B", "codestral:22b", 13.0, ["chat", "edit"]),
+                portfolio_model("Granite Code 8B", "granite-code:8b", 5.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete"]),
                 create_embed_model()
             ]
             total_ram_1 = sum(m.ram_gb for m in option1_models)
@@ -2711,9 +2678,9 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 2: Multi-Model (48GB)
             option2_models = [
-                portfolio_model("Codestral 22B Q5", "codestral:22b-q5_k_m", 17.0, ["chat", "edit"]),
-                portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete"]),
+                portfolio_model("Codestral 22B", "codestral:22b", 13.0, ["chat", "edit"]),
+                portfolio_model("Granite Code 8B", "granite-code:8b", 5.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete"]),
                 create_embed_model()
             ]
             total_ram_2 = sum(m.ram_gb for m in option2_models)
@@ -2726,8 +2693,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 3: Conservative (48GB)
             option3_models = [
-                portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                portfolio_model("Phi-4 14B", "phi4:14b", 8.0, ["chat", "edit", "agent"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
                 create_embed_model()
             ]
             total_ram_3 = sum(m.ram_gb for m in option3_models)
@@ -2742,8 +2709,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 1: Conservative (Recommended for 32GB)
             option1_models = [
-                portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                portfolio_model("Phi-4 14B", "phi4:14b", 8.0, ["chat", "edit", "agent"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
                 create_embed_model()
             ]
             total_ram_1 = sum(m.ram_gb for m in option1_models)
@@ -2757,7 +2724,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             # Option 2: Balanced (32GB)
             option2_models = [
                 portfolio_model("Codestral Latest", "codestral:latest", 12.0, ["chat", "edit", "autocomplete"]),
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
                 create_embed_model()
             ]
             total_ram_2 = sum(m.ram_gb for m in option2_models)
@@ -2774,8 +2741,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
         
         # Option 1: Conservative (Strongly Recommended for Tier B)
         option1_models = [
-            portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
-            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            portfolio_model("Phi-4 14B", "phi4:14b", 8.0, ["chat", "edit", "agent"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
             create_embed_model()
         ]
         total_ram_1 = sum(m.ram_gb for m in option1_models)
@@ -2788,8 +2755,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
         
         # Option 2: Balanced (Use with Caution)
         option2_models = [
-            portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
-            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            portfolio_model("Granite Code 8B", "granite-code:8b", 5.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
             create_embed_model()
         ]
         total_ram_2 = sum(m.ram_gb for m in option2_models)
@@ -2812,7 +2779,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 1: Conservative (Strongly Recommended for 24GB)
             option1_models = [
-                portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 8B", "granite-code:8b", 5.0, ["chat", "edit", "autocomplete"]),
                 portfolio_model("Granite Code Tiny", "granite-code:tiny", 1.0, ["autocomplete"]),
                 create_embed_model()
             ]
@@ -2826,8 +2793,8 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 2: Balanced (Risky on 24GB)
             option2_models = [
-                portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                portfolio_model("Phi-4 14B", "phi4:14b", 8.0, ["chat", "edit", "agent"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete", "chat", "edit"]),
                 create_embed_model()
             ]
             total_ram_2 = sum(m.ram_gb for m in option2_models)
@@ -2842,7 +2809,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             
             # Option 1: Conservative (Only Viable Option for 16GB)
             option1_models = [
-                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["chat", "edit", "autocomplete"]),
                 portfolio_model("Granite Code Tiny", "granite-code:tiny", 1.0, ["autocomplete"]),
                 create_embed_model()
             ]
@@ -3520,7 +3487,7 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         print()
         
         # Determine model name format for Ollama
-        # Portfolio options already have full variant in ollama_name (e.g., "codestral:22b-q5_k_m")
+        # Portfolio options already have full variant in ollama_name (e.g., "codestral:22b")
         # Just use ollama_name directly - it's already in the correct format
         model_name_to_pull = model.ollama_name
         
@@ -3825,7 +3792,7 @@ def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInf
     """
     Convert Ollama model name to Continue.dev compatible format.
     
-    Portfolio options already have full variant in ollama_name (e.g., "codestral:22b-q5_k_m").
+    Portfolio options already have full variant in ollama_name (e.g., "codestral:22b").
     Just return ollama_name directly - it's already in the correct format.
     """
     # Input validation - accept either ModelInfo or string for backward compatibility
