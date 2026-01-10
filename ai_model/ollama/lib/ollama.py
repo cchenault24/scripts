@@ -10,6 +10,7 @@ import os
 import platform
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from typing import List, Tuple
@@ -290,8 +291,86 @@ def fetch_available_models_from_api(endpoint: str = None) -> List[str]:
     return available_models
 
 
+def start_ollama_service() -> bool:
+    """
+    Start Ollama service if it's not already running.
+    
+    Returns:
+        True if Ollama is now running, False otherwise
+    """
+    import subprocess
+    
+    # First check if Ollama is already running
+    try:
+        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
+            if response.status == 200:
+                return True  # Already running
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+        pass  # Not running, continue to start it
+    
+    # Check if ollama process is running
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "ollama serve"],
+            capture_output=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            # Process exists but API not responding - wait a bit
+            ui.print_info("Ollama process found, waiting for API to be ready...")
+            for _ in range(10):  # Wait up to 10 seconds
+                time.sleep(1)
+                try:
+                    req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
+                    with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
+                        if response.status == 200:
+                            return True
+                except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                    continue
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass  # pgrep not available or timed out, continue to start
+    
+    # Start Ollama service
+    ui.print_info("Starting Ollama service...")
+    try:
+        # Start ollama serve in background
+        process = subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        
+        # Wait for API to become available (up to 15 seconds)
+        ui.print_info("Waiting for Ollama API to be ready...")
+        for attempt in range(15):
+            time.sleep(1)
+            try:
+                req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
+                with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
+                    if response.status == 200:
+                        ui.print_success("Ollama service started successfully")
+                        return True
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                continue
+        
+        # Check if process is still running
+        if process.poll() is None:
+            ui.print_warning("Ollama process started but API not responding yet")
+            ui.print_info("It may take a few more seconds to be ready")
+            return True  # Process is running, API might be slow to start
+        else:
+            ui.print_error("Failed to start Ollama service")
+            return False
+            
+    except (FileNotFoundError, OSError) as e:
+        ui.print_error(f"Could not start Ollama service: {e}")
+        return False
+
+
 def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
-    """Check if Ollama API is available and accessible."""
+    """Check if Ollama API is available and accessible. Starts Ollama if needed."""
     # Input validation
     if not hw_info:
         raise ValueError("hw_info is required")
@@ -320,7 +399,35 @@ def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
                     ui.print_info("No models installed yet")
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
         ui.print_warning("Could not reach Ollama API")
-        ui.print_info("The API may not be running. Ollama will start automatically when you pull a model.")
+        ui.print_info("Attempting to start Ollama service...")
+        
+        # Try to start Ollama
+        if start_ollama_service():
+            # Wait a moment and check again
+            time.sleep(2)
+            try:
+                req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
+                req.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
+                    if response.status == 200:
+                        api_reachable = True
+                        hw_info.ollama_api_endpoint = OLLAMA_OPENAI_ENDPOINT
+                        ui.print_success("Ollama API is now accessible")
+                        ui.print_info(f"API endpoint: {hw_info.ollama_api_endpoint}")
+                        
+                        # Fetch available models from API
+                        available_api_models = fetch_available_models_from_api()
+                        if available_api_models:
+                            ui.print_info(f"Found {len(available_api_models)} model(s) installed")
+                        else:
+                            ui.print_info("No models installed yet")
+            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+                ui.print_warning("Ollama service started but API not yet ready")
+                ui.print_info("It should be available shortly")
+        else:
+            ui.print_warning("Could not start Ollama service automatically")
+            ui.print_info("You may need to start it manually: ollama serve")
+        
         hw_info.ollama_api_endpoint = OLLAMA_OPENAI_ENDPOINT
         ui.print_info(f"API endpoint (default): {hw_info.ollama_api_endpoint}")
     
@@ -354,4 +461,13 @@ def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
     if hw_info.has_apple_silicon:
         ui.print_success("Metal GPU acceleration will be used automatically for Apple Silicon")
     
-    return True
+    # Return True if API is reachable or if we successfully started Ollama
+    # Return False only if we couldn't start it and it's definitely not available
+    if api_reachable:
+        return True
+    elif hw_info.ollama_available:  # ollama list succeeded, so Ollama is working
+        return True
+    else:
+        # Couldn't reach API and couldn't start service - but still return True
+        # to allow setup to continue (user can start manually)
+        return True

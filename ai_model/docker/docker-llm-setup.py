@@ -26,18 +26,17 @@ import sys
 import os
 from pathlib import Path
 
-# Add parent directory to path so we can import lib modules
+# Add docker directory to path so we can import lib modules
 # Use absolute path to ensure it works from any directory
 script_path = Path(__file__).resolve() if __file__ else Path(sys.argv[0]).resolve()
 docker_dir = script_path.parent
-parent_dir = docker_dir.parent
 
-# Ensure the parent_dir is in sys.path
-parent_dir_str = str(parent_dir)
-if parent_dir_str not in sys.path:
-    sys.path.insert(0, parent_dir_str)
+# Ensure the docker_dir is in sys.path (so we import from docker/lib/)
+docker_dir_str = str(docker_dir)
+if docker_dir_str not in sys.path:
+    sys.path.insert(0, docker_dir_str)
 
-# Import from lib modules
+# Import from lib modules (from docker/lib/)
 from lib import config
 from lib import docker
 from lib import hardware

@@ -205,24 +205,15 @@ MODEL_CATALOG: List[ModelInfo] = [
         recommended_for=["Fast autocomplete", "All tiers"],
         base_model_name="granite-code"
     ),
-    ModelInfo(
-        name="Granite Code Tiny",
-        ollama_name="granite-code:tiny",
-        description="IBM's Granite Code Tiny - Ultra-fast autocomplete",
-        ram_gb=1.0,
-        context_length=131072,
-        roles=["autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Ultra-fast autocomplete", "Minimal memory"],
-        base_model_name="granite-code"
-    ),
+    # Note: granite-code:tiny doesn't exist in Ollama - using granite-code:3b as smallest option
+    # Removed ModelInfo for "Granite Code Tiny" - use granite-code:3b instead
     
     # =========================================================================
     # Embedding Models (All Tiers)
     # =========================================================================
     ModelInfo(
         name="Nomic Embed Text",
-        ollama_name="nomic-embed-text",
+        ollama_name="nomic-embed-text:latest",
         description="Best open embedding model for code indexing (8192 tokens)",
         ram_gb=0.3,
         context_length=8192,
@@ -2599,7 +2590,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
     def create_embed_model() -> ModelInfo:
         return portfolio_model(
             name="Nomic Embed Text",
-            ollama_name="nomic-embed-text",
+            ollama_name="nomic-embed-text:latest",
             ram_gb=0.3,
             roles=["embed"]
         )
@@ -2780,7 +2771,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             # Option 1: Conservative (Strongly Recommended for 24GB)
             option1_models = [
                 portfolio_model("Granite Code 8B", "granite-code:8b", 5.0, ["chat", "edit", "autocomplete"]),
-                portfolio_model("Granite Code Tiny", "granite-code:tiny", 1.0, ["autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["autocomplete"]),
                 create_embed_model()
             ]
             total_ram_1 = sum(m.ram_gb for m in option1_models)
@@ -2810,7 +2801,6 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             # Option 1: Conservative (Only Viable Option for 16GB)
             option1_models = [
                 portfolio_model("Granite Code 3B", "granite-code:3b", 2.0, ["chat", "edit", "autocomplete"]),
-                portfolio_model("Granite Code Tiny", "granite-code:tiny", 1.0, ["autocomplete"]),
                 create_embed_model()
             ]
             total_ram_1 = sum(m.ram_gb for m in option1_models)
@@ -2818,7 +2808,7 @@ def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str
             options.append((
                 "Conservative (16GB Only Viable Option)",
                 option1_models,
-                f"Entry-level quality - suitable for simple coding tasks, learning, and experimentation. Close everything except IDE and minimal browser. Consider this a stopgap until upgrading to 32GB+ RAM. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+                f"Entry-level quality - suitable for simple coding tasks, learning, and experimentation. Granite 3B handles all roles. Close everything except IDE and minimal browser. Consider this a stopgap until upgrading to 32GB+ RAM. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
             ))
         
     else:  # Tier D
@@ -3732,16 +3722,36 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         
         if code == 0:
             # Verify the model was actually downloaded
+            # Wait a moment for Ollama to update its internal list
+            import time
+            time.sleep(1)
+            
             verify_code, verify_out, _ = utils.run_command(["ollama", "list"])
             model_found = False
             
             if verify_code == 0:
                 # Check if the model appears in the list
-                model_name_simple = model_name_to_pull.split(":")[0]  # Remove tag for matching
+                # Try matching both the full name (with tag) and base name (without tag)
+                model_name_simple = model_name_to_pull.split(":")[0]  # Base name (e.g., "codestral")
+                model_name_full = model_name_to_pull.lower()  # Full name with tag (e.g., "codestral:22b")
+                
                 for line in verify_out.split("\n"):
-                    if model_name_simple.lower() in line.lower():
+                    line_lower = line.lower()
+                    # Check for full name match first (e.g., "codestral:22b")
+                    if model_name_full in line_lower:
                         model_found = True
                         break
+                    # Also check for base name match (e.g., "codestral")
+                    # But be careful - "codestral" might match "codestral-latest" or other variants
+                    # So we check if the line starts with the base name or contains it as a word boundary
+                    if model_name_simple.lower() in line_lower:
+                        # More specific check: the model name should appear as a word (not part of another word)
+                        # Check if it's at the start of the line or after whitespace
+                        import re
+                        pattern = rf'\b{re.escape(model_name_simple.lower())}\b'
+                        if re.search(pattern, line_lower):
+                            model_found = True
+                            break
             
             if model_found:
                 ui.print_success(f"{model.name} downloaded successfully")
@@ -3750,17 +3760,29 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
             else:
                 ui.print_warning(f"Download completed but model '{model.name}' not found in Ollama list")
                 ui.print_info("The model may have been downloaded with a different name")
+                ui.print_info(f"Try running 'ollama list' to see available models")
                 # Still add to successfully_pulled since the pull command succeeded
                 successfully_pulled.append(model)
         else:
             ui.print_error(f"Failed to pull {model.name}")
             
-            # Check if it was a 401 Unauthorized error
+            # Check for specific error types
             is_unauthorized = False
+            is_ssh_error = False
             if 'full_output' in locals() and isinstance(full_output, list):
+                output_text = " ".join(full_output).lower()
                 is_unauthorized = any("401" in line or "unauthorized" in line.lower() for line in full_output)
+                is_ssh_error = "ssh" in output_text and ("no key found" in output_text or "id_ed25519" in output_text)
             
-            if is_unauthorized:
+            if is_ssh_error:
+                ui.print_warning("SSH authentication error detected - this is a known Ollama issue")
+                ui.print_info("Possible solutions:")
+                ui.print_info("  1. Restart Ollama: killall ollama && ollama serve")
+                ui.print_info("  2. Check Ollama version: ollama --version (consider updating if < 0.14)")
+                ui.print_info("  3. Try pulling manually: ollama pull codestral:latest")
+                ui.print_info("  4. Check if models directory exists: ls -la ~/.ollama/")
+                ui.print_info("  5. If error persists, this may be an Ollama bug - try updating Ollama")
+            elif is_unauthorized:
                 ui.print_warning("Model not found in Ollama Library (401 Unauthorized)")
                 ui.print_info("This model may not be available in the 'ai/' namespace.")
                 ui.print_info("You can try:")
