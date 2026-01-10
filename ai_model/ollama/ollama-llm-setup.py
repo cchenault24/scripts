@@ -114,15 +114,23 @@ def main() -> int:
     # Step 6: Model selection
     print()
     if preset and preset != "Custom":
-        # Use portfolio recommendation for preset
+        # Get portfolio option based on preset
         ui.print_info(f"Generating {preset} portfolio recommendation...")
-        selected_models = models.generate_portfolio_recommendation(hw_info)
+        selected_models = models.get_portfolio_option_by_preset(hw_info, preset)
         
         if not selected_models:
             ui.print_warning("Could not generate portfolio recommendation. Falling back to manual selection.")
             selected_models = models.select_models(hw_info)
+        else:
+            # Display what was selected
+            options = models.generate_portfolio_options(hw_info)
+            for option_name, models_list, _ in options:
+                if models_list == selected_models:
+                    ui.print_success(f"Selected {preset} preset: {option_name}")
+                    break
+            print()
     else:
-        # Custom selection
+        # Custom selection - show all options
         selected_models = models.select_models(hw_info)
     
     if not selected_models:

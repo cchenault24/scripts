@@ -53,12 +53,13 @@ class HardwareInfo:
     
     def get_tier_label(self) -> str:
         """Get human-readable tier label."""
+        usable = self.get_estimated_model_memory()
         labels = {
-            HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.B: f"Tier B (>24-32GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.C: f"Tier C (16-24GB RAM) - {self.ram_gb:.1f}GB detected",
-            HardwareTier.D: f"Tier D (<16GB RAM) - {self.ram_gb:.1f}GB detected (UNSUPPORTED - minimum 16GB required)",
+            HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
+            HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
+            HardwareTier.B: f"Tier B (>24-32GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
+            HardwareTier.C: f"Tier C (16-24GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
+            HardwareTier.D: f"Tier D (<16GB RAM) - {self.ram_gb:.1f}GB total (UNSUPPORTED - minimum 16GB required)",
         }
         return labels.get(self.tier, "Unknown")
     
@@ -79,29 +80,34 @@ class HardwareInfo:
     def calculate_os_overhead(self) -> float:
         """
         Calculate OS overhead based on total RAM.
-        OS_OVERHEAD: 3GB (<16GB), 4GB (16-32GB), 5GB (>32GB)
+        Uses 30% of total RAM for macOS, apps, browser, IDE, and model context/KV cache.
+        This is more realistic than the previous 10-15% reservation.
         """
-        if self.ram_gb < 16:
-            return 3.0
-        elif self.ram_gb <= 32:
-            return 4.0
-        else:
-            return 5.0
+        return self.ram_gb * 0.30
     
     def get_estimated_model_memory(self) -> float:
         """
         Get estimated memory available for models.
-        Uses formula: usable_ram = total_ram - os_overhead
-        This leaves OS overhead reserved while making the rest available for models.
+        Reserves 30% of total RAM for macOS, apps, browser, and IDE overhead.
+        This is more realistic than the previous 10-15% reservation.
+        
+        Formula: usable_ram = total_ram * 0.70
+        
+        Breakdown of 30% overhead:
+        - macOS system: 4-6GB
+        - VS Code/IntelliJ: 2-4GB  
+        - Browser (Chrome/Safari): 3-6GB
+        - Continue.dev overhead: 1-2GB
+        - Model context/KV cache: 2-4GB
+        
         On Apple Silicon, unified memory is shared between CPU/GPU/Neural Engine.
         """
         if self.usable_ram_gb > 0:
             return self.usable_ram_gb
         
-        # Calculate usable RAM: total_ram - os_overhead
-        # Changed from (total_ram * 0.75) - os_overhead to avoid double-counting OS overhead
-        os_overhead = self.calculate_os_overhead()
-        usable_ram = self.ram_gb - os_overhead
+        # Reserve 30% for macOS + apps (more realistic than previous 10-15%)
+        reserved_percent = 0.30
+        usable_ram = self.ram_gb * (1 - reserved_percent)
         
         # For discrete GPU systems, use VRAM if available and larger
         if not self.has_apple_silicon and self.gpu_vram_gb > 0:
@@ -324,9 +330,8 @@ def detect_hardware() -> HardwareInfo:
         ui.print_error("Please upgrade your hardware to at least 16GB RAM")
         raise SystemExit("Hardware requirements not met: Minimum 16GB RAM required")
     
-    # Calculate usable RAM and OS overhead
-    os_overhead = info.calculate_os_overhead()
-    info.usable_ram_gb = max(0, info.ram_gb - os_overhead)
+    # Calculate usable RAM (70% of total, 30% reserved for macOS/apps)
+    info.usable_ram_gb = info.get_estimated_model_memory()
     
     # Classify tier based on total RAM
     # Updated tier system: S (>64GB), A (32-64GB), B (>24-32GB), C (16-24GB), D (<16GB - unsupported)

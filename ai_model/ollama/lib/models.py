@@ -140,168 +140,129 @@ class ModelInfo:
 # Note: Legacy model formats have been removed - using Ollama-native naming conventions
 MODEL_CATALOG: List[ModelInfo] = [
     # =========================================================================
-    # Chat/Edit Models - Large (Tier S: 49GB+ RAM)
+    # Chat/Edit Models - Medium-Large (Tier A: 33-48GB RAM with 30% overhead)
     # =========================================================================
     ModelInfo(
-        name="Llama 3.3",
-        ollama_name="llama3.3",
-        description="Highest quality for complex refactoring - variant auto-selected based on hardware",
-        ram_gb=35.0,  # Will be updated based on selected variant
-        context_length=131072,
-        roles=["chat", "edit", "agent"],
-        tiers=[hardware.HardwareTier.S],
-        recommended_for=["Tier S primary model", "Complex refactoring"],
-        base_model_name="llama3.3"
-    ),
-    ModelInfo(
-        name="Llama 3.1",
-        ollama_name="llama3.1",
-        description="Excellent for architecture and complex tasks - variant auto-selected based on hardware",
-        ram_gb=35.0,  # Will be updated based on selected variant
-        context_length=131072,
-        roles=["chat", "edit", "agent"],
-        tiers=[hardware.HardwareTier.S],
-        recommended_for=["Tier S alternative"],
-        base_model_name="llama3.1"
-    ),
-    # =========================================================================
-    # Chat/Edit Models - Medium-Large (Tier A: 33-48GB RAM)
-    # =========================================================================
-    ModelInfo(
-        name="Granite 4.0 H-Small",
-        ollama_name="granite-code:latest",
-        description="IBM's Granite 4.0 coding model (small variant) - State-of-the-art code generation",
-        ram_gb=18.0,
-        context_length=131072,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
-        recommended_for=["Best coding quality", "Tier A primary"]
-    ),
-    ModelInfo(
-        name="Codestral",
-        ollama_name="codestral",
-        description="Mistral's Codestral code generation model - Excellent for code generation",
-        ram_gb=12.0,
+        name="Codestral 22B",
+        ollama_name="codestral:22b-q5_k_m",
+        description="Mistral's Codestral 22B (Q5) - Excellent code generation, highest quality",
+        ram_gb=17.0,  # 22B * 0.75 for Q5
         context_length=32768,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
-        recommended_for=["Excellent code generation", "Mistral coding model"]
+        recommended_for=["Best coding quality for Tier S/A", "Primary model"],
+        base_model_name="codestral"
     ),
     ModelInfo(
-        name="Devstral Small",
-        ollama_name="devstral",
-        description="Mistral's Devstral coding model (small variant) - Fast and capable",
-        ram_gb=9.0,
+        name="Codestral 22B Q4",
+        ollama_name="codestral:22b-q4_k_m",
+        description="Mistral's Codestral 22B (Q4) - Excellent code generation, balanced",
+        ram_gb=13.0,  # 22B * 0.6 for Q4
         context_length=32768,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
-        recommended_for=["Good balance of speed and quality"]
+        recommended_for=["Tier A primary model", "Best balance quality/size"],
+        base_model_name="codestral"
     ),
-    # =========================================================================
-    # Chat/Edit Models - Medium (Tier B: >24-32GB RAM)
-    # =========================================================================
     ModelInfo(
-        name="Phi-4",
-        ollama_name="phi4",
-        description="Microsoft's state-of-the-art reasoning model - variant auto-selected based on hardware",
-        ram_gb=8.0,  # Will be updated based on selected variant
+        name="Codestral 22B Q8",
+        ollama_name="codestral:22b-q8",
+        description="Mistral's Codestral 22B (Q8) - Maximum quality, larger size",
+        ram_gb=22.0,  # 22B * 1.0 for Q8
+        context_length=32768,
+        roles=["chat", "edit", "autocomplete"],
+        tiers=[hardware.HardwareTier.S],
+        recommended_for=["Tier S ultra quality", "Maximum quality"],
+        base_model_name="codestral"
+    ),
+    ModelInfo(
+        name="Codestral Latest",
+        ollama_name="codestral:latest",
+        description="Mistral's Codestral (latest) - Default quantization, typically Q4",
+        ram_gb=13.0,  # Assumes Q4 default
+        context_length=32768,
+        roles=["chat", "edit", "autocomplete"],
+        tiers=[hardware.HardwareTier.A, hardware.HardwareTier.B],
+        recommended_for=["Tier A/B balanced", "Latest version"],
+        base_model_name="codestral"
+    ),
+    ModelInfo(
+        name="Devstral 27B",
+        ollama_name="devstral:27b-q4_k_m",
+        description="Mistral's Devstral 27B (Q4) - Fast and capable coding model",
+        ram_gb=16.0,  # 27B * 0.6 for Q4
+        context_length=32768,
+        roles=["chat", "edit", "autocomplete"],
+        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
+        recommended_for=["Tier S primary", "Fast coding"],
+        base_model_name="devstral"
+    ),
+    ModelInfo(
+        name="Phi-4 14B",
+        ollama_name="phi4:14b-q4_k_m",
+        description="Microsoft's Phi-4 14B (Q4) - State-of-the-art reasoning",
+        ram_gb=8.0,  # 14B * 0.6 for Q4
         context_length=16384,
         roles=["chat", "edit", "agent"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B],
-        recommended_for=["Excellent reasoning", "Tier B primary"],
+        recommended_for=["Excellent reasoning", "Tier A/B primary"],
         base_model_name="phi4"
     ),
-    ModelInfo(
-        name="Granite 4.0 H-Micro",
-        ollama_name="granite-code:micro",
-        description="IBM's Granite 4.0 coding model (micro variant) - Strong coding with good performance",
-        ram_gb=8.0,
-        context_length=131072,
-        roles=["chat", "edit", "autocomplete"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B],
-        recommended_for=["Good balance of quality and speed"]
-    ),
+    
     # =========================================================================
-    # Chat/Edit Models - Small (All Tiers, optimized for Tier C: 16-24GB RAM)
+    # Chat/Edit Models - Medium (Tier B: >24-32GB RAM with 30% overhead)
     # =========================================================================
-    # Note: Llama 3.2 8B is NOT available in Ollama - only the 3B variant exists
     ModelInfo(
-        name="Granite 4.0 H-Nano",
-        ollama_name="granite-code:nano",
-        description="IBM's Granite 4.0 coding model (nano variant) - Efficient coding model",
-        ram_gb=4.0,
+        name="Granite Code 8B",
+        ollama_name="granite-code:8b-q4",
+        description="IBM's Granite Code 8B (Q4) - Balanced coding model",
+        ram_gb=5.0,  # 8B * 0.6 for Q4
         context_length=131072,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Tier C primary", "Fast autocomplete"]
+        recommended_for=["Tier B/C primary", "Tier A helper", "Good balance"],
+        base_model_name="granite-code"
     ),
+    
     # =========================================================================
-    # Autocomplete Models - Ultra-fast (All Tiers)
+    # Autocomplete Models - Fast (All Tiers)
     # =========================================================================
     ModelInfo(
-        name="Llama 3.2",
-        ollama_name="llama3.2",
-        description="Small and efficient general model - variant auto-selected based on hardware",
-        ram_gb=1.8,  # Will be updated based on selected variant
+        name="Granite Code 3B",
+        ollama_name="granite-code:3b-q4",
+        description="IBM's Granite Code 3B (Q4) - Fast autocomplete",
+        ram_gb=2.0,  # 3B * 0.6 for Q4
         context_length=131072,
-        roles=["chat", "edit", "autocomplete"],
+        roles=["autocomplete", "chat", "edit"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["All tiers", "Quick edits", "Low memory", "Fast responses"],
-        base_model_name="llama3.2"
+        recommended_for=["Fast autocomplete", "All tiers"],
+        base_model_name="granite-code"
     ),
     ModelInfo(
-        name="Granite 4.0 H-Tiny",
+        name="Granite Code Tiny",
         ollama_name="granite-code:tiny",
-        description="IBM's Granite 4.0 coding model (tiny variant) - Smallest coding model, very fast",
+        description="IBM's Granite Code Tiny - Ultra-fast autocomplete",
         ram_gb=1.0,
         context_length=131072,
         roles=["autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Minimal memory usage", "Ultra-fast autocomplete"]
+        recommended_for=["Ultra-fast autocomplete", "Minimal memory"],
+        base_model_name="granite-code"
     ),
+    
     # =========================================================================
     # Embedding Models (All Tiers)
     # =========================================================================
     ModelInfo(
-        name="Nomic Embed Text v1.5",
+        name="Nomic Embed Text",
         ollama_name="nomic-embed-text",
         description="Best open embedding model for code indexing (8192 tokens)",
         ram_gb=0.3,
         context_length=8192,
         roles=["embed"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Code indexing", "Semantic search"],
-        base_model_name="nomic-embed-text"  # Match ollama_name since this model doesn't have variants
-    ),
-    ModelInfo(
-        name="Granite Embedding Multilingual",
-        ollama_name="granite-embed",
-        description="IBM's Granite multilingual embedding model - Multi-lingual code and text embeddings",
-        ram_gb=0.5,
-        context_length=8192,
-        roles=["embed"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Multi-lingual codebases"]
-    ),
-    ModelInfo(
-        name="MXBAI Embed Large",
-        ollama_name="mxbai-embed-large",
-        description="Mixedbread AI's large embedding model - High-quality embeddings for code",
-        ram_gb=0.8,
-        context_length=8192,
-        roles=["embed"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["High-quality code embeddings"]
-    ),
-    ModelInfo(
-        name="All-MiniLM-L6-v2 (vLLM)",
-        ollama_name="all-minilm",
-        description="Lightweight embedding model optimized with vLLM - Minimal memory usage",
-        ram_gb=0.1,
-        context_length=512,
-        roles=["embed"],
-        tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
-        recommended_for=["Minimal memory", "Simple search", "Fast embeddings"]
+        recommended_for=["Code indexing", "Semantic search", "@codebase"],
+        base_model_name="nomic-embed-text"
     ),
 ]
 
@@ -2242,19 +2203,25 @@ def validate_model_selection(
                 f"of available RAM (max 50% recommended)"
             )
     
-    # Check: Total selection ≤85% available RAM
+    # Check: Total selection exceeds usable RAM (block this)
     ram_usage_percent = (total_ram_used / usable_ram * 100) if usable_ram > 0 else 0
-    if ram_usage_percent > 85:
+    if ram_usage_percent > 100:
         warnings.append(
-            f"Total RAM usage {total_ram_used:.1f}GB ({ram_usage_percent:.1f}%) exceeds 85% limit. "
-            f"Recommended: ≤{usable_ram * 0.85:.1f}GB"
+            f"Total RAM usage {total_ram_used:.1f}GB ({ram_usage_percent:.1f}%) exceeds available RAM ({usable_ram:.1f}GB). "
+            f"This will cause system instability."
+        )
+    elif ram_usage_percent >= 95:
+        warnings.append(
+            f"Total RAM usage {total_ram_used:.1f}GB ({ram_usage_percent:.1f}%) is very high. "
+            f"Consider reducing selection for better stability."
         )
     
-    # Check: Minimum 2GB free RAM after load
+    # Check: Very low free RAM after load (only warn if <0.5GB, not 2GB)
+    # Since we've already reserved 30% for overhead, we don't need a large buffer
     free_ram_after = usable_ram - total_ram_used
-    if free_ram_after < 2.0:
+    if free_ram_after < 0.5:
         warnings.append(
-            f"Only {free_ram_after:.1f}GB free RAM after model load (minimum 2GB recommended). "
+            f"Only {free_ram_after:.1f}GB free RAM after model load. "
             f"System may become unstable."
         )
     
@@ -2345,9 +2312,9 @@ def display_ram_usage(selected_models: List[ModelInfo], hw_info: hardware.Hardwa
     
     Color coding:
     - Green <70%
-    - Yellow 70-85%
-    - Red >85%
-    - Block >90% (prevent installation)
+    - Yellow 70-95%
+    - Yellow 95-100% (high but acceptable - 30% overhead already reserved)
+    - Red >100% (exceeds usable RAM - blocked)
     
     Args:
         selected_models: List of selected models
@@ -2360,14 +2327,18 @@ def display_ram_usage(selected_models: List[ModelInfo], hw_info: hardware.Hardwa
     reserve_percent = (reserve_ram / usable_ram * 100) if usable_ram > 0 else 0
     
     # Determine color based on usage
+    # Since we've already reserved 30% for macOS/apps, we can use up to 100% of usable RAM
     if usage_percent < 70:
         color = ui.Colors.GREEN
         status_icon = "✓"
     elif usage_percent < 85:
         color = ui.Colors.YELLOW
         status_icon = "⚠"
-    elif usage_percent < 90:
-        color = ui.Colors.RED
+    elif usage_percent < 95:
+        color = ui.Colors.YELLOW
+        status_icon = "⚠"
+    elif usage_percent <= 100:
+        color = ui.Colors.YELLOW
         status_icon = "⚠"
     else:
         color = ui.Colors.RED + ui.Colors.BOLD
@@ -2376,7 +2347,12 @@ def display_ram_usage(selected_models: List[ModelInfo], hw_info: hardware.Hardwa
     # Display RAM usage summary
     print()
     ui.print_subheader("RAM Usage Summary")
-    ram_usage_str = f"RAM Usage: {total_ram_used:.1f}GB / {usable_ram:.1f}GB usable (of {hw_info.ram_gb:.1f}GB total) ({usage_percent:.1f}%)"
+    print(f"  Total System RAM: {hw_info.ram_gb:.1f}GB")
+    print(f"  Reserved for macOS/Apps (30%): {hw_info.ram_gb * 0.30:.1f}GB")
+    print(f"  Available for Models (70%): {usable_ram:.1f}GB")
+    print()
+    
+    ram_usage_str = f"Model RAM Usage: {total_ram_used:.1f}GB / {usable_ram:.1f}GB ({usage_percent:.1f}%)"
     reserve_str = f"Reserve: {reserve_ram:.1f}GB ({reserve_percent:.1f}%)"
     
     print(f"  {status_icon} {ui.colorize(ram_usage_str, color)} | {reserve_str}")
@@ -2385,21 +2361,26 @@ def display_ram_usage(selected_models: List[ModelInfo], hw_info: hardware.Hardwa
     print()
     print("  Model Breakdown:")
     for model in selected_models:
-        variant_info = f" ({model.selected_variant})" if model.selected_variant else ""
+        # Extract variant from ollama_name for display
+        variant_info = ""
+        if ":" in model.ollama_name:
+            variant_info = f" ({model.ollama_name.split(':', 1)[1]})"
         roles_str = ", ".join(model.roles) if model.roles else "general"
         print(f"    {ui.colorize('✓', ui.Colors.GREEN)} {model.name}{variant_info} - {model.ram_gb:.1f}GB ({roles_str})")
     
     # Show warnings if needed
-    if usage_percent >= 90:
+    # Note: Since we've already reserved 30% for macOS/apps, we can use up to 100% of usable RAM
+    # Only warn if we exceed usable RAM or get very close (95%+)
+    if usage_percent > 100:
         print()
-        ui.print_error("RAM usage exceeds 90% - installation blocked for safety")
+        ui.print_error("RAM usage exceeds available RAM - installation blocked")
         ui.print_info("Please reduce model selection or upgrade hardware")
+    elif usage_percent >= 95:
+        print()
+        ui.print_warning("RAM usage is very high (≥95%) - consider reducing selection for better stability")
     elif usage_percent >= 85:
         print()
-        ui.print_warning("RAM usage exceeds 85% - system may become unstable")
-    elif usage_percent >= 70:
-        print()
-        ui.print_warning("RAM usage is high - consider reducing selection if experiencing issues")
+        ui.print_warning("RAM usage is high (≥85%) - monitor system performance")
     
     print()
 
@@ -2487,10 +2468,13 @@ def select_preset(hw_info: hardware.HardwareInfo) -> Optional[str]:
     Select a quick start preset for model configuration.
     
     Presets:
-    - Balanced: General + coding + embeddings (default portfolio)
-    - Coding Focus: Emphasize coding models
-    - Minimal: Fastest, smallest models
-    - Custom: Manual selection
+    - Balanced: One powerful primary model with lightweight helpers. Optimizes quality vs resources.
+                Recommended for most users. Excellent code quality with smooth system performance.
+    - Multi Model: Multiple specialized models simultaneously - large primary, reasoning model, fast helper.
+                   Best tool for each job with maximum flexibility. Higher RAM usage. Tier S (64GB+) only.
+    - Conservative: Single primary model handling all roles with minimal helpers. Prioritizes system stability.
+                    Plenty of buffer for macOS, browser, IDEs. Essential for Tier B/C, smart for larger systems.
+    - Custom: Manual selection - see all options for your tier
     
     Args:
         hw_info: Hardware information
@@ -2500,14 +2484,28 @@ def select_preset(hw_info: hardware.HardwareInfo) -> Optional[str]:
     """
     ui.print_subheader("Quick Start Presets")
     print()
-    ui.print_info("Select a preset configuration, or choose Custom for manual selection:")
+    ui.print_info("Select a preset configuration, or choose Custom to see all options:")
     print()
     
     presets = [
-        ("Balanced", "General chat + coding + embeddings (recommended)"),
-        ("Coding Focus", "Emphasize coding models for development"),
-        ("Minimal", "Fastest, smallest models for quick responses"),
-        ("Custom", "Manual selection with full control")
+        (
+            "Balanced", 
+            "Optimizes quality vs resources - one powerful primary model with lightweight helpers. "
+            "Excellent code quality while maintaining smooth system performance. Recommended for most users."
+        ),
+        (
+            "Multi Model", 
+            "Multiple specialized models simultaneously - large primary for coding, separate reasoning model, "
+            "fast helper, plus autocomplete and embeddings. Best tool for each job with maximum flexibility. "
+            "Higher RAM usage (~30GB on Tier S). Only practical on Tier S (64GB+) systems."
+        ),
+        (
+            "Conservative", 
+            "Prioritizes system stability - single primary model handling all roles with minimal helpers. "
+            "Plenty of buffer for macOS, browser, IDEs without RAM pressure. Essential for Tier B/C (16-32GB), "
+            "smart choice for larger systems if you value smooth performance over specialized models."
+        ),
+        ("Custom", "Manual selection - see all options for your tier")
     ]
     
     for i, (name, desc) in enumerate(presets):
@@ -2599,310 +2597,341 @@ def ensure_model_diversity(selected_models: List[ModelInfo]) -> List[ModelInfo]:
     return diverse_models
 
 
+def generate_portfolio_options(hw_info: hardware.HardwareInfo) -> List[Tuple[str, List[ModelInfo], str]]:
+    """
+    Generate multiple portfolio options for hardware tier.
+    
+    Returns list of tuples: (option_name, models_list, description)
+    Each option is a complete portfolio of models for the tier.
+    
+    Uses 30% RAM overhead reservation (70% usable for models).
+    """
+    usable_ram = hw_info.get_estimated_model_memory()
+    total_ram = hw_info.ram_gb
+    reserved_ram = total_ram * 0.30
+    
+    options = []
+    
+    # Helper function to create portfolio model (minimal fields - only what's needed)
+    def portfolio_model(name: str, ollama_name: str, ram_gb: float, roles: List[str]) -> ModelInfo:
+        """Create a ModelInfo for portfolio options with only essential fields."""
+        return ModelInfo(
+            name=name,
+            ollama_name=ollama_name,  # Already contains full variant (e.g., "codestral:22b-q5_k_m")
+            description="",  # Not used in portfolio flow
+            ram_gb=ram_gb,
+            context_length=0,  # Not used
+            roles=roles,
+            tiers=[],  # Not used in portfolio flow
+            recommended_for=[],  # Not used
+            base_model_name=None,  # Not needed - ollama_name is complete
+            selected_variant=None  # Not needed - ollama_name is complete
+        )
+    
+    # Helper function to create embed model
+    def create_embed_model() -> ModelInfo:
+        return portfolio_model(
+            name="Nomic Embed Text",
+            ollama_name="nomic-embed-text",
+            ram_gb=0.3,
+            roles=["embed"]
+        )
+    
+    if hw_info.tier == hardware.HardwareTier.S:
+        # Tier S: >64GB RAM (e.g., 64GB, 96GB, 128GB systems)
+        # Example: 64GB → 44.8GB usable
+        
+        # Option 1: Multi-Model (Recommended for Tier S)
+        option1_models = [
+            portfolio_model("Codestral 22B Q5", "codestral:22b-q5_k_m", 17.0, ["chat", "edit"]),
+            portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
+            portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+            create_embed_model()
+        ]
+        total_ram_1 = sum(m.ram_gb for m in option1_models)
+        buffer_1 = usable_ram - total_ram_1
+        options.append((
+            "Multi-Model (Recommended)",
+            option1_models,
+            f"Specialized tools for every job - Phi-4 for reasoning/architecture, Codestral Q5 for code generation, Granite 8B for quick edits. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+        ))
+        
+        # Option 2: Balanced
+        option2_models = [
+            portfolio_model("Devstral 27B", "devstral:27b-q4_k_m", 16.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            create_embed_model()
+        ]
+        total_ram_2 = sum(m.ram_gb for m in option2_models)
+        buffer_2 = usable_ram - total_ram_2
+        options.append((
+            "Balanced",
+            option2_models,
+            f"Single powerful model handling all roles - Devstral 27B delivers excellent quality with more headroom. Total: ~{total_ram_2:.1f}GB (leaves {buffer_2:.1f}GB buffer)"
+        ))
+        
+        # Option 3: Conservative
+        option3_models = [
+            portfolio_model("Codestral 22B Q4", "codestral:22b-q4_k_m", 13.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            create_embed_model()
+        ]
+        total_ram_3 = sum(m.ram_gb for m in option3_models)
+        buffer_3 = usable_ram - total_ram_3
+        options.append((
+            "Conservative",
+            option3_models,
+            f"Even conservative on Tier S runs a 22B model with massive headroom - room for Docker, databases, multiple IDEs, dozens of browser tabs. Total: ~{total_ram_3:.1f}GB (leaves {buffer_3:.1f}GB buffer)"
+        ))
+        
+    elif hw_info.tier == hardware.HardwareTier.A:
+        # Tier A: 32-64GB RAM (e.g., 48GB M4 Pro, 32GB systems)
+        # Example: 48GB → 33.6GB usable, 32GB → 22.4GB usable
+        
+        # Determine if this is a 48GB system (>=40GB) or 32GB system
+        is_48gb_system = hw_info.ram_gb >= 40
+        
+        if is_48gb_system:
+            # 48GB Systems (M4 Pro) - ~34GB usable
+            
+            # Option 1: Balanced (Recommended for 48GB)
+            option1_models = [
+                portfolio_model("Codestral 22B Q4", "codestral:22b-q4_k_m", 13.0, ["chat", "edit"]),
+                portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete"]),
+                create_embed_model()
+            ]
+            total_ram_1 = sum(m.ram_gb for m in option1_models)
+            buffer_1 = usable_ram - total_ram_1
+            options.append((
+                "Balanced (48GB Recommended)",
+                option1_models,
+                f"Sweet spot for M4 Pro - Codestral Q4 handles main work, Granite 8B for faster tasks, 3B for instant autocomplete. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+            ))
+            
+            # Option 2: Multi-Model (48GB)
+            option2_models = [
+                portfolio_model("Codestral 22B Q5", "codestral:22b-q5_k_m", 17.0, ["chat", "edit"]),
+                portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete"]),
+                create_embed_model()
+            ]
+            total_ram_2 = sum(m.ram_gb for m in option2_models)
+            buffer_2 = usable_ram - total_ram_2
+            options.append((
+                "Multi-Model (48GB)",
+                option2_models,
+                f"Q5 quality (better than Q4) with adequate headroom. Pushes closer to limits but delivers noticeably better outputs. Total: ~{total_ram_2:.1f}GB (leaves {buffer_2:.1f}GB buffer)"
+            ))
+            
+            # Option 3: Conservative (48GB)
+            option3_models = [
+                portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                create_embed_model()
+            ]
+            total_ram_3 = sum(m.ram_gb for m in option3_models)
+            buffer_3 = usable_ram - total_ram_3
+            options.append((
+                "Conservative (48GB)",
+                option3_models,
+                f"Phi-4 14B handles everything competently - excels at complex code and architectural decisions. Leaves massive headroom for Docker, databases, heavy browser usage. Total: ~{total_ram_3:.1f}GB (leaves {buffer_3:.1f}GB buffer)"
+            ))
+        else:
+            # 32GB Systems - ~22GB usable
+            
+            # Option 1: Conservative (Recommended for 32GB)
+            option1_models = [
+                portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                create_embed_model()
+            ]
+            total_ram_1 = sum(m.ram_gb for m in option1_models)
+            buffer_1 = usable_ram - total_ram_1
+            options.append((
+                "Conservative (32GB Recommended)",
+                option1_models,
+                f"Safe choice - Phi-4 handles all coding, chat, and reasoning tasks. Plenty of room for VS Code, Chrome, and other apps. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+            ))
+            
+            # Option 2: Balanced (32GB)
+            option2_models = [
+                portfolio_model("Codestral Latest", "codestral:latest", 12.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                create_embed_model()
+            ]
+            total_ram_2 = sum(m.ram_gb for m in option2_models)
+            buffer_2 = usable_ram - total_ram_2
+            options.append((
+                "Balanced (32GB)",
+                option2_models,
+                f"Codestral gives better code generation than Phi-4 but tighter margins. Close browser tabs and unused apps when running models. Total: ~{total_ram_2:.1f}GB (leaves {buffer_2:.1f}GB buffer)"
+            ))
+        
+    elif hw_info.tier == hardware.HardwareTier.B:
+        # Tier B: 24-32GB RAM (e.g., 32GB, 24GB systems)
+        # Example: 32GB → 22.4GB usable
+        
+        # Option 1: Conservative (Strongly Recommended for Tier B)
+        option1_models = [
+            portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            create_embed_model()
+        ]
+        total_ram_1 = sum(m.ram_gb for m in option1_models)
+        buffer_1 = usable_ram - total_ram_1
+        options.append((
+            "Conservative (Strongly Recommended)",
+            option1_models,
+            f"Run only one large model at a time - keep Phi-4 loaded for main work. Close unnecessary browser tabs and apps. Monitor Activity Monitor for RAM pressure. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+        ))
+        
+        # Option 2: Balanced (Use with Caution)
+        option2_models = [
+            portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+            portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+            create_embed_model()
+        ]
+        total_ram_2 = sum(m.ram_gb for m in option2_models)
+        buffer_2 = usable_ram - total_ram_2
+        options.append((
+            "Balanced (Use with Caution)",
+            option2_models,
+            f"More headroom than conservative but lose Phi-4's reasoning capabilities. Good if you primarily do straightforward coding. Total: ~{total_ram_2:.1f}GB (leaves {buffer_2:.1f}GB buffer)"
+        ))
+        
+    elif hw_info.tier == hardware.HardwareTier.C:
+        # Tier C: 16-24GB RAM (e.g., 24GB, 16GB systems)
+        # Example: 24GB → 16.8GB usable, 16GB → 11.2GB usable
+        
+        # Determine if this is a 24GB system (>=20GB) or 16GB system
+        is_24gb_system = hw_info.ram_gb >= 20
+        
+        if is_24gb_system:
+            # 24GB Systems (~17GB usable)
+            
+            # Option 1: Conservative (Strongly Recommended for 24GB)
+            option1_models = [
+                portfolio_model("Granite Code 8B", "granite-code:8b-q4", 5.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code Tiny", "granite-code:tiny", 1.0, ["autocomplete"]),
+                create_embed_model()
+            ]
+            total_ram_1 = sum(m.ram_gb for m in option1_models)
+            buffer_1 = usable_ram - total_ram_1
+            options.append((
+                "Conservative (24GB Strongly Recommended)",
+                option1_models,
+                f"8B model is surprisingly capable for coding - reliable and fast. Keep autocomplete and embed loaded, run only one primary model. Close unnecessary apps, limit browser tabs to 3-5 max. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+            ))
+            
+            # Option 2: Balanced (Risky on 24GB)
+            option2_models = [
+                portfolio_model("Phi-4 14B", "phi4:14b-q4_k_m", 8.0, ["chat", "edit", "agent"]),
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["autocomplete", "chat", "edit"]),
+                create_embed_model()
+            ]
+            total_ram_2 = sum(m.ram_gb for m in option2_models)
+            buffer_2 = usable_ram - total_ram_2
+            options.append((
+                "Balanced (Risky on 24GB)",
+                option2_models,
+                f"Only viable if you close everything except VS Code - no browser, no Slack, no music apps. Not recommended for daily use. Total: ~{total_ram_2:.1f}GB (leaves {buffer_2:.1f}GB buffer)"
+            ))
+        else:
+            # 16GB Systems (~11GB usable)
+            
+            # Option 1: Conservative (Only Viable Option for 16GB)
+            option1_models = [
+                portfolio_model("Granite Code 3B", "granite-code:3b-q4", 2.0, ["chat", "edit", "autocomplete"]),
+                portfolio_model("Granite Code Tiny", "granite-code:tiny", 1.0, ["autocomplete"]),
+                create_embed_model()
+            ]
+            total_ram_1 = sum(m.ram_gb for m in option1_models)
+            buffer_1 = usable_ram - total_ram_1
+            options.append((
+                "Conservative (16GB Only Viable Option)",
+                option1_models,
+                f"Entry-level quality - suitable for simple coding tasks, learning, and experimentation. Close everything except IDE and minimal browser. Consider this a stopgap until upgrading to 32GB+ RAM. Total: ~{total_ram_1:.1f}GB (leaves {buffer_1:.1f}GB buffer)"
+            ))
+        
+    else:  # Tier D
+        raise ValueError("Tier D hardware is unsupported - minimum 16GB RAM required")
+    
+    return options
+
+
 def generate_portfolio_recommendation(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
     """
     Generate portfolio-based model recommendations for hardware tier.
+    Returns the first (recommended) option from generate_portfolio_options().
+    For backward compatibility with existing code.
+    """
+    options = generate_portfolio_options(hw_info)
+    if options:
+        return options[0][1]  # Return models from first option
+    return []
+
+
+def get_portfolio_option_by_preset(hw_info: hardware.HardwareInfo, preset: str) -> Optional[List[ModelInfo]]:
+    """
+    Get portfolio option models based on preset name.
     
-    Portfolio allocation (CONSERVATIVE for proper headroom):
-    - Primary model: 50% RAM budget (main workhorse - conservative allocation for stability)
-    - Specialized: 30% RAM budget (coding, reasoning, vision - increased for balance)
-    - Utility: 3% RAM budget (embeddings, small helpers - minimal, embeddings are small)
-    - Reserve: 17% free RAM (generous reserve for OS, multiple models, browser, and other apps)
-    
-    Tier-specific portfolios (DOWNGRADED - one size smaller for stability):
-    - Tier S (>64GB): 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) + embed
-    - Tier A (32-64GB): 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed
-    - Tier B (>24-32GB): 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) + embed
-    - Tier C (16-24GB): 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) + embed
-    - Tier D (<16GB): Unsupported - minimum 16GB RAM required
+    Preset mapping:
+    - "Balanced": Option with "Balanced" in name, or first option
+    - "Multi Model": Option with "Multi-Model" or "Multi Model" in name, or option with 4+ models
+    - "Conservative": Option with "Conservative" in name, or last option
     
     Args:
         hw_info: Hardware information
+        preset: Preset name ("Balanced", "Multi Model", "Conservative")
     
     Returns:
-        List of recommended ModelInfo objects with selected variants
+        List of ModelInfo objects for the selected option, or None if not found
     """
-    usable_ram = hw_info.get_estimated_model_memory()
+    options = generate_portfolio_options(hw_info)
+    if not options:
+        return None
     
-    # Calculate RAM budgets (conservative for proper headroom)
-    primary_budget = usable_ram * 0.50  # Reduced to 50% for stability and headroom
-    specialized_budget = usable_ram * 0.30  # Increased to 30% for balance
-    utility_budget = usable_ram * 0.03  # Kept at 3% (embeddings are small)
+    preset_lower = preset.lower()
     
-    recommended = []
+    if preset_lower == "balanced":
+        # Find option with "Balanced" in name
+        for option_name, models, _ in options:
+            if "balanced" in option_name.lower():
+                return models
+        # Fallback to first option
+        return options[0][1]
+    elif preset_lower == "multi model" or preset_lower == "multi-model":
+        # Find option with "Multi-Model" or "Multi Model" in name
+        for option_name, models, _ in options:
+            if "multi-model" in option_name.lower() or "multi model" in option_name.lower():
+                return models
+        # Find option with most models (4+ models typically indicates multi-model setup)
+        best_option = None
+        max_models = 0
+        for option_name, models, _ in options:
+            model_count = len(models)
+            if model_count >= 4 and model_count > max_models:
+                max_models = model_count
+                best_option = models
+        if best_option:
+            return best_option
+        # Fallback to option with 3+ models
+        for option_name, models, _ in options:
+            if len(models) >= 3:
+                return models
+        # Fallback to first option
+        return options[0][1]
+    elif preset_lower == "conservative":
+        # Find option with "Conservative" in name
+        for option_name, models, _ in options:
+            if "conservative" in option_name.lower():
+                return models
+        # Fallback to last option
+        return options[-1][1]
     
-    # Tier-specific model selection
-    if hw_info.tier == hardware.HardwareTier.S:
-        # Tier S: 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) + embed
-        # Primary: 34B reasoning model
-        primary_result = discover_best_model_by_criteria(34.0, "reasoning", primary_budget, hw_info)
-        if primary_result:
-            model_name, variant = primary_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "reasoning", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="34B reasoning model",
-                ram_gb=calculate_model_ram(34.0, "Q4"),
-                context_length=131072,
-                roles=["chat", "edit", "agent"],
-                tiers=[hardware.HardwareTier.S],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        # Specialized: 22B coding
-        coding_result = discover_best_model_by_criteria(22.0, "coding", specialized_budget, hw_info)
-        if coding_result:
-            model_name, variant = coding_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="22B coding model",
-                ram_gb=calculate_model_ram(22.0, "Q5"),
-                context_length=131072,
-                roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.S],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        # Multimodal: 13B
-        multimodal_result = discover_best_model_by_criteria(13.0, "multimodal", specialized_budget, hw_info)
-        if multimodal_result:
-            model_name, variant = multimodal_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "multimodal", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="13B multimodal model",
-                ram_gb=calculate_model_ram(13.0, "Q5"),
-                context_length=131072,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.S],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-    
-    elif hw_info.tier == hardware.HardwareTier.A:
-        # Tier A: 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) + embed
-        primary_result = discover_best_model_by_criteria(34.0, "reasoning", primary_budget, hw_info)
-        if primary_result:
-            model_name, variant = primary_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "reasoning", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="34B reasoning model",
-                ram_gb=calculate_model_ram(34.0, "Q4"),
-                context_length=131072,
-                roles=["chat", "edit", "agent"],
-                tiers=[hardware.HardwareTier.A],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        coding_result = discover_best_model_by_criteria(13.0, "coding", specialized_budget, hw_info)
-        if coding_result:
-            model_name, variant = coding_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="13B coding model",
-                ram_gb=calculate_model_ram(13.0, "Q5"),
-                context_length=131072,
-                roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.A],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        multimodal_result = discover_best_model_by_criteria(7.0, "multimodal", specialized_budget, hw_info)
-        if multimodal_result:
-            model_name, variant = multimodal_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "multimodal", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="7B multimodal model",
-                ram_gb=calculate_model_ram(7.0, "Q4"),
-                context_length=16384,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.A],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-    
-    elif hw_info.tier == hardware.HardwareTier.B:
-        # Tier B: 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) + embed
-        primary_result = discover_best_model_by_criteria(13.0, "general", primary_budget, hw_info)
-        if primary_result:
-            model_name, variant = primary_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "general", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="13B general model",
-                ram_gb=calculate_model_ram(13.0, "Q4"),
-                context_length=131072,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.B],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        coding_result = discover_best_model_by_criteria(7.0, "coding", specialized_budget, hw_info)
-        if coding_result:
-            model_name, variant = coding_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="7B coding model",
-                ram_gb=calculate_model_ram(7.0, "Q4"),
-                context_length=16384,
-                roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.B],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        multimodal_result = discover_best_model_by_criteria(3.0, "multimodal", specialized_budget, hw_info)
-        if multimodal_result:
-            model_name, variant = multimodal_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "multimodal", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="3B multimodal model",
-                ram_gb=calculate_model_ram(3.0, "Q4"),
-                context_length=32768,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.B],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-    
-    elif hw_info.tier == hardware.HardwareTier.C:
-        # Tier C: 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) + embed
-        primary_result = discover_best_model_by_criteria(7.0, "general", primary_budget, hw_info)
-        if primary_result:
-            model_name, variant = primary_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "general", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="7B general model",
-                ram_gb=calculate_model_ram(7.0, "Q4"),
-                context_length=131072,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.C],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        coding_result = discover_best_model_by_criteria(3.0, "coding", specialized_budget, hw_info)
-        if coding_result:
-            model_name, variant = coding_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "coding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="3B coding model",
-                ram_gb=calculate_model_ram(3.0, "Q4"),
-                context_length=32768,
-                roles=["chat", "edit", "autocomplete"],
-                tiers=[hardware.HardwareTier.C],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-        
-        # Utility model: Try to find a small model (1B or similar)
-        # Use a more generous budget (utility + some reserve) since 1B models need ~0.6-0.7GB
-        utility_budget_extended = utility_budget + (usable_ram * 0.05)  # Add 5% from reserve
-        utility_result = discover_best_model_by_criteria(1.0, "general", utility_budget_extended, hw_info)
-        if not utility_result:
-            # Fallback: try with no size constraint but still within extended budget
-            utility_result = discover_best_model_by_criteria(None, "general", utility_budget_extended, hw_info)
-        if utility_result:
-            model_name, variant = utility_result
-            model_info = ModelInfo(
-                name=get_display_name_from_model(model_name, "utility", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="1B utility model",
-                ram_gb=calculate_model_ram(1.0, "Q4"),
-                context_length=2048,
-                roles=["chat", "edit"],
-                tiers=[hardware.HardwareTier.C],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-            recommended.append(model_info)
-    
-    else:  # Tier D - should never be reached (minimum 16GB required)
-        # Tier D (<16GB) is unsupported - hardware detection should have raised an error
-        ui.print_error("Tier D hardware detected - this should not be possible")
-        ui.print_error("Minimum 16GB RAM is required. Please upgrade your hardware.")
-        raise ValueError("Tier D hardware is unsupported - minimum 16GB RAM required")
-    
-    # Always add embedding model
-    # Embedding models typically don't have variants, so use catalog models directly
-    embed_models = [m for m in MODEL_CATALOG if "embed" in m.roles]
-    
-    # Try to find a suitable embedding model that fits in utility budget
-    embed_model = None
-    for model in embed_models:
-        if model.ram_gb <= utility_budget and hw_info.tier in model.tiers:
-            embed_model = model
-            break
-    
-    # If no catalog model fits, try variant discovery as fallback
-    if not embed_model:
-        embed_result = discover_best_model_by_criteria(None, "embedding", utility_budget, hw_info)
-        if embed_result:
-            model_name, variant = embed_result
-            embed_model = ModelInfo(
-                name=get_display_name_from_model(model_name, "embedding", variant),
-                ollama_name=model_name,  # Ollama doesn't use "ai/" prefix
-                description="Embedding model",
-                ram_gb=calculate_model_ram(0.3, "Q4"),  # Small embedding model
-                context_length=8192,
-                roles=["embed"],
-                tiers=[hw_info.tier],
-                base_model_name=model_name,
-                selected_variant=variant
-            )
-    
-    if embed_model:
-        # Create a copy to avoid modifying the catalog
-        embed_info = ModelInfo(
-            name=embed_model.name,
-            ollama_name=embed_model.ollama_name,
-            description=embed_model.description,
-            ram_gb=embed_model.ram_gb,
-            context_length=embed_model.context_length,
-            roles=embed_model.roles,
-            tiers=embed_model.tiers,
-            base_model_name=embed_model.base_model_name,
-            selected_variant=embed_model.selected_variant
-        )
-        recommended.append(embed_info)
-    
-    # Apply diversity rules
-    recommended = ensure_model_diversity(recommended)
-    
-    # Update RAM estimates based on actual selected variants
-    for model in recommended:
-        if model.selected_variant and model.base_model_name:
-            tags = discover_ollama_model_tags(model.base_model_name, hw_info, use_cache=True)
-            for tag in tags:
-                if tag.get("tag_name") == model.selected_variant:
-                    model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
-                    break
-    
-    return recommended
+    # Unknown preset - return first option
+    return options[0][1]
 
 
 def get_tier_optimized_recommendation(hw_info: hardware.HardwareInfo) -> Dict[str, str]:
@@ -3350,61 +3379,109 @@ def get_recommended_models(tier: hardware.HardwareTier, hw_info: Optional[hardwa
 
 def select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
     """
-    Interactive model selection with new UX flow:
-    1. Show categories with top models
-    2. Show tier-optimized recommendation
-    3. User confirms or customizes
+    Simplified model selection - shows tier-based options, user picks one.
+    No discovery, no scoring, no complex logic.
     """
-    # Input validation
     if not hw_info:
         raise ValueError("hw_info is required")
     
     ui.print_header("🤖 Model Selection")
     
-    ui.print_info(f"Hardware Tier: {ui.colorize(hw_info.tier.value, ui.Colors.GREEN + ui.Colors.BOLD)}")
-    ui.print_info(f"Available RAM: ~{hw_info.ram_gb:.1f}GB")
+    usable_ram = hw_info.get_estimated_model_memory()
+    total_ram = hw_info.ram_gb
+    reserved_ram = total_ram * 0.30
+    
+    # Display RAM breakdown
+    print()
+    ui.print_subheader("RAM Breakdown")
+    print(f"  Total System RAM:           {total_ram:.1f}GB")
+    print(f"  Reserved for macOS/Apps:    {reserved_ram:.1f}GB (30%)")
+    print(f"  ────────────────────────────────────")
+    print(f"  Usable for Models:          {usable_ram:.1f}GB (70%)")
     print()
     
-    # Step 1: Get portfolio recommendation
-    recommended_models = generate_portfolio_recommendation(hw_info)
+    # Get portfolio options for this tier
+    options = generate_portfolio_options(hw_info)
     
-    if not recommended_models:
-        ui.print_warning("Could not generate recommendations for your hardware tier.")
-        ui.print_info("You can try the model discovery feature to search for available models.")
-        if ui.prompt_yes_no("Would you like to search for available models?", default=False):
-            return discover_and_select_models(hw_info)
+    if not options:
+        ui.print_error("Could not generate options for your hardware tier.")
         return []
     
-    # Step 2: Display recommended selection
-    ui.print_subheader("Recommended Selection (Auto-selected for your tier)")
+    # Display tier info
+    ui.print_subheader(f"Tier {hw_info.tier.value} Options")
+    print()
+    ui.print_info(f"Select a portfolio option for your hardware tier:")
     print()
     
-    # Display recommended models
-    total_ram = sum(m.ram_gb for m in recommended_models)
-    if recommended_models:
-        for model in recommended_models:
+    # Display each option
+    for i, (option_name, models, description) in enumerate(options, 1):
+        total_ram_used = sum(m.ram_gb for m in models)
+        buffer = usable_ram - total_ram_used
+        buffer_percent = (buffer / usable_ram * 100) if usable_ram > 0 else 0
+        
+        # Mark recommended option
+        is_recommended = "Recommended" in option_name or i == 1
+        marker = ui.colorize("●", ui.Colors.GREEN) if is_recommended else ui.colorize("○", ui.Colors.DIM)
+        
+        print(f"  {marker} Option {i}: {ui.colorize(option_name, ui.Colors.BOLD)}")
+        print(f"     {description}")
+        print()
+        
+        # Show model breakdown
+        for model in models:
+            # ollama_name already contains the full variant name
+            display_name = model.ollama_name
             roles_str = ", ".join(model.roles) if model.roles else "general"
-            variant_info = ""
-            if model.selected_variant:
-                variant_info = f" ({model.selected_variant})"
-            print(f"  • {model.name}{variant_info} ({roles_str}) - ~{model.ram_gb:.1f}GB RAM")
-        print(f"  Total RAM: ~{total_ram:.1f}GB")
+            print(f"     ├─ {display_name:30s} {model.ram_gb:5.1f}GB   {roles_str}")
+        
+        print(f"     └─ Total: {' ' * 30} {total_ram_used:5.1f}GB   (leaves {buffer:.1f}GB buffer, {buffer_percent:.0f}%)")
         print()
     
-    # Step 4: User confirms, customizes, or cancels
-    choice = ui.prompt_choice(
-        "What would you like to do?",
-        ["Use recommended selection", "Customize selection", "Cancel setup"],
-        default=0
-    )
-    
-    if choice == 0:
-        return recommended_models
-    elif choice == 1:
-        return customize_from_categories(hw_info)
+    # Let user select an option
+    print()
+    choice_prompt = f"Select option (1-{len(options)})"
+    if len(options) > 0 and "Recommended" in options[0][0]:
+        choice_prompt += " [1]: "
     else:
-        ui.print_info("Setup cancelled.")
-        return []
+        choice_prompt += ": "
+    
+    while True:
+        try:
+            response = input(f"  {choice_prompt}").strip()
+            if not response and len(options) > 0:
+                # Default to first option
+                selected_option = options[0]
+                break
+            idx = int(response) - 1
+            if 0 <= idx < len(options):
+                selected_option = options[idx]
+                break
+            else:
+                ui.print_warning(f"Please enter a number between 1 and {len(options)}")
+        except ValueError:
+            ui.print_warning("Please enter a valid number")
+    
+    option_name, selected_models, _ = selected_option
+    
+    # Display selected option summary
+    print()
+    ui.print_success(f"Selected: {option_name}")
+    total_selected = sum(m.ram_gb for m in selected_models)
+    buffer_selected = usable_ram - total_selected
+    
+    print()
+    ui.print_subheader("Selected Portfolio")
+    for model in selected_models:
+        # Extract variant from ollama_name for display
+        variant_info = ""
+        if ":" in model.ollama_name:
+            variant_info = f" ({model.ollama_name.split(':', 1)[1]})"
+        roles_str = ", ".join(model.roles) if model.roles else "general"
+        print(f"  • {model.name}{variant_info} - {model.ram_gb:.1f}GB ({roles_str})")
+    print(f"  Total: {total_selected:.1f}GB / {usable_ram:.1f}GB usable (leaves {buffer_selected:.1f}GB buffer)")
+    print()
+    
+    return selected_models
 
 
 def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
@@ -3443,159 +3520,12 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
         print()
         
         # Determine model name format for Ollama
-        # Ollama uses format: model-name or model-name:tag (e.g., "llama3.2:3b")
+        # Portfolio options already have full variant in ollama_name (e.g., "codestral:22b-q5_k_m")
+        # Just use ollama_name directly - it's already in the correct format
         model_name_to_pull = model.ollama_name
         
-        # Check if we have a selected variant that needs to be applied
-        base_model_name = None
-        if model.selected_variant:
-            # We have a selected variant, use it
-            base_model_name = model.base_model_name or model.ollama_name.split(":")[0]
-            if base_model_name:
-                # Extract variant part - selected_variant might be full format (model:tag) or just tag
-                variant_part = model.selected_variant
-                if ":" in variant_part:
-                    # If it contains ":", check if it starts with base_model_name
-                    if variant_part.startswith(f"{base_model_name}:"):
-                        # Full format like "granite-code:latest" - extract just the tag part
-                        variant_part = variant_part.split(":", 1)[1]
-                    else:
-                        # Different format, use the part after the last ":"
-                        variant_part = variant_part.split(":")[-1]
-                # Ollama variant format: model-name:tag (e.g., "llama3.2:3b")
-                model_name_to_pull = f"{base_model_name}:{variant_part}"
-        elif model.base_model_name:
-            # We have a base model name but no variant selected yet - discover and select
-            base_model_name = model.base_model_name
-            ui.print_info(f"Discovering variants for {model.name}...")
-            tags = discover_ollama_model_tags(base_model_name, hw_info)
-            if tags:
-                selected_tag = select_best_variant(tags, hw_info)
-                if selected_tag:
-                    model.selected_variant = selected_tag
-                    # Extract just the variant part (e.g., "3b" from "llama3.2:3b" or "latest" from "granite-code:latest")
-                    variant_part = selected_tag
-                    if ":" in variant_part:
-                        # If it contains ":", check if it starts with base_model_name
-                        if variant_part.startswith(f"{base_model_name}:"):
-                            # Full format like "granite-code:latest" - extract just the tag part
-                            variant_part = variant_part.split(":", 1)[1]
-                        else:
-                            # Different format, use the part after the last ":"
-                            variant_part = variant_part.split(":")[-1]
-                    model_name_to_pull = f"{base_model_name}:{variant_part}"
-                    ui.print_success(f"Auto-selected variant: {variant_part} (best for your hardware)")
-                    # Update RAM estimate
-                    for tag in tags:
-                        tag_name = tag.get("tag_name", "")
-                        if variant_part in tag_name or selected_tag in tag_name:
-                            model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
-                            break
-                else:
-                    ui.print_warning(f"Could not select variant for {model.name}, using base model")
-                    # Fall back to ollama_name if base_model_name looks incorrect
-                    if base_model_name != model.ollama_name and ":" not in model.ollama_name:
-                        model_name_to_pull = model.ollama_name
-                    else:
-                        model_name_to_pull = base_model_name
-            else:
-                ui.print_warning(f"Could not discover variants for {model.name}, using base model")
-                # Fall back to ollama_name if base_model_name looks incorrect or doesn't match
-                # This handles cases where base_model_name is set incorrectly (e.g., "nomic-embed-text-v1.5" vs "nomic-embed-text")
-                if base_model_name != model.ollama_name and ":" not in model.ollama_name:
-                    model_name_to_pull = model.ollama_name
-                else:
-                    model_name_to_pull = base_model_name
-        else:
-            # Extract base name if it has a tag
-            if ":" in model.ollama_name:
-                base_model_name = model.ollama_name.split(":")[0]
-            else:
-                base_model_name = model.ollama_name
-            
-            # Only try variant discovery if it looks like a base model (no size variant in name)
-            if not re.search(r'[0-9]+\s*b', base_model_name, re.IGNORECASE):
-                ui.print_info(f"Discovering variants for {model.name}...")
-                tags = discover_ollama_model_tags(base_model_name, hw_info)
-                if tags:
-                    selected_tag = select_best_variant(tags, hw_info)
-                    if selected_tag:
-                        model.selected_variant = selected_tag
-                        model.base_model_name = base_model_name
-                        # Extract variant part (e.g., "3b" from "llama3.2:3b" or "8b" from "granite-code:8b")
-                        variant_part = selected_tag
-                        if ":" in variant_part:
-                            # If it contains ":", check if it starts with base_model_name
-                            if variant_part.startswith(f"{base_model_name}:"):
-                                # Full format like "granite-code:8b" - extract just the tag part
-                                variant_part = variant_part.split(":", 1)[1]
-                            else:
-                                # Different format, use the part after the last ":"
-                                variant_part = variant_part.split(":")[-1]
-                        model_name_to_pull = f"{base_model_name}:{variant_part}"
-                        ui.print_success(f"Auto-selected variant: {variant_part} (best for your hardware)")
-                        # Update RAM estimate
-                        for tag in tags:
-                            tag_name = tag.get("tag_name", "")
-                            if variant_part in tag_name or selected_tag in tag_name:
-                                model.ram_gb = tag.get("estimated_ram_gb", model.ram_gb)
-                                break
-                    else:
-                        # select_best_variant returned None - check if we have quantized variants available
-                        # Filter out "latest" and find the largest quantized variant that fits
-                        quantized_tags = [t for t in tags if t.get("size") is not None and t.get("quantization")]
-                        if quantized_tags:
-                            # Sort by size (largest first) and quantization (Q4/Q5 preferred)
-                            def quantized_priority(tag):
-                                size = tag.get("size", 0)
-                                quant = (tag.get("quantization") or "").upper()
-                                # Size first (multiply by 1000), then quantization preference
-                                size_score = size * 1000
-                                if quant in ["Q4", "Q4_K_M", "Q4_0", "Q5"]:
-                                    quant_score = 3
-                                elif quant in ["Q8", "Q8_0"]:
-                                    quant_score = 2.5
-                                elif quant == "F16":
-                                    quant_score = 2
-                                else:
-                                    quant_score = 1
-                                return (size_score, quant_score)
-                            
-                            quantized_tags.sort(key=quantized_priority, reverse=True)
-                            # Filter by RAM fit
-                            usable_ram = hw_info.get_estimated_model_memory()
-                            fitting_quantized = [t for t in quantized_tags if t.get("estimated_ram_gb", 0) <= usable_ram]
-                            
-                            if fitting_quantized:
-                                best_quantized = fitting_quantized[0]
-                                selected_tag = best_quantized.get("tag_name")
-                                model.selected_variant = selected_tag
-                                model.base_model_name = base_model_name
-                                # Extract variant part
-                                variant_part = selected_tag
-                                if ":" in variant_part:
-                                    if variant_part.startswith(f"{base_model_name}:"):
-                                        variant_part = variant_part.split(":", 1)[1]
-                                    else:
-                                        variant_part = variant_part.split(":")[-1]
-                                model_name_to_pull = f"{base_model_name}:{variant_part}"
-                                ui.print_success(f"Auto-selected quantized variant: {variant_part} (best for your hardware)")
-                                # Update RAM estimate
-                                model.ram_gb = best_quantized.get("estimated_ram_gb", model.ram_gb)
-                            else:
-                                # No quantized variants fit - fall back to original ollama_name (might be :latest)
-                                ui.print_warning(f"No quantized variants fit in available RAM, using {model.ollama_name}")
-                        else:
-                            # No quantized variants found - fall back to original ollama_name
-                            ui.print_warning(f"No quantized variants found for {base_model_name}, using {model.ollama_name}")
-        
         # Log the actual command being executed
-        variant_info = ""
-        if model.selected_variant:
-            variant_info = f" ({model.selected_variant} variant)"
         ui.print_info(f"Command: {ui.colorize(f'ollama pull {model_name_to_pull}', ui.Colors.CYAN)}")
-        if variant_info:
-            ui.print_info(f"Selected variant{variant_info} based on your hardware ({hw_info.ram_gb:.1f}GB RAM)")
         print()
         
         # Run ollama pull
@@ -3895,54 +3825,14 @@ def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInf
     """
     Convert Ollama model name to Continue.dev compatible format.
     
-    Ollama API returns models as: llama3.2:3b or llama3.2
-    The model catalog uses: llama3.2 (base name)
-    
-    This function converts to the actual API model ID format.
-    Preserves variant tags if selected.
+    Portfolio options already have full variant in ollama_name (e.g., "codestral:22b-q5_k_m").
+    Just return ollama_name directly - it's already in the correct format.
     """
     # Input validation - accept either ModelInfo or string for backward compatibility
     if isinstance(model, str):
-        ollama_name = model
-        selected_variant = None
-        base_model_name = None
+        return model
     elif isinstance(model, ModelInfo):
-        ollama_name = model.ollama_name
-        selected_variant = model.selected_variant
-        base_model_name = model.base_model_name
+        # Portfolio options have full variant in ollama_name - use it directly
+        return model.ollama_name
     else:
         raise ValueError("model must be ModelInfo or string")
-    
-    # If we have a selected variant, use it
-    if selected_variant and base_model_name:
-        # Format: base_model_name:variant (e.g., "llama3.2:3b")
-        # Extract variant part if it includes model name
-        if ":" in selected_variant:
-            variant_part = selected_variant.split(":")[1]
-        else:
-            variant_part = selected_variant
-        return f"{base_model_name}:{variant_part}"
-    
-    # First, check if we can get the actual model ID from the API
-    if hw_info and hasattr(hw_info, 'available_api_models') and hw_info.available_api_models:
-        # Try to match the model name to an API model ID
-        model_lower = ollama_name.lower()
-        
-        # Check for matching models in API
-        for api_model_id in hw_info.available_api_models:
-            api_lower = api_model_id.lower()
-            # Check if base names match
-            base_ollama = ollama_name.split(":")[0].lower()
-            base_api = api_model_id.split(":")[0].lower()
-            if base_ollama == base_api or base_ollama in api_lower:
-                return api_model_id  # Return the actual API model ID
-    
-    # Fallback: Use the ollama_name as-is, or add variant if available
-    model_id = ollama_name
-    
-    # If it doesn't have a tag and we have a base_model_name, use that
-    if ":" not in model_id and base_model_name:
-        model_id = base_model_name
-    
-    # Ollama model names don't need ai/ prefix - return as-is
-    return model_id

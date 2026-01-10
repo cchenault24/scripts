@@ -537,6 +537,7 @@ __pycache__/
 *.egg
 *.egg-info/
 dist/
+dist
 build/
 *.whl
 .python-version
@@ -546,6 +547,8 @@ build/
 
 # Node.js and JavaScript
 node_modules/
+node_modules
+bower_components
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -556,6 +559,7 @@ yarn-error.log*
 .yarn/unplugged
 .yarn/build-state.yml
 .yarn/install-state.gz
+.yarn-dev-pid
 .pnp.js
 .next/
 .nuxt/
@@ -569,12 +573,14 @@ yarn-error.log*
 # Java and JVM languages
 target/
 .gradle/
+.gradle_home
 .mvn/
 *.class
 *.jar
 *.war
 *.ear
 *.nar
+*.hprof
 
 # Go
 vendor/
@@ -594,9 +600,11 @@ composer.lock
 
 # Ruby
 vendor/bundle/
+vendor/bundle
 .bundle/
 *.gem
 *.rbc
+.byebug_history
 
 # Virtual environments
 venv/
@@ -609,18 +617,27 @@ ENV/
 # IDE and editor files
 .vscode/
 .idea/
+**/.idea
+.theia
 *.swp
 *.swo
 *~
 .project
+*.project
 .pydevproject
+*.iml
+*.classpath
+*.classpath.txt
 .settings/
+.metadata
+.recommenders
 *.sublime-project
 *.sublime-workspace
 *.code-workspace
 
 # OS files
 .DS_Store
+*.DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
@@ -641,6 +658,10 @@ htmlcov/
 coverage/
 *.lcov
 .jest/
+reports
+screenshots
+public/screenshots
+task-*.json
 
 # Logs and temporary files
 *.log
@@ -648,9 +669,14 @@ coverage/
 *.temp
 *.bak
 *.backup
+*.hash
 tmp/
 temp/
+temp/*
 .tmp/
+/log/*
+/tmp/*
+/tmp/pids/*
 
 # Documentation builds
 docs/_build/
@@ -664,6 +690,7 @@ _book/
 
 # Environment variables
 .env
+.env.bundle
 .env.local
 .env.*.local
 .envrc
@@ -679,6 +706,8 @@ libs/
 *.o
 *.dylib
 *.dll
+public/assets
+buildinfo
 
 # Package manager locks and caches
 package-lock.json
@@ -698,22 +727,63 @@ Podfile.lock
 .aws-sam/
 .terraform/
 .terraform.lock.hcl
+.terraform.tfstate*
+terraform.tfstate*
 *.tfstate
 *.tfstate.*
+*.tfvars
+vars.json
 
 # Database files
 *.db
 *.sqlite
 *.sqlite3
 *.db-journal
+database.*
+database1.*
+db/*.sqlite3
+db/*.sqlite3-journal
+db/development.*
+db/*.zip
+*.trace.db
 
 # Compiled assets
 *.min.js
 *.min.css
+*.css
+*.html
+*.js
 *.map
 assets/dist/
 public/dist/
 static/dist/
+
+# Container and VM files
+.vagrant
+.containerid
+.pongo/.bash_history
+
+# Generated and cache files
+.repository/.cache/*
+**/*.lastUpdated
+luacov.stats.out
+luacov.report.out
+servroot
+
+# Certificates and keys
+*.pfx
+*.crt
+*.key
+certificates/
+keystores/
+ssl/
+
+# Miscellaneous
+audio
+images
+backup
+help
+tags
 """
     
     # Write .continueignore

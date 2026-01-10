@@ -644,25 +644,68 @@ When running the setup script, you'll be prompted to select:
 - **IntelliJ only** - Generates JSON config only
 - **Both** - Generates both YAML and JSON (recommended if you use both IDEs)
 
-## 🖥️ Hardware Tiers
+## 🖥️ Hardware Tiers & RAM Management
 
-The script classifies hardware into tiers based on total RAM. Model selections are conservative to ensure proper headroom for OS, multiple models, and other applications:
+### RAM Allocation Strategy
 
-| Tier | RAM Range | Description | Portfolio Models |
-|------|-----------|-------------|----------------|
-| **S** | >64GB | High-end workstations | 34B reasoning (Q4) + 22B coding (Q5) + 13B multimodal (Q5) |
-| **A** | 32-64GB | Professional systems | 34B reasoning (Q4) + 13B coding (Q5) + 7B multimodal (Q4) |
-| **B** | >24-32GB | Mid-range systems | 13B general (Q4) + 7B coding (Q4) + 3B multimodal (Q4) |
-| **C** | 16-24GB | Entry-level systems | 7B general (Q4) + 3B coding (Q4) + 1B utility (Q4) |
-| **D** | <16GB | Unsupported | Minimum 16GB RAM required |
+The setup uses a **conservative 30% overhead reservation** for system stability:
+```
+Total RAM:           XX GB
+macOS + Apps (30%):  -XX GB (reserved)
+Usable for Models:   XX GB (70% of total)
+Model Budget (85%):  XX GB (85% of usable)
+Safety Buffer (15%): XX GB (15% of usable)
+```
+
+**Why 30% overhead?**
+- macOS system: 4-6GB
+- VS Code/IntelliJ: 2-4GB
+- Browser (Chrome/Safari): 3-6GB
+- Continue.dev overhead: 1-2GB
+- Model context/KV cache: 2-4GB
+
+### Hardware Tiers
+
+| Tier | Total RAM | Usable | Primary Model | Total Models |
+|------|-----------|--------|---------------|--------------|
+| **S** | >64GB | ~45GB | Codestral 22B Q5 (17GB) | ~30GB |
+| **A** | 32-64GB | ~34GB | Codestral 22B Q4 (13GB) | ~20GB |
+| **B** | 24-32GB | ~22GB | Phi-4 14B (8GB) | ~10GB |
+| **C** | 16-24GB | ~17GB | Granite 8B (5GB) | ~6GB |
+| **D** | <16GB | Unsupported | Minimum 16GB RAM required | - |
+
+### Quantization Levels (Ollama)
+
+- **Q5**: 0.75× params - Best quality (Tier S only)
+- **Q4**: 0.6× params - Recommended default (all tiers)
+- **Q3**: 0.5× params - Lower quality (not recommended)
+
+### Example: M4 Pro (48GB)
+```
+Total RAM:          48GB
+Reserved (30%):     -14.4GB
+Usable:             33.6GB
+Model Budget:       28.5GB (85% of usable)
+Safety Buffer:      5.1GB (15% of usable)
+
+Recommended Models:
+- codestral:22b-q4_k_m     13GB (primary)
+- granite-code:8b-q4        5GB (helper)
+- granite-code:3b-q4        2GB (autocomplete)
+- nomic-embed-text         0.3GB (embeddings)
+────────────────────────────────
+Total Models:             20.3GB
+Remaining Buffer:         13.3GB ✓
+```
 
 ### RAM Budget Allocation
 
 The portfolio recommendation uses conservative RAM budgets to ensure stability:
-- **Primary model**: 50% of usable RAM (main workhorse)
-- **Specialized models**: 30% of usable RAM (coding, reasoning, vision)
-- **Utility models**: 3% of usable RAM (embeddings, small helpers)
-- **Reserve**: 17% free RAM (for OS, multiple models, browser, and other apps)
+- **Primary model**: 40% of usable RAM (main workhorse)
+- **Specialized models**: 25% of usable RAM (coding helper)
+- **Utility models**: 5% of usable RAM (fast autocomplete)
+- **Embedding models**: 3% of usable RAM (embeddings)
+- **Reserve**: 27% free RAM (safety buffer for smooth operation)
 
 ### Apple Silicon Optimization
 
