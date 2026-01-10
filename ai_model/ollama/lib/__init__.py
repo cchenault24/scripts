@@ -35,7 +35,6 @@ from .model_selector import (
     ModelRecommendation,
     generate_best_recommendation,
     select_models_smart,
-    get_tier_ram_reservation,
     get_usable_ram,
 )
 

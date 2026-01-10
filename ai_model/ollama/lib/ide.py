@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from . import hardware
 from . import ui
@@ -360,7 +360,7 @@ def start_model_server(model_name: str) -> Optional[subprocess.Popen]:
     return None
 
 
-def _get_model_attr(model, attr: str, default=None):
+def _get_model_attr(model: Any, attr: str, default: Any = None) -> Any:
     """Get attribute from model, supporting both object and dict access."""
     if hasattr(model, attr):
         return getattr(model, attr)

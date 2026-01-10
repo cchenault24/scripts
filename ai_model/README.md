@@ -215,7 +215,8 @@ The Ollama script uses intelligent recommendations:
   - Level 2: Add optional models (reasoning, vision)
 
 Example recommendation for 32GB RAM (Tier A):
-```
+
+```text
 ┌─────────────────────────────────────────────────────────┐
 │  RECOMMENDED SETUP FOR YOUR SYSTEM                       │
 │                                                          │
@@ -403,7 +404,7 @@ ollama rm llama3.2:3b
 
 ## 📁 Project Structure
 
-```
+```text
 ai_model/
 ├── docker/                      # Docker Model Runner implementation
 │   ├── docker-llm-setup.py      # Docker setup script
@@ -542,7 +543,7 @@ General utilities:
 
 ### Data Flow (Docker)
 
-```
+```text
 User Input
     ↓
 Hardware Detection → Tier Classification
@@ -560,7 +561,7 @@ IDE Setup → Next Steps
 
 ### Data Flow (Ollama v4.0 Smart Recommendations)
 
-```
+```text
 Hardware Detection → Tier Classification → Tier-Based RAM Reservation
     ↓
 IDE Auto-Detection (VS Code, Cursor, IntelliJ)
@@ -769,7 +770,7 @@ The setup uses a **tier-based overhead reservation** for optimal balance between
 | **B** | 24-32GB | 35% | 65% | Balanced - moderate headroom |
 | **A/S** | 32GB+ | 30% | 70% | Aggressive - ample headroom |
 
-```
+```text
 Example: 32GB RAM (Tier A)
 Total RAM:           32 GB
 Reserved (30%):      -9.6 GB
@@ -802,7 +803,8 @@ Safety Buffer (30%): 6.7 GB (for OS, apps, context)
 - **Q3**: 0.5× params - Lower quality (not recommended)
 
 ### Example: M4 Pro (48GB)
-```
+
+```text
 Total RAM:          48GB
 Reserved (30%):     -14.4GB
 Usable:             33.6GB
@@ -1166,8 +1168,9 @@ hw = hardware.detect_hardware()
 rec = model_selector.generate_best_recommendation(hw)
 print(f'Tier: {hw.tier.name}')
 print(f'Usable RAM: {model_selector.get_usable_ram(hw):.1f} GB')
-print(f'Models: {len(rec.models)}')
-for m in rec.models:
+models = rec.all_models()
+print(f'Models: {len(models)}')
+for m in models:
     print(f'  - {m.name}: {m.ollama_name} ({m.ram_gb:.1f}GB)')
 "
 

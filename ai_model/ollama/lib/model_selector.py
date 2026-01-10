@@ -264,33 +264,13 @@ VISION_MODELS = {
 }
 
 
-def get_tier_ram_reservation(tier: hardware.HardwareTier) -> float:
-    """
-    Get the RAM reservation percentage for a hardware tier.
-    
-    Returns the percentage of RAM to reserve for OS/apps (not available for models).
-    
-    - Tier C (16-24GB): Reserve 40% for OS/apps
-    - Tier B (24-32GB): Reserve 35% for OS/apps
-    - Tier A/S (32GB+): Reserve 30% for OS/apps
-    """
-    reservations = {
-        hardware.HardwareTier.S: 0.30,
-        hardware.HardwareTier.A: 0.30,
-        hardware.HardwareTier.B: 0.35,
-        hardware.HardwareTier.C: 0.40,
-        hardware.HardwareTier.D: 0.50,  # Unsupported, but defined for safety
-    }
-    return reservations.get(tier, 0.40)
-
-
 def get_usable_ram(hw_info: hardware.HardwareInfo) -> float:
     """
     Get usable RAM for models based on tier-based reservation.
     
-    Uses tier-specific reservation instead of flat 30%.
+    Uses tier-specific reservation from HardwareInfo.get_tier_ram_reservation().
     """
-    reservation = get_tier_ram_reservation(hw_info.tier)
+    reservation = hw_info.get_tier_ram_reservation()
     return hw_info.ram_gb * (1 - reservation)
 
 
@@ -741,7 +721,7 @@ def show_customization_menu(
     return recommendation
 
 
-def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: List[str] = None) -> List[RecommendedModel]:
+def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: Optional[List[str]] = None) -> List[RecommendedModel]:
     """
     Smart model selection with single best recommendation.
     
@@ -761,7 +741,7 @@ def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: List[str
     
     # Display hardware summary
     usable_ram = get_usable_ram(hw_info)
-    reservation = get_tier_ram_reservation(hw_info.tier)
+    reservation = hw_info.get_tier_ram_reservation()
     reserved_ram = hw_info.ram_gb * reservation
     
     print()

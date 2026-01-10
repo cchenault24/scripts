@@ -26,6 +26,14 @@ from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL, AUTOCOMPLE
 # Ollama API configuration
 OLLAMA_API_BASE = "http://localhost:11434"
 
+# Timeout and delay constants (in seconds)
+API_TIMEOUT = 5  # Timeout for API health checks
+API_TIMEOUT_LONG = 10  # Timeout for longer API operations
+OLLAMA_LIST_TIMEOUT = 10  # Timeout for 'ollama list' command
+MODEL_PULL_TIMEOUT = 3600  # Timeout for model pull (1 hour)
+PROCESS_KILL_TIMEOUT = 5  # Timeout for process termination
+VERIFICATION_DELAY = 1  # Delay before verifying model after pull
+
 
 @dataclass
 class PullResult:
@@ -57,15 +65,15 @@ class SetupResult:
     
     @property
     def complete_failure(self) -> bool:
-        """True if no models were installed."""
-        return len(self.successful_models) == 0
+        """True if no models were installed but some were attempted."""
+        return len(self.successful_models) == 0 and len(self.failed_models) > 0
 
 
 def is_ollama_api_available() -> bool:
     """Check if Ollama API is reachable."""
     try:
         req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT, context=get_unverified_ssl_context()) as response:
             return response.status == 200
     except (urllib.error.URLError, urllib.error.HTTPError, OSError):
         return False
@@ -75,7 +83,7 @@ def get_installed_models() -> List[str]:
     """Get list of currently installed Ollama models."""
     try:
         req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=5, context=get_unverified_ssl_context()) as response:
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT, context=get_unverified_ssl_context()) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode('utf-8'))
                 return [m.get("name", "") for m in data.get("models", [])]
@@ -83,7 +91,7 @@ def get_installed_models() -> List[str]:
         pass
     
     # Fallback to ollama list command
-    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=10)
+    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=OLLAMA_LIST_TIMEOUT)
     if code == 0:
         models = []
         lines = stdout.strip().split("\n")
@@ -233,7 +241,7 @@ def pull_model_with_verification(
     
     if success:
         # Verify the model exists
-        time.sleep(1)  # Brief pause for Ollama to update
+        time.sleep(VERIFICATION_DELAY)  # Brief pause for Ollama to update
         if verify_model_exists(model.ollama_name):
             result.success = True
             result.verified = True
@@ -256,7 +264,7 @@ def pull_model_with_verification(
         fallback_success = _pull_model(fallback.ollama_name, show_progress)
         
         if fallback_success:
-            time.sleep(1)
+            time.sleep(VERIFICATION_DELAY)
             if verify_model_exists(fallback.ollama_name):
                 result.success = True
                 result.verified = True
@@ -301,13 +309,13 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
                             print()
                             ui.print_success(f"    {line}")
             
-            process.wait(timeout=3600)  # 1 hour timeout
+            process.wait(timeout=MODEL_PULL_TIMEOUT)
             return process.returncode == 0
         else:
             # Silent pull
             code, _, _ = utils.run_command(
                 ["ollama", "pull", model_name],
-                timeout=3600
+                timeout=MODEL_PULL_TIMEOUT
             )
             return code == 0
     
@@ -316,7 +324,7 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
         if process:
             process.kill()
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=PROCESS_KILL_TIMEOUT)
             except subprocess.TimeoutExpired:
                 pass
         return False
@@ -327,7 +335,7 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
         if process and process.poll() is None:
             process.kill()
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=PROCESS_KILL_TIMEOUT)
             except subprocess.TimeoutExpired:
                 pass
 
@@ -568,7 +576,7 @@ def validate_pre_install(
     try:
         req = urllib.request.Request("https://ollama.com")
         req.add_header("User-Agent", "Ollama-LLM-Setup/1.0")
-        with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT_LONG, context=get_unverified_ssl_context()) as response:
             pass  # Just checking connectivity
     except (urllib.error.URLError, urllib.error.HTTPError, OSError):
         warnings.append(

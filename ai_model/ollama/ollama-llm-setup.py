@@ -152,7 +152,7 @@ def main() -> int:
         roles_str = ", ".join(model.roles)
         print(f"    • {model.ollama_name} (~{model.ram_gb:.1f}GB RAM) - {roles_str}")
     print(f"  Total RAM: ~{total_ram:.1f}GB / {usable_ram:.1f}GB usable ({buffer:.1f}GB buffer)")
-    print(f"  Target IDE(s): {', '.join([i for i in installed_ides] if installed_ides else ['VS Code'])}")
+    print(f"  Target IDE(s): {', '.join(installed_ides) if installed_ides else 'VS Code'}")
     print()
     
     if not ui.prompt_yes_no("Proceed with this configuration?", default=True):
@@ -196,15 +196,15 @@ def main() -> int:
     
     # Step 10: Generate global-rule.md
     print()
-    rule_path = config.generate_global_rule()
+    config.generate_global_rule()  # Return value not needed
     
     # Step 11: Generate .continueignore
     print()
-    ignore_path = config.generate_continueignore()
+    config.generate_continueignore()  # Return value not needed
     
     # Step 12: Save setup summary
     print()
-    summary_path = config.save_setup_summary(models_for_config, hw_info)
+    config.save_setup_summary(models_for_config, hw_info)  # Return value not needed
     
     # Step 13: Show next steps
     print()
