@@ -9,6 +9,7 @@ Provides manifest-based cleanup with:
 """
 
 import json
+import logging
 import os
 import platform
 import shutil
@@ -16,12 +17,15 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
 from . import config as config_module
+
+# Module logger
+_logger = logging.getLogger(__name__)
 
 # Safety limits for scanning
 MAX_FILES_SCANNED = 10000
@@ -88,12 +92,20 @@ def scan_for_orphaned_files(manifest: Dict[str, Any]) -> List[Tuple[Path, str]]:
     """
     Scan for files created by installer but not in manifest.
     
+    Security: Prevents symlink escapes by checking resolved paths stay within root.
+    Performance: Pre-builds manifest path set to avoid O(n²) lookups.
+    
     Returns:
         List of tuples (filepath, status) where status is "certain" or "uncertain"
     """
-    orphaned = []
+    orphaned: List[Tuple[Path, str]] = []
     files_scanned = 0
     start_time = time.time()
+    
+    # Pre-build set of manifest paths for O(1) lookup (fixes O(n²) issue)
+    manifest_paths: Set[str] = set(
+        f["path"] for f in manifest.get("installed", {}).get("files", [])
+    )
     
     for location, scan_config in SCAN_CONFIG.items():
         location_path = Path(location).expanduser()
@@ -101,8 +113,15 @@ def scan_for_orphaned_files(manifest: Dict[str, Any]) -> List[Tuple[Path, str]]:
         if not location_path.exists():
             continue
         
+        # Resolve root once for symlink escape prevention
+        try:
+            root_resolved = location_path.resolve()
+        except (OSError, RuntimeError):
+            ui.print_warning(f"Cannot resolve path: {location}")
+            continue
+        
         # Safety check
-        if not is_safe_location(location_path):
+        if not is_safe_location(root_resolved):
             ui.print_warning(f"Skipping unsafe location: {location}")
             continue
         
@@ -123,20 +142,34 @@ def scan_for_orphaned_files(manifest: Dict[str, Any]) -> List[Tuple[Path, str]]:
                     ui.print_warning(f"Scan timeout at {location}")
                     break
                 
-                if filepath.is_file():
-                    files_scanned += 1
-                    
-                    # Skip if already in manifest
-                    manifest_files = [f["path"] for f in manifest.get("installed", {}).get("files", [])]
-                    if str(filepath) in manifest_files:
+                if not filepath.is_file():
+                    continue
+                
+                files_scanned += 1
+                
+                # Symlink escape prevention: ensure resolved path is under root
+                try:
+                    resolved_path = filepath.resolve()
+                    # Check if resolved path is under the root directory
+                    try:
+                        resolved_path.relative_to(root_resolved)
+                    except ValueError:
+                        # Path escapes root via symlink - skip with warning
+                        _logger.debug(f"Skipping symlink escape: {filepath} -> {resolved_path}")
                         continue
-                    
-                    # Check if it's ours
-                    status = config_module.is_our_file(filepath, manifest)
-                    if status is True:
-                        orphaned.append((filepath, "certain"))
-                    elif status == "maybe":
-                        orphaned.append((filepath, "uncertain"))
+                except (OSError, RuntimeError):
+                    continue
+                
+                # Skip if already in manifest (O(1) lookup now)
+                if str(filepath) in manifest_paths:
+                    continue
+                
+                # Check if it's ours
+                status = config_module.is_our_file(filepath, manifest)
+                if status is True:
+                    orphaned.append((filepath, "certain"))
+                elif status == "maybe":
+                    orphaned.append((filepath, "uncertain"))
         
         except (OSError, IOError, PermissionError) as e:
             ui.print_warning(f"Error scanning {location}: {e}")
@@ -183,9 +216,10 @@ def check_running_processes(manifest: Dict[str, Any]) -> Dict[str, List[str]]:
                 data = json.loads(response.read())
                 if data.get("models"):
                     running["model_servers"] = [m.get("name", "unknown") for m in data["models"]]
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError):
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError) as e:
         # API not available or returned invalid data - no active models
-        pass
+        # Log for debugging but don't fail
+        _logger.debug(f"Failed to check active models via Ollama API: {type(e).__name__}: {e}")
     
     return running
 
@@ -469,7 +503,7 @@ def uninstall_intellij_plugin() -> bool:
     return removed_any
 
 
-def handle_ide_extensions(manifest: Dict[str, Any]) -> Dict[str, bool]:
+def handle_ide_extensions() -> Dict[str, bool]:
     """Handle IDE extension removal with user choice."""
     removed = {"vscode": False, "intellij": False}
     
@@ -490,7 +524,7 @@ def handle_ide_extensions(manifest: Dict[str, Any]) -> Dict[str, bool]:
     print()
     
     # Check IntelliJ
-    is_installed, paths = check_intellij_plugin_installed()
+    is_installed, _ = check_intellij_plugin_installed()
     if is_installed:
         ui.print_subheader("IntelliJ IDEA Plugin")
         ui.print_info("IntelliJ Continue plugin is installed")

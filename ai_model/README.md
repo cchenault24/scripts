@@ -69,7 +69,9 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 - **VS Code Integration**: Optional automatic extension installation and setup
 - **IntelliJ IDEA Support**: Full support for IntelliJ IDEA with Continue plugin
 
-### Advanced Features (Ollama v4.0)
+### Advanced Features (Ollama Setup v4.0)
+
+> **Note:** "v4.0" refers to the setup script version (see [Changelog](#changelog)), not the Ollama product version. The module API version is `__version__ = "2.0.0"`.
 
 - **Smart Model Recommendations**: Automatically selects the highest quality models that fit your RAM
 - **Tier-Based RAM Reservation**: Variable overhead (40%/35%/30%) based on hardware tier
@@ -204,7 +206,7 @@ The Docker script offers presets based on your hardware tier:
 
 Choose "Custom" preset to manually select models based on your needs.
 
-### Smart Recommendations (Ollama v4.0)
+### Smart Recommendations (Ollama Setup v4.0)
 
 The Ollama script uses intelligent recommendations:
 - **Automatic portfolio**: Best models for your exact RAM, no questions asked
@@ -259,7 +261,7 @@ python3 ollama/ollama-llm-setup.py
 10. Global rules generation
 11. Next steps display
 
-**Interactive Flow (Ollama v4.0 - Smart Recommendations):**
+**Interactive Flow (Ollama Setup v4.0 - Smart Recommendations):**
 1. Hardware detection and tier classification
 2. IDE auto-detection (VS Code, Cursor, IntelliJ IDEA)
 3. Ollama service verification
@@ -461,7 +463,8 @@ Hardware detection and classification:
 - **calculate_os_overhead()**: Calculates OS memory overhead
 - **get_estimated_model_memory()**: Estimates available RAM for models
 
-#### `lib/model_selector.py` (Ollama v4.0 - NEW)
+#### `lib/model_selector.py` (Ollama Setup v4.0 - NEW)
+
 Smart model recommendation engine:
 - **ModelRole**: Enum for model roles (CHAT, EDIT, AUTOCOMPLETE, EMBED, REASONING, VISION)
 - **RecommendedModel**: Dataclass for recommended models with role, RAM, and Ollama name
@@ -475,7 +478,8 @@ Smart model recommendation engine:
 - **show_customization_menu()**: Two-level customization UI
 - **select_models_smart()**: Main entry point for smart model selection
 
-#### `lib/validator.py` (Ollama v4.0 - NEW)
+#### `lib/validator.py` (Ollama Setup v4.0 - NEW)
+
 Robust model pulling with verification and fallback:
 - **PullResult**: Dataclass tracking individual model pull outcomes
 - **SetupResult**: Dataclass tracking overall setup success/failure
@@ -490,6 +494,7 @@ Robust model pulling with verification and fallback:
 - **validate_pre_install()**: Pre-flight checks before downloading
 
 #### `lib/models.py` (Docker & Ollama - Legacy)
+
 Legacy model catalog (maintained for backward compatibility):
 - **ModelInfo**: Dataclass for model metadata
 - **MODEL_CATALOG**: Comprehensive model catalog
@@ -503,18 +508,21 @@ Legacy model catalog (maintained for backward compatibility):
 - **parse_tag_info()**: Parses Ollama model tags to extract size and quantization info
 
 #### `lib/docker.py` (Docker only)
+
 Docker and Docker Model Runner management:
 - **check_docker()**: Verifies Docker installation
 - **check_docker_model_runner()**: Verifies DMR availability
 - **fetch_available_models_from_api()**: Fetches models from DMR API
 
 #### `lib/ollama.py` (Ollama only)
+
 Ollama management:
 - **check_ollama()**: Verifies Ollama installation and API availability
 - **install_ollama()**: Prompts user to install Ollama if not found
 - **get_installation_instructions()**: Provides platform-specific installation instructions
 
 #### `lib/config.py`
+
 Continue.dev configuration generation:
 - **generate_continue_config()**: Generates config.yaml and config.json
 - **generate_global_rule()**: Generates global-rule.md with assistant behavior rules
@@ -522,6 +530,7 @@ Continue.dev configuration generation:
 - **generate_yaml()**: YAML generation utility
 
 #### `lib/ide.py`
+
 IDE integration for VS Code and IntelliJ IDEA:
 - **install_vscode_extension()**: Installs Continue.dev extension in VS Code
 - **detect_intellij_cli()**: Detects IntelliJ IDEA CLI command
@@ -531,6 +540,7 @@ IDE integration for VS Code and IntelliJ IDEA:
 - **show_next_steps()**: Displays post-setup instructions for selected IDE(s)
 
 #### `lib/ui.py`
+
 Terminal UI utilities:
 - **Colors**: ANSI color codes
 - **print_header()**, **print_subheader()**: Formatted headers
@@ -538,6 +548,7 @@ Terminal UI utilities:
 - **prompt_yes_no()**, **prompt_choice()**: Interactive prompts
 
 #### `lib/utils.py`
+
 General utilities:
 - **run_command()**: Execute shell commands with timeout
 
@@ -559,7 +570,7 @@ Model Pulling → Configuration Generation → Global Rules Generation
 IDE Setup → Next Steps
 ```
 
-### Data Flow (Ollama v4.0 Smart Recommendations)
+### Data Flow (Ollama Setup v4.0 Smart Recommendations)
 
 ```text
 Hardware Detection → Tier Classification → Tier-Based RAM Reservation
@@ -873,7 +884,7 @@ Valid roles per Continue.dev schema:
 - **rerank**: Reranking search results
 - **summarize**: Summarization tasks
 
-### Smart Selection Roles (Ollama v4.0)
+### Smart Selection Roles (Ollama Setup v4.0)
 
 The smart model selector uses functional roles for portfolio building:
 - **PRIMARY**: All-rounder for chat, edit, and apply (main workhorse)
@@ -1173,7 +1184,7 @@ python3 -c "from lib import docker; print(docker.check_docker())"
 python3 -c "from lib import models; print(len(models.MODEL_CATALOG))"
 ```
 
-**Testing Ollama v4.0 Modules:**
+**Testing Ollama Setup v4.0 Modules:**
 
 ```bash
 cd ai_model/ollama

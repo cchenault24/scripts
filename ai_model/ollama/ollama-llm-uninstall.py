@@ -20,12 +20,16 @@ Author: AI-Generated for Local LLM Development
 License: MIT
 """
 
+from __future__ import annotations
+
 import json
+import logging
 import os
 import shutil
 import sys
+import warnings
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 # Add ollama directory to path so we can import lib modules
 script_path = Path(__file__).resolve() if __file__ else Path(sys.argv[0]).resolve()
@@ -39,9 +43,18 @@ from lib import ui
 from lib import config
 from lib import uninstaller
 
+# Module logger
+_logger = logging.getLogger(__name__)
 
-def load_manifest() -> Optional[Dict[str, Any]]:
-    """Load installation manifest if it exists."""
+
+def load_manifest() -> dict[str, Any] | None:
+    """
+    Load installation manifest if it exists.
+    
+    Returns:
+        Manifest dict, or {"_unreadable_manifest": True} if corrupt,
+        or None if missing.
+    """
     manifest_path = Path.home() / ".continue" / "setup-manifest.json"
     
     if not manifest_path.exists():
@@ -50,7 +63,14 @@ def load_manifest() -> Optional[Dict[str, Any]]:
     try:
         with open(manifest_path, 'r') as f:
             return json.load(f)
-    except (OSError, IOError, json.JSONDecodeError, PermissionError):
+    except json.JSONDecodeError as e:
+        # Manifest exists but is corrupt
+        _logger.warning(f"Manifest file is corrupt: {manifest_path}: {e}")
+        warnings.warn(f"Installation manifest is unreadable: {e}", UserWarning)
+        return {"_unreadable_manifest": True}
+    except (OSError, IOError, PermissionError) as e:
+        # File access issues
+        _logger.warning(f"Failed to read manifest: {manifest_path}: {e}")
         return None
 
 
@@ -104,7 +124,11 @@ def main() -> int:
     # Step 1: Load manifest
     manifest = load_manifest()
     
-    if manifest:
+    if manifest and manifest.get("_unreadable_manifest"):
+        ui.print_warning("Installation manifest is corrupt or unreadable")
+        ui.print_info("Will use fingerprint-based detection")
+        manifest = uninstaller.create_empty_manifest()
+    elif manifest:
         ui.print_success("Found installation manifest")
         ui.print_info(f"Installed on: {manifest.get('timestamp', 'unknown')}")
         ui.print_info(f"Installer version: {manifest.get('installer_version', 'unknown')}")

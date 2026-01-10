@@ -30,11 +30,13 @@ Author: AI-Generated for Local LLM Development
 License: MIT
 """
 
+from __future__ import annotations
+
+import logging
 import subprocess
 import sys
 import os
 from pathlib import Path
-from typing import List
 
 # Add ollama directory to path so we can import lib modules
 # Use absolute path to ensure it works from any directory
@@ -55,13 +57,17 @@ from lib import ui
 from lib import model_selector
 from lib import validator
 
+# Module logger
+_logger = logging.getLogger(__name__)
 
-def get_pre_existing_models() -> List[str]:
+
+def get_pre_existing_models() -> list[str]:
     """Get list of models that exist before we start pulling."""
     try:
         return validator.get_installed_models()
-    except (OSError, IOError, subprocess.SubprocessError):
+    except (OSError, IOError, subprocess.SubprocessError) as e:
         # Ollama not available or command failed
+        _logger.warning(f"Failed to detect pre-existing models: {type(e).__name__}: {e}")
         return []
 
 
@@ -206,40 +212,42 @@ def main() -> int:
         ui.print_error("No models available for configuration.")
         return 1
     
-    # Track created files for manifest
-    created_files: List[Path] = []
+    # Track created files for manifest (using set to avoid duplicates)
+    created_files_set: set[Path] = set()
     
     # Step 9: Generate config
     print()
     config_path = config.generate_continue_config(models_for_config, hw_info, target_ide=target_ide)
     if config_path:
-        created_files.append(config_path)
-        # Also track JSON if both were created
+        created_files_set.add(config_path)
+        # Also track JSON if both were created (avoid duplicates)
         json_path = config_path.with_suffix('.json')
-        if json_path.exists():
-            created_files.append(json_path)
+        if json_path.exists() and json_path != config_path:
+            created_files_set.add(json_path)
     
     # Step 10: Generate global-rule.md
     print()
     rule_path = config.generate_global_rule()
     if rule_path:
-        created_files.append(rule_path)
+        created_files_set.add(rule_path)
     
     # Step 11: Generate .continueignore
     print()
     ignore_path = config.generate_continueignore()
     if ignore_path:
-        created_files.append(ignore_path)
+        created_files_set.add(ignore_path)
     
     # Step 12: Save setup summary
     print()
     summary_path = config.save_setup_summary(models_for_config, hw_info)
     if summary_path:
-        created_files.append(summary_path)
+        created_files_set.add(summary_path)
     
     # Step 13: Create installation manifest for uninstaller
     print()
     ui.print_subheader("Creating Installation Manifest")
+    # Convert set to list for manifest creation
+    created_files = list(created_files_set)
     config.create_installation_manifest(
         installed_models=models_for_config,
         created_files=created_files,
