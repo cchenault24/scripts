@@ -547,7 +547,8 @@ def show_uninstall_summary(
     temp_removed: int,
     vscode_removed: bool,
     intellij_removed: bool,
-    autostart_removed: bool = False
+    autostart_removed: bool = False,
+    ollama_removed: bool = False
 ) -> None:
     """Show uninstallation summary."""
     ui.print_header("✅ Uninstallation Complete!")
@@ -561,13 +562,19 @@ def show_uninstall_summary(
     print(f"  VS Code Extension Removed: {'Yes' if vscode_removed else 'No'}")
     print(f"  IntelliJ Plugin Removed: {'Yes' if intellij_removed else 'No'}")
     print(f"  Auto-Start Removed: {'Yes' if autostart_removed else 'No'}")
+    print(f"  Ollama Application Removed: {'Yes' if ollama_removed else 'No'}")
     print()
     
     print(ui.colorize("━" * 60, ui.Colors.DIM))
     print(ui.colorize("Note:", ui.Colors.YELLOW + ui.Colors.BOLD))
     print()
-    print("  • Ollama itself is not uninstalled")
-    print("  • Ollama Desktop app remains installed")
-    print("  • Pre-existing models were kept")
+    if ollama_removed:
+        print("  • Ollama has been completely removed from your system")
+        print("  • Pre-existing models were removed with Ollama")
+        print("  • You can reinstall Ollama from https://ollama.com/download")
+    else:
+        print("  • Ollama itself was not uninstalled")
+        print("  • Ollama Desktop app remains installed")
+        print("  • Pre-existing models were kept")
     print("  • You can reinstall by running ollama-llm-setup.py again")
     print()

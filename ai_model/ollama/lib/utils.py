@@ -51,10 +51,7 @@ def run_command(
         capture: Whether to capture stdout/stderr (default: True)
         timeout: Maximum time to wait in seconds (default: 300)
         clean_env: If True, remove SSH_AUTH_SOCK from environment (default: False)
-                   Use this when calling Ollama to avoid SSH agent interference.
-                   SSH_AUTH_SOCK (set by macOS SSH agent for git) causes Ollama
-                   (a Go binary) to fail with "ssh: no key found" errors when
-                   making HTTPS requests due to a bug in Go's HTTP library.
+                   Use this when calling Ollama to prevent Go HTTP client issues.
     
     Returns:
         Tuple of (returncode, stdout, stderr):
@@ -68,7 +65,7 @@ def run_command(
     try:
         # Determine environment
         if clean_env:
-            # Remove SSH_AUTH_SOCK to prevent Go HTTP client bugs in Ollama
+            # Remove SSH_AUTH_SOCK to prevent Go HTTP client issues in Ollama
             env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
         else:
             env = None  # Use current environment

@@ -10,6 +10,7 @@ Handles:
 
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -28,6 +29,27 @@ from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL, AUTOCOMPLE
 OLLAMA_API_BASE = "http://localhost:11434"
 OLLAMA_REGISTRY = "https://registry.ollama.ai"
 
+# Restricted model keywords (Chinese-based LLMs are not allowed)
+RESTRICTED_MODEL_KEYWORDS = [
+    "qwen", "deepseek", "deepcoder", "baai", "bge-", "yi", "baichuan",
+    "chatglm", "glm", "internlm", "minicpm", "cogvlm", "qianwen", "tongyi"
+]
+
+
+def is_restricted_model_name(model_name: str) -> bool:
+    """
+    Check if a model name is from restricted countries (China-based LLMs).
+    
+    Args:
+        model_name: The model name to check (e.g., "qwen2.5-coder:14b")
+        
+    Returns:
+        True if the model is restricted, False otherwise
+    """
+    model_lower = model_name.lower()
+    return any(keyword in model_lower for keyword in RESTRICTED_MODEL_KEYWORDS)
+
+
 # Timeout and delay constants (in seconds)
 API_TIMEOUT = 5  # Timeout for API health checks
 API_TIMEOUT_LONG = 10  # Timeout for longer API operations
@@ -41,7 +63,8 @@ MAX_PULL_RETRIES = 3
 RETRY_BASE_DELAY = 2  # Base delay for exponential backoff (seconds)
 
 # Pre-flight test model (very small, ~400MB)
-PREFLIGHT_TEST_MODEL = "qwen:0.5b"
+# Using a non-Chinese model for preflight testing
+PREFLIGHT_TEST_MODEL = "all-minilm"
 
 
 class PullErrorType:
@@ -56,6 +79,20 @@ class PullErrorType:
     UNKNOWN = "unknown"
 
 
+def is_restricted_model_name(model_name: str) -> bool:
+    """
+    Check if a model name is from restricted countries (China-based LLMs).
+    
+    Args:
+        model_name: The model name to check (e.g., "qwen2.5-coder:14b")
+        
+    Returns:
+        True if the model is restricted, False otherwise
+    """
+    model_lower = model_name.lower()
+    return any(keyword in model_lower for keyword in RESTRICTED_MODEL_KEYWORDS)
+
+
 def classify_pull_error(error_msg: str) -> str:
     """
     Classify the type of pull error for targeted troubleshooting.
@@ -68,7 +105,7 @@ def classify_pull_error(error_msg: str) -> str:
     """
     error_lower = error_msg.lower()
     
-    # SSH key error - often caused by SSH agent interference
+    # SSH-related errors
     if "ssh:" in error_lower or "no key found" in error_lower or "ssh_auth" in error_lower:
         return PullErrorType.SSH_KEY
     
@@ -125,11 +162,10 @@ def get_troubleshooting_steps(error_type: str) -> List[str]:
     """
     steps = {
         PullErrorType.SSH_KEY: [
-            "SSH agent may be interfering with Ollama. Try:",
-            "  1. Unset SSH agent: unset SSH_AUTH_SOCK",
-            "  2. Restart Ollama: pkill ollama && ollama serve &",
-            "  3. Retry the pull: ollama pull <model>",
-            "  4. If issue persists, reinstall Ollama: brew reinstall ollama",
+            "SSH-related error detected. Try:",
+            "  1. Restart Ollama: pkill ollama && ollama serve &",
+            "  2. Retry the pull: ollama pull <model>",
+            "  3. If issue persists, check Ollama installation: ollama --version",
         ],
         PullErrorType.NETWORK: [
             "Network connectivity issue detected. Try:",
@@ -285,19 +321,22 @@ def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> 
     Get a fallback model for a failed pull.
     
     Uses the hardcoded catalog to find alternatives based on role and tier.
+    Ensures fallback models are not restricted (Chinese-based).
     """
     role = model.role
     
-    # Try the model's built-in fallback first
+    # Try the model's built-in fallback first (but check if it's restricted)
     if model.fallback_name:
-        return RecommendedModel(
-            name=f"{model.name} (fallback)",
-            ollama_name=model.fallback_name,
-            ram_gb=model.ram_gb,
-            role=model.role,
-            roles=model.roles,
-            description=f"Fallback for {model.name}"
-        )
+        # Skip if fallback is restricted
+        if not is_restricted_model_name(model.fallback_name):
+            return RecommendedModel(
+                name=f"{model.name} (fallback)",
+                ollama_name=model.fallback_name,
+                ram_gb=model.ram_gb,
+                role=model.role,
+                roles=model.roles,
+                description=f"Fallback for {model.name}"
+            )
     
     # Find alternative from catalog
     if role == ModelRole.EMBED:
@@ -344,8 +383,8 @@ def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> 
         # If no tier-specific fallback, try general fallbacks (reliable models)
         fallbacks = [
             ("codellama:7b", 4.0),  # Meta's CodeLlama - very reliable
-            ("qwen2.5-coder:3b", 2.0),  # Smaller Qwen coder
             ("codegemma:7b", 4.5),  # Google's CodeGemma
+            ("starcoder2:3b", 2.0),  # StarCoder2 - reliable coding model
         ]
         for name, ram in fallbacks:
             if name != model.ollama_name and name not in model.ollama_name:
@@ -370,12 +409,22 @@ def pull_model_with_verification(
     Pull a model with immediate verification and fallback.
     
     Strategy:
-    1. Try to pull the model
-    2. Verify it exists in Ollama
-    3. If verification fails, try the fallback
-    4. Track success/failure for reporting
+    1. Check if model is restricted (Chinese-based LLMs are not allowed)
+    2. Try to pull the model
+    3. Verify it exists in Ollama
+    4. If verification fails, try the fallback
+    5. Track success/failure for reporting
     """
     result = PullResult(model=model, success=False)
+    
+    # Check if model is restricted (Chinese-based)
+    if is_restricted_model_name(model.ollama_name):
+        error_msg = f"Model {model.ollama_name} is from a restricted country and cannot be downloaded"
+        result.error_message = error_msg
+        if show_progress:
+            ui.print_error(f"Blocked: {model.name} ({model.ollama_name})")
+            ui.print_error(f"  Reason: Chinese-based LLMs are not allowed")
+        return result
     
     if show_progress:
         ui.print_info(f"Pulling {model.name} ({model.ollama_name})...")
@@ -407,9 +456,16 @@ def pull_model_with_verification(
     # Store the error for reporting
     primary_error = error_msg
     
-    # Try fallback
+    # Try fallback (but check if fallback is also restricted)
     fallback = get_fallback_model(model, tier)
     if fallback:
+        # Check if fallback is also restricted
+        if is_restricted_model_name(fallback.ollama_name):
+            if show_progress:
+                ui.print_warning(f"Fallback {fallback.ollama_name} is also restricted, skipping")
+            result.error_message = f"Primary model failed and fallback is restricted: {fallback.ollama_name}"
+            return result
+        
         if show_progress:
             ui.print_info(f"Trying fallback: {fallback.ollama_name}")
         
@@ -494,11 +550,18 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
     output_lines: List[str] = []
     
     try:
-        # Create clean environment without SSH_AUTH_SOCK
-        # SSH_AUTH_SOCK causes Go's HTTP library to fail in Ollama
+        # Create clean environment without SSH_AUTH_SOCK to prevent Go HTTP client issues
         clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
         
         if show_progress:
+            # Try to use rich progress bar, fallback to simple output
+            try:
+                from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
+                from rich.console import Console
+                use_rich = True
+            except ImportError:
+                use_rich = False
+            
             # Show live progress with separate stdout/stderr for better error capture
             process = subprocess.Popen(
                 ["ollama", "pull", model_name],
@@ -509,21 +572,133 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                 env=clean_env  # Pass clean environment
             )
             
-            # Read stdout for progress
-            if process.stdout:
-                for line in process.stdout:
-                    line = line.strip()
-                    if line:
-                        output_lines.append(line)
-                        # Show progress updates
-                        if "pulling" in line.lower() or "%" in line:
-                            print(f"    {line}", end="\r")
-                        elif "success" in line.lower() or "done" in line.lower():
-                            print()
-                            ui.print_success(f"    {line}")
-                        elif "error" in line.lower() or "ssh:" in line.lower():
-                            print()
-                            ui.print_error(f"    {line}")
+            if use_rich:
+                # Use rich progress bar
+                console = Console()
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    TimeRemainingColumn(),
+                    console=console,
+                    transient=False,
+                    refresh_per_second=10  # Refresh 10 times per second for smooth updates
+                ) as progress:
+                    # Start with a reasonable default total (will be updated when we get real size info)
+                    task = progress.add_task(f"Pulling {model_name}", total=100)  # Start with percentage-based
+                    total_bytes = None
+                    last_percent = 0
+                    
+                    # Read stdout for progress
+                    if process.stdout:
+                        for line in process.stdout:
+                            # Clean ANSI escape codes - be more aggressive
+                            # Remove all ANSI escape sequences including cursor positioning
+                            clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
+                            clean_line = re.sub(r'\x1b\][0-9;]*', '', clean_line)  # Remove OSC sequences
+                            clean_line = clean_line.strip()
+                            
+                            # Skip empty lines but keep track of progress lines even if they're mostly ANSI
+                            if not clean_line and "%" not in line:
+                                continue
+                                
+                            if clean_line:
+                                output_lines.append(clean_line)
+                            
+                            # Parse Ollama progress output
+                            # Format: "pulling <hash>:   X% ▕█...▏  Y MB/Z GB   speed   time"
+                            # Or: "pulling manifest"
+                            if "pulling manifest" in clean_line.lower():
+                                progress.update(task, description=f"Pulling {model_name} (manifest)", total=None)
+                            elif "pulling" in clean_line.lower() and "%" in clean_line:
+                                # Extract percentage
+                                percent_match = re.search(r'(\d+)%', clean_line)
+                                if percent_match:
+                                    percent = int(percent_match.group(1))
+                                    last_percent = percent
+                                    
+                                    # Extract size info if available
+                                    # Pattern: "X MB/Y GB" or "X MB/Y MB" etc.
+                                    size_match = re.search(r'(\d+(?:\.\d+)?)\s*(MB|GB)\s*/\s*(\d+(?:\.\d+)?)\s*(MB|GB)', clean_line)
+                                    if size_match:
+                                        downloaded = float(size_match.group(1))
+                                        downloaded_unit = size_match.group(2)
+                                        total = float(size_match.group(3))
+                                        total_unit = size_match.group(4)
+                                        
+                                        # Convert to bytes for rich
+                                        if downloaded_unit == "GB":
+                                            downloaded_bytes = int(downloaded * 1024 * 1024 * 1024)
+                                        else:
+                                            downloaded_bytes = int(downloaded * 1024 * 1024)
+                                        
+                                        if total_unit == "GB":
+                                            total_bytes = int(total * 1024 * 1024 * 1024)
+                                        else:
+                                            total_bytes = int(total * 1024 * 1024)
+                                        
+                                        # Update with bytes - this enables DownloadColumn and TransferSpeedColumn
+                                        progress.update(
+                                            task, 
+                                            completed=downloaded_bytes, 
+                                            total=total_bytes,
+                                            description=f"Pulling {model_name}"
+                                        )
+                                    else:
+                                        # Just update percentage if we don't have size info
+                                        # Use percentage-based progress
+                                        if total_bytes is None:
+                                            # Set total to 100 for percentage-based progress
+                                            progress.update(task, total=100, completed=percent, description=f"Pulling {model_name}")
+                                        else:
+                                            # Calculate bytes from percentage
+                                            completed_bytes = int((percent / 100) * total_bytes)
+                                            progress.update(task, completed=completed_bytes, total=total_bytes, description=f"Pulling {model_name}")
+                            
+                            # Check for completion
+                            if "success" in clean_line.lower() or "done" in clean_line.lower() or "complete" in clean_line.lower():
+                                if total_bytes:
+                                    progress.update(task, completed=total_bytes, total=total_bytes, description=f"Pulling {model_name}")
+                                else:
+                                    progress.update(task, completed=100, total=100, description=f"Pulling {model_name}")
+                                print()
+                                ui.print_success(f"Downloaded {model_name}")
+                            elif "error" in clean_line.lower() or "ssh:" in clean_line.lower():
+                                print()
+                                ui.print_error(f"    {clean_line}")
+                        
+                        # Wait for process to complete (it should already be done after reading all stdout)
+                        if process.poll() is None:
+                            process.wait(timeout=MODEL_PULL_TIMEOUT)
+                    else:
+                        # If stdout is None, wait for process
+                        process.wait(timeout=MODEL_PULL_TIMEOUT)
+            else:
+                # Fallback: simple progress output (rich not available)
+                # Read stdout for progress
+                if process.stdout:
+                    for line in process.stdout:
+                        # Clean ANSI escape codes
+                        clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line).strip()
+                        if clean_line:
+                            output_lines.append(clean_line)
+                            # Show progress updates
+                            if "pulling" in clean_line.lower() or "%" in clean_line:
+                                print(f"    {clean_line}", end="\r", flush=True)
+                            elif "success" in clean_line.lower() or "done" in clean_line.lower():
+                                print()
+                                ui.print_success(f"    {clean_line}")
+                            elif "error" in clean_line.lower() or "ssh:" in clean_line.lower():
+                                print()
+                                ui.print_error(f"    {clean_line}")
+                    
+                    # Wait for process to complete
+                    process.wait(timeout=MODEL_PULL_TIMEOUT)
+                else:
+                    process.wait(timeout=MODEL_PULL_TIMEOUT)
             
             # Read stderr for errors
             stderr_output = ""
@@ -551,7 +726,7 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
             code, stdout, stderr = utils.run_command(
                 ["ollama", "pull", model_name],
                 timeout=MODEL_PULL_TIMEOUT,
-                clean_env=True  # Prevent SSH_AUTH_SOCK bug
+                clean_env=True
             )
             if code == 0:
                 return True, ""
@@ -594,7 +769,6 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
     Implements:
     - Up to MAX_PULL_RETRIES attempts
     - Exponential backoff between retries
-    - SSH agent cleanup on SSH-related errors
     - Proper process cleanup on timeout or error
     """
     last_error = ""
@@ -606,12 +780,6 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
             if show_progress:
                 ui.print_info(f"Retrying in {delay}s... (attempt {attempt + 1}/{MAX_PULL_RETRIES})")
             time.sleep(delay)
-            
-            # If previous attempt had SSH error, try to clear SSH agent
-            if "ssh:" in last_error.lower() or "no key found" in last_error.lower():
-                if show_progress:
-                    ui.print_info("Clearing SSH agent interference...")
-                _clear_ssh_agent_interference()
         
         success, error_msg = _pull_model_single_attempt(model_name, show_progress)
         
@@ -633,31 +801,6 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
     return False, last_error
 
 
-def _clear_ssh_agent_interference() -> None:
-    """
-    Attempt to clear SSH agent interference that can cause pull failures.
-    
-    The "ssh: no key found" error often happens when SSH_AUTH_SOCK is set
-    but the agent isn't working properly, causing Ollama to fail.
-    """
-    import os
-    
-    # Temporarily unset SSH_AUTH_SOCK for child processes
-    if "SSH_AUTH_SOCK" in os.environ:
-        try:
-            # Create a clean environment for the next attempt
-            # Note: This won't affect the parent process
-            del os.environ["SSH_AUTH_SOCK"]
-        except Exception:
-            pass
-    
-    # Also try to restart Ollama's connection state by pinging the API
-    try:
-        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
-            pass
-    except Exception:
-        pass
 
 
 def pull_models_with_tracking(
@@ -815,7 +958,6 @@ def display_setup_result(result: SetupResult) -> None:
         if error_type == PullErrorType.SSH_KEY:
             print(ui.colorize("Quick Fix for SSH errors:", ui.Colors.CYAN + ui.Colors.BOLD))
             print("  Run these commands in order:")
-            print("    unset SSH_AUTH_SOCK")
             print("    pkill ollama")
             print("    ollama serve &")
             print("    ollama pull <model-name>")
@@ -966,6 +1108,7 @@ def validate_pre_install(
     Pre-installation validation.
     
     Checks:
+    - Models are not restricted (Chinese-based LLMs are not allowed)
     - Ollama is installed and running
     - Models fit in available RAM
     - Network connectivity (with detailed diagnostics)
@@ -979,6 +1122,17 @@ def validate_pre_install(
     Returns: (is_valid, list_of_warnings)
     """
     warnings = []
+    
+    # Check for restricted models (Chinese-based LLMs)
+    restricted_models = [m for m in models if is_restricted_model_name(m.ollama_name)]
+    if restricted_models:
+        for model in restricted_models:
+            warnings.append(
+                f"Model {model.ollama_name} ({model.name}) is from a restricted country and cannot be downloaded. "
+                f"Chinese-based LLMs are not allowed."
+            )
+        # This is a hard failure - cannot proceed with restricted models
+        return False, warnings
     
     # Check Ollama API
     if not is_ollama_api_available():
@@ -1130,18 +1284,15 @@ def run_diagnostics(verbose: bool = True) -> Dict[str, Any]:
         if verbose:
             ui.print_error(f"Cannot reach registry: {e}")
     
-    # Check 5: SSH agent
+    # Check 5: SSH agent (informational only - script handles this automatically)
     ssh_sock = os.environ.get("SSH_AUTH_SOCK", "")
     if ssh_sock:
         results["ssh_agent_active"] = True
         if verbose:
-            ui.print_warning(f"SSH agent active: {ssh_sock}")
-            ui.print_info("  This may cause 'ssh: no key found' errors")
-            ui.print_info("  Fix: unset SSH_AUTH_SOCK")
-        results["recommendations"].append("Try: unset SSH_AUTH_SOCK (may fix SSH errors)")
+            ui.print_info("SSH agent detected (script will handle automatically)")
     else:
         if verbose:
-            ui.print_success("No SSH agent interference detected")
+            ui.print_success("No SSH agent detected")
     
     # Check 6: Proxy configuration
     proxy_vars = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY"]

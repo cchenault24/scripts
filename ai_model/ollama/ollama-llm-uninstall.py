@@ -399,6 +399,44 @@ def main() -> int:
         else:
             ui.print_info("No auto-start configuration found")
     
+    # Step 8b: Remove Ollama application (optional)
+    ollama_removed = False
+    print()
+    ui.print_subheader("Ollama Application")
+    
+    # Check if Ollama is installed
+    ollama_ok, ollama_version = ollama.check_ollama()
+    
+    if ollama_ok:
+        ui.print_info(f"Ollama is installed (version: {ollama_version})")
+        ui.print_warning("This will remove Ollama completely from your system")
+        ui.print_warning("This includes:")
+        ui.print_info("  • Ollama application")
+        ui.print_info("  • Ollama CLI binary")
+        ui.print_info("  • All Ollama data and models (~/.ollama)")
+        ui.print_info("  • Application caches and support files")
+        print()
+        
+        if ui.prompt_yes_no("Remove Ollama application completely?", default=False):
+            print()
+            success, errors = ollama.remove_ollama()
+            
+            if success:
+                ollama_removed = True
+                ui.print_success("Ollama has been removed from your system")
+            else:
+                ui.print_warning("Ollama removal completed with some errors")
+                if errors:
+                    ui.print_info("Items that couldn't be removed:")
+                    for error in errors:
+                        ui.print_info(f"  • {error}")
+                    print()
+                    ui.print_info("You may need to remove these manually or use sudo")
+        else:
+            ui.print_info("Keeping Ollama installation")
+    else:
+        ui.print_info("Ollama is not installed or not found")
+    
     # Step 9: Remove manifest itself
     manifest_path = Path.home() / ".continue" / "setup-manifest.json"
     if manifest_path.exists():
@@ -416,7 +454,8 @@ def main() -> int:
         temp_removed=temp_removed,
         vscode_removed=ide_removed.get("vscode", False),
         intellij_removed=ide_removed.get("intellij", False),
-        autostart_removed=autostart_removed
+        autostart_removed=autostart_removed,
+        ollama_removed=ollama_removed
     )
     
     return 0

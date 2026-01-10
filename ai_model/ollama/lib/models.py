@@ -55,30 +55,30 @@ MODEL_CATALOG: List[ModelInfo] = [
         base_model_name="codestral"
     ),
     ModelInfo(
-        name="Qwen2.5 Coder 14B",
-        ollama_name="qwen2.5-coder:14b",
-        description="Alibaba's Qwen2.5 Coder 14B - Excellent code generation",
-        ram_gb=9.0,
-        context_length=32768,
+        name="CodeLlama 13B",
+        ollama_name="codellama:13b",
+        description="Meta's CodeLlama 13B - Excellent code generation",
+        ram_gb=7.5,
+        context_length=16384,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.S, hardware.HardwareTier.A],
         recommended_for=["Tier A primary", "Excellent code generation"],
-        base_model_name="qwen2.5-coder"
+        base_model_name="codellama"
     ),
     
     # =========================================================================
     # Chat/Edit Models - Medium (Tier B/C)
     # =========================================================================
     ModelInfo(
-        name="Qwen2.5 Coder 7B",
-        ollama_name="qwen2.5-coder:7b",
-        description="Alibaba's Qwen2.5 Coder 7B - Fast and capable",
-        ram_gb=5.0,
-        context_length=32768,
+        name="CodeLlama 7B",
+        ollama_name="codellama:7b",
+        description="Meta's CodeLlama 7B - Reliable coding model",
+        ram_gb=4.0,
+        context_length=16384,
         roles=["chat", "edit", "autocomplete"],
         tiers=[hardware.HardwareTier.A, hardware.HardwareTier.B, hardware.HardwareTier.C],
         recommended_for=["Tier B primary", "Fast coding"],
-        base_model_name="qwen2.5-coder"
+        base_model_name="codellama"
     ),
     ModelInfo(
         name="Granite Code 8B",

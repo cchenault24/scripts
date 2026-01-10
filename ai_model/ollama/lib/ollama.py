@@ -361,8 +361,7 @@ def start_ollama_service() -> bool:
     # Start Ollama service
     ui.print_info("Starting Ollama service...")
     try:
-        # Create clean environment without SSH_AUTH_SOCK
-        # SSH_AUTH_SOCK causes Go's HTTP library to fail in Ollama
+        # Create clean environment without SSH_AUTH_SOCK to prevent Go HTTP client issues
         clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
         
         # Start ollama serve in background
@@ -763,26 +762,166 @@ def get_autostart_plist_path() -> Optional[Path]:
 
 def check_ssh_environment_pollution() -> bool:
     """
-    Check if SSH_AUTH_SOCK is set and warn user.
+    Check if SSH_AUTH_SOCK is set (informational only).
     
-    SSH_AUTH_SOCK (set by macOS SSH agent for git) causes Ollama to fail with
-    "ssh: no key found" errors due to a bug in Go's HTTP library. This happens
-    because Go's HTTP client incorrectly tries to use SSH certificates for HTTPS
-    when this variable is set.
+    The script automatically handles this by using clean environments
+    when calling Ollama commands.
     
     Returns:
-        True if SSH_AUTH_SOCK is set (potential issue), False otherwise
+        True if SSH_AUTH_SOCK is set, False otherwise
     """
     ssh_auth_sock = os.environ.get('SSH_AUTH_SOCK')
     
     if ssh_auth_sock:
-        ui.print_warning("Detected SSH_AUTH_SOCK environment variable")
-        # Only show truncated path for privacy
-        display_path = ssh_auth_sock[:50] + "..." if len(ssh_auth_sock) > 50 else ssh_auth_sock
-        ui.print_info(f"Value: {display_path}")
-        ui.print_info("This can cause Ollama model pulls to fail with 'ssh: no key found' errors")
-        ui.print_info("The script will automatically use clean environment when calling Ollama")
-        print()
+        ui.print_info("SSH agent detected (will be handled automatically)")
         return True
     
     return False
+
+
+def remove_ollama() -> Tuple[bool, List[str]]:
+    """
+    Remove Ollama installation from the system.
+    
+    Based on official Ollama uninstall documentation:
+    https://docs.ollama.com/macos#uninstall
+    
+    Returns:
+        Tuple of (success, list_of_errors):
+        - success: True if removal was successful
+        - list_of_errors: List of error messages for items that couldn't be removed
+    """
+    errors: List[str] = []
+    removed_items: List[str] = []
+    
+    # Check if Ollama is running
+    if verify_ollama_running():
+        ui.print_warning("Ollama is currently running")
+        ui.print_info("Attempting to stop Ollama service...")
+        
+        # Try to stop Ollama
+        try:
+            code, _, _ = utils.run_command(["pkill", "ollama"], timeout=5, clean_env=True)
+            time.sleep(2)  # Give it time to stop
+        except Exception as e:
+            errors.append(f"Could not stop Ollama service: {e}")
+    
+    # Check if installed via Homebrew (macOS)
+    is_homebrew_install = False
+    if platform.system() == "Darwin" and shutil.which("brew"):
+        try:
+            code, stdout, _ = utils.run_command(["brew", "list", "ollama"], timeout=5, clean_env=True)
+            if code == 0:
+                is_homebrew_install = True
+                ui.print_info("Detected Ollama installed via Homebrew")
+                ui.print_warning("For Homebrew installations, it's recommended to use: brew uninstall ollama")
+                ui.print_info("This script will attempt to remove files, but Homebrew-managed files may remain")
+                print()
+        except Exception:
+            pass  # Ignore errors checking Homebrew
+    
+    # Remove auto-start configuration first (if exists)
+    if platform.system() == "Darwin":
+        autostart_removed = remove_ollama_autostart_macos()
+        if autostart_removed:
+            removed_items.append("Auto-start configuration")
+    
+    # Paths to remove (macOS)
+    paths_to_remove = []
+    
+    if platform.system() == "Darwin":
+        # Application
+        paths_to_remove.append(("/Applications/Ollama.app", "Ollama application"))
+        
+        # CLI binary
+        paths_to_remove.append(("/usr/local/bin/ollama", "Ollama CLI binary"))
+        
+        # Application Support
+        app_support = Path.home() / "Library" / "Application Support" / "Ollama"
+        paths_to_remove.append((str(app_support), "Application Support directory"))
+        
+        # Saved Application State
+        saved_state = Path.home() / "Library" / "Saved Application State" / "com.electron.ollama.savedState"
+        paths_to_remove.append((str(saved_state), "Saved Application State"))
+        
+        # Caches
+        cache1 = Path.home() / "Library" / "Caches" / "com.electron.ollama"
+        paths_to_remove.append((str(cache1), "Electron cache"))
+        
+        cache2 = Path.home() / "Library" / "Caches" / "ollama"
+        paths_to_remove.append((str(cache2), "Ollama cache"))
+        
+        # WebKit cache
+        webkit_cache = Path.home() / "Library" / "WebKit" / "com.electron.ollama"
+        paths_to_remove.append((str(webkit_cache), "WebKit cache"))
+    
+    # User data directory (all platforms)
+    ollama_data = Path.home() / ".ollama"
+    paths_to_remove.append((str(ollama_data), "Ollama data directory (~/.ollama)"))
+    
+    # Remove each path
+    for path_str, description in paths_to_remove:
+        path = Path(path_str)
+        
+        if not path.exists():
+            continue
+        
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+                removed_items.append(description)
+                ui.print_success(f"Removed: {description}")
+            elif path.is_file() or path.is_symlink():
+                # For /usr/local/bin/ollama, might need sudo
+                if path_str == "/usr/local/bin/ollama":
+                    # Try without sudo first
+                    try:
+                        path.unlink()
+                        removed_items.append(description)
+                        ui.print_success(f"Removed: {description}")
+                    except PermissionError:
+                        # Need sudo - inform user
+                        errors.append(f"{description} requires sudo to remove. Run: sudo rm {path_str}")
+                        ui.print_warning(f"{description} requires sudo. Run: sudo rm {path_str}")
+                else:
+                    path.unlink()
+                    removed_items.append(description)
+                    ui.print_success(f"Removed: {description}")
+        except PermissionError as e:
+            error_msg = f"{description}: Permission denied. May need sudo."
+            errors.append(error_msg)
+            ui.print_warning(f"Could not remove {description}: Permission denied")
+        except (OSError, IOError, shutil.Error) as e:
+            error_msg = f"{description}: {e}"
+            errors.append(error_msg)
+            ui.print_warning(f"Could not remove {description}: {e}")
+    
+    # Summary
+    if removed_items:
+        ui.print_success(f"Removed {len(removed_items)} item(s)")
+    
+    if errors:
+        ui.print_warning(f"Could not remove {len(errors)} item(s) (see details above)")
+        ui.print_info("You may need to remove these manually or use sudo")
+    
+    # Verify removal
+    ollama_exists = shutil.which("ollama")
+    if ollama_exists:
+        if is_homebrew_install:
+            errors.append("Ollama CLI still found. If installed via Homebrew, run: brew uninstall ollama")
+            ui.print_warning("Ollama CLI still found in PATH")
+            ui.print_info("If installed via Homebrew, run: brew uninstall ollama")
+        else:
+            errors.append("Ollama CLI still found in PATH. May need to restart terminal or check other locations.")
+            ui.print_warning("Ollama CLI still found in PATH")
+    else:
+        ui.print_success("Ollama CLI no longer found in PATH")
+    
+    # If Homebrew install, suggest proper uninstall method
+    if is_homebrew_install and ollama_exists:
+        ui.print_info("")
+        ui.print_info("To complete removal of Homebrew-installed Ollama:")
+        ui.print_info("  brew uninstall ollama")
+    
+    success = len(errors) == 0
+    return success, errors

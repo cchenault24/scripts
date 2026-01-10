@@ -146,26 +146,17 @@ PRIMARY_MODELS = {
             fallback_name="codestral:latest"
         ),
         RecommendedModel(
-            name="Qwen2.5 Coder 14B",
-            ollama_name="qwen2.5-coder:14b",
-            ram_gb=9.0,
+            name="CodeLlama 13B",
+            ollama_name="codellama:13b",
+            ram_gb=7.5,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
-            description="Alibaba's Qwen2.5 Coder - Excellent code generation",
-            fallback_name="qwen2.5-coder:7b"
+            description="Meta's CodeLlama 13B - Excellent code generation",
+            fallback_name="codellama:7b"
         ),
     ],
     hardware.HardwareTier.A: [
         # Tier A (32-64GB): 14B models with good quality
-        RecommendedModel(
-            name="Qwen2.5 Coder 14B",
-            ollama_name="qwen2.5-coder:14b",
-            ram_gb=9.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="Alibaba's Qwen2.5 Coder - Excellent code generation",
-            fallback_name="qwen2.5-coder:7b"
-        ),
         RecommendedModel(
             name="Codestral 22B",
             ollama_name="codestral:22b",
@@ -175,18 +166,18 @@ PRIMARY_MODELS = {
             description="Mistral's Codestral - Best open coding model",
             fallback_name="codestral:latest"
         ),
+        RecommendedModel(
+            name="CodeLlama 13B",
+            ollama_name="codellama:13b",
+            ram_gb=7.5,
+            role=ModelRole.CHAT,
+            roles=["chat", "edit", "autocomplete"],
+            description="Meta's CodeLlama 13B - Excellent code generation",
+            fallback_name="codellama:7b"
+        ),
     ],
     hardware.HardwareTier.B: [
         # Tier B (24-32GB): 7-8B models
-        RecommendedModel(
-            name="Qwen2.5 Coder 7B",
-            ollama_name="qwen2.5-coder:7b",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="Alibaba's Qwen2.5 Coder 7B - Fast and capable",
-            fallback_name="granite-code:8b"
-        ),
         RecommendedModel(
             name="Granite Code 8B",
             ollama_name="granite-code:8b",
@@ -196,27 +187,35 @@ PRIMARY_MODELS = {
             description="IBM's Granite Code - Balanced coding model",
             fallback_name="granite-code:latest"
         ),
+        RecommendedModel(
+            name="CodeLlama 7B",
+            ollama_name="codellama:7b",
+            ram_gb=4.0,
+            role=ModelRole.CHAT,
+            roles=["chat", "edit", "autocomplete"],
+            description="Meta's CodeLlama 7B - Reliable coding model",
+            fallback_name="starcoder2:3b"
+        ),
     ],
     hardware.HardwareTier.C: [
         # Tier C (16-24GB): 3-8B models
-        # Using Qwen2.5 Coder as first choice - very reliable
         RecommendedModel(
-            name="Qwen2.5 Coder 7B",
-            ollama_name="qwen2.5-coder:7b",
+            name="CodeLlama 7B",
+            ollama_name="codellama:7b",
+            ram_gb=4.0,
+            role=ModelRole.CHAT,
+            roles=["chat", "edit", "autocomplete"],
+            description="Meta's CodeLlama 7B - Reliable coding model",
+            fallback_name="starcoder2:3b"
+        ),
+        RecommendedModel(
+            name="Granite Code 8B",
+            ollama_name="granite-code:8b",
             ram_gb=5.0,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
-            description="Alibaba's Qwen2.5 Coder 7B - Fast and capable",
-            fallback_name="codellama:7b"
-        ),
-        RecommendedModel(
-            name="DeepSeek Coder V2 Lite",
-            ollama_name="deepseek-coder-v2:lite",
-            ram_gb=3.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="DeepSeek Coder V2 Lite - Good balance of size and quality",
-            fallback_name="starcoder2:3b"
+            description="IBM's Granite Code - Balanced coding model",
+            fallback_name="granite-code:latest"
         ),
     ],
 }
