@@ -87,6 +87,7 @@ def install_ollama() -> Tuple[bool, str]:
         ui.print_info("The script will install Ollama to ~/.local/bin or /usr/local/bin")
         
         # Download and run the install script
+        process = None
         try:
             import urllib.request
             install_script_url = "https://ollama.com/install.sh"
@@ -117,10 +118,29 @@ def install_ollama() -> Tuple[bool, str]:
             else:
                 ui.print_error(f"Installation failed: {stderr}")
                 return False, f"Installation failed: {stderr}"
+        except subprocess.TimeoutExpired:
+            # Clean up the process on timeout
+            if process:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            ui.print_error("Installation timed out")
+            ui.print_info("Please install manually: curl -fsSL https://ollama.com/install.sh | sh")
+            return False, "Installation timed out"
         except Exception as e:
             ui.print_error(f"Failed to install Ollama: {e}")
             ui.print_info("Please install manually: curl -fsSL https://ollama.com/install.sh | sh")
             return False, str(e)
+        finally:
+            # Ensure process is cleaned up
+            if process and process.poll() is None:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
     
     else:
         ui.print_warning(f"Automatic installation not supported on {os_name}")

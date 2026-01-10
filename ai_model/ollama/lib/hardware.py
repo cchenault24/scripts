@@ -9,7 +9,7 @@ import platform
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List
+from typing import List
 
 from . import ui
 from . import utils
@@ -47,7 +47,6 @@ class HardwareInfo:
     ollama_available: bool = False
     ollama_api_endpoint: str = "http://localhost:11434/v1"  # Default, will be updated by ollama module
     available_api_models: List[str] = field(default_factory=list)  # Models available via API
-    discovered_model_tags: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # Cached model tag discovery results
     tier: HardwareTier = HardwareTier.C
     usable_ram_gb: float = 0.0  # Calculated usable RAM after OS overhead
     

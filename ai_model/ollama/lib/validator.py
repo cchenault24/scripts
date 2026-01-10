@@ -276,7 +276,9 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
     Execute ollama pull command.
     
     Returns True if the command succeeded.
+    Ensures proper process cleanup on timeout or error.
     """
+    process = None
     try:
         if show_progress:
             # Show live progress
@@ -310,9 +312,24 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
             return code == 0
     
     except subprocess.TimeoutExpired:
+        # Clean up the process on timeout
+        if process:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
         return False
     except Exception:
         return False
+    finally:
+        # Ensure process is cleaned up
+        if process and process.poll() is None:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 def pull_models_with_tracking(
