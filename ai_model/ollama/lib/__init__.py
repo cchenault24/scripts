@@ -4,13 +4,14 @@ Ollama LLM Setup Library
 Modular components for Ollama and Continue.dev setup.
 
 Modules:
-- config: Continue.dev configuration generation
+- config: Continue.dev configuration generation + manifest tracking
 - hardware: Hardware detection and tier classification
 - ide: IDE detection and integration (VS Code, Cursor, IntelliJ)
 - model_selector: Smart model recommendation engine
 - models: Model catalog and legacy support
 - ollama: Ollama service management
 - ui: Terminal UI utilities
+- uninstaller: Smart uninstallation with manifest tracking
 - utils: General utilities
 - validator: Model verification and fallback handling
 """
@@ -25,6 +26,7 @@ from . import model_selector
 from . import models
 from . import ollama
 from . import ui
+from . import uninstaller
 from . import utils
 from . import validator
 

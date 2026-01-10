@@ -11,6 +11,7 @@ NEW in v2.0:
 - Single "best recommendation" approach with [Accept]/[Customize]
 - Reliable model pulling with verification and fallbacks
 - Auto-detection of installed IDEs
+- Installation manifest for smart uninstallation
 
 Optimized for Mac with Apple Silicon (M1/M2/M3/M4) using Ollama.
 
@@ -32,6 +33,7 @@ License: MIT
 import sys
 import os
 from pathlib import Path
+from typing import List
 
 # Add ollama directory to path so we can import lib modules
 # Use absolute path to ensure it works from any directory
@@ -51,6 +53,14 @@ from lib import ide
 from lib import ui
 from lib import model_selector
 from lib import validator
+
+
+def get_pre_existing_models() -> List[str]:
+    """Get list of models that exist before we start pulling."""
+    try:
+        return validator.get_installed_models()
+    except Exception:
+        return []
 
 
 def main() -> int:
@@ -113,6 +123,10 @@ def main() -> int:
         ui.print_error("Ollama API is not accessible.")
         ui.print_info("Please ensure Ollama service is running.")
         return 1
+    
+    # Step 4b: Record pre-existing models for manifest
+    pre_existing_models = get_pre_existing_models()
+    hw_info.ollama_available = True  # Mark that Ollama is available
     
     # Step 5: Smart model selection (new approach)
     print()
@@ -190,23 +204,49 @@ def main() -> int:
         ui.print_error("No models available for configuration.")
         return 1
     
+    # Track created files for manifest
+    created_files: List[Path] = []
+    
     # Step 9: Generate config
     print()
     config_path = config.generate_continue_config(models_for_config, hw_info, target_ide=target_ide)
+    if config_path:
+        created_files.append(config_path)
+        # Also track JSON if both were created
+        json_path = config_path.with_suffix('.json')
+        if json_path.exists():
+            created_files.append(json_path)
     
     # Step 10: Generate global-rule.md
     print()
-    config.generate_global_rule()  # Return value not needed
+    rule_path = config.generate_global_rule()
+    if rule_path:
+        created_files.append(rule_path)
     
     # Step 11: Generate .continueignore
     print()
-    config.generate_continueignore()  # Return value not needed
+    ignore_path = config.generate_continueignore()
+    if ignore_path:
+        created_files.append(ignore_path)
     
     # Step 12: Save setup summary
     print()
-    config.save_setup_summary(models_for_config, hw_info)  # Return value not needed
+    summary_path = config.save_setup_summary(models_for_config, hw_info)
+    if summary_path:
+        created_files.append(summary_path)
     
-    # Step 13: Show next steps
+    # Step 13: Create installation manifest for uninstaller
+    print()
+    ui.print_subheader("Creating Installation Manifest")
+    config.create_installation_manifest(
+        installed_models=models_for_config,
+        created_files=created_files,
+        hw_info=hw_info,
+        target_ide=target_ide,
+        pre_existing_models=pre_existing_models
+    )
+    
+    # Step 14: Show next steps
     print()
     ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide)
     

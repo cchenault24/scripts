@@ -997,6 +997,23 @@ The smart model selector uses functional roles for portfolio building:
 
 ### Full Uninstallation
 
+**For Ollama Setup (Recommended - Smart Uninstaller v2.0):**
+
+```bash
+python3 ollama/ollama-llm-uninstall.py
+```
+
+The smart uninstaller will:
+1. **Load installation manifest** - Knows exactly what was installed
+2. **Detect running processes** - Warns about active Ollama/IDE processes
+3. **Scan for orphaned files** - Finds files created by installer but not in manifest
+4. **Remove Ollama models** - Only models we installed (keeps pre-existing)
+5. **Handle config customization** - Detects if you modified configs, offers backup
+6. **Auto-clean cache/temp** - Removes cache files without asking
+7. **Remove IDE extensions** - Asks before removing (can be used with other LLMs)
+
+**For Docker Setup:**
+
 ```bash
 python3 docker/docker-llm-uninstall.py
 ```
@@ -1258,9 +1275,19 @@ MIT License - See LICENSE file for details.
   - Continues with remaining models on individual failures
   - Clear feedback and actionable next steps for partial setups
   - Retry mechanism for failed models
+- **Smart Uninstaller v2.0**: Manifest-based cleanup system
+  - Installation manifest tracking for precise uninstallation
+  - File fingerprinting to detect user customizations
+  - Pre-existing model preservation (keeps models you had before setup)
+  - Orphaned file detection and cleanup
+  - Running process detection and graceful handling
+  - Smart config removal with backup/restore options
+  - Auto-cleanup of cache and temporary files
+  - New `lib/uninstaller.py` module
 - **New Modules**: Modular architecture for maintainability
   - `lib/model_selector.py`: Smart recommendation engine and customization UI
   - `lib/validator.py`: Robust model pulling with verification and fallback
+  - `lib/uninstaller.py`: Smart uninstallation with manifest tracking
 - **IDE Auto-Detection**: Automatically finds installed IDEs
   - Detects VS Code, Cursor, and IntelliJ IDEA installations
   - No manual IDE selection required
