@@ -260,6 +260,63 @@ def main() -> int:
     print()
     ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide)
     
+    # Step 15: Configure auto-start (macOS only)
+    import platform
+    if platform.system() == "Darwin":
+        print()
+        ui.print_subheader("Auto-Start Configuration")
+        
+        is_configured, details = ollama.check_ollama_autostart_status_macos()
+        
+        if is_configured:
+            ui.print_success("Ollama is already configured to auto-start")
+            ui.print_info(f"Method: {details}")
+            
+            # Verify it's actually running
+            if ollama.verify_ollama_running():
+                ui.print_success("Ollama service is currently running")
+            else:
+                ui.print_warning("Ollama is configured but not currently running")
+                ui.print_info("It will start automatically on next boot")
+                
+                if ui.prompt_yes_no("Would you like to start Ollama now?", default=True):
+                    if ollama.start_ollama_service():
+                        ui.print_success("Ollama service started")
+                    else:
+                        ui.print_warning("Could not start Ollama automatically")
+                        ui.print_info("Run 'ollama serve' manually or restart your Mac")
+        else:
+            ui.print_info("Ollama is not configured to start automatically on boot")
+            ui.print_info("Without auto-start, you'll need to manually run 'ollama serve' after each reboot")
+            print()
+            
+            if ui.prompt_yes_no("Would you like to set up Ollama to start automatically?", default=True):
+                print()
+                ui.print_info("Setting up Ollama auto-start using launchd...")
+                ui.print_info("This will create a Launch Agent that starts Ollama when you log in")
+                print()
+                
+                if ollama.setup_ollama_autostart_macos():
+                    print()
+                    ui.print_success("✅ Ollama will now start automatically when you boot your Mac")
+                    ui.print_info("No manual 'ollama serve' needed after restart")
+                    
+                    # Track the plist file in manifest
+                    plist_path = ollama.get_autostart_plist_path()
+                    if plist_path and plist_path.exists():
+                        created_files_set.add(plist_path)
+                else:
+                    print()
+                    ui.print_warning("Could not set up auto-start")
+                    ui.print_info("You can manually start Ollama with: ollama serve")
+                    ui.print_info("Or set it up later with: brew services start ollama")
+            else:
+                print()
+                ui.print_info("Skipping auto-start setup")
+                ui.print_info("Remember to run 'ollama serve' after each reboot")
+                ui.print_info("Or set it up later with: brew services start ollama")
+    
+    print()
     return 0
 
 

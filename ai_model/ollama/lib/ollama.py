@@ -13,12 +13,17 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from typing import List, Tuple
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 from . import hardware
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
+
+# Launch Agent configuration
+LAUNCH_AGENT_LABEL = "com.ollama.server"
+LAUNCH_AGENT_PLIST = f"{LAUNCH_AGENT_LABEL}.plist"
 
 # Ollama API configuration
 # Ollama exposes an OpenAI-compatible API endpoint
@@ -491,3 +496,259 @@ def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
         # Couldn't reach API and couldn't start service - but still return True
         # to allow setup to continue (user can start manually)
         return True
+
+
+# =============================================================================
+# macOS Auto-Start Functions (launchd Launch Agent)
+# =============================================================================
+
+def setup_ollama_autostart_macos() -> bool:
+    """
+    Set up Ollama to start automatically on macOS using launchd.
+    
+    Creates a Launch Agent plist file at:
+    ~/Library/LaunchAgents/com.ollama.server.plist
+    
+    This is more reliable than Homebrew services and works regardless
+    of how Ollama was installed.
+    
+    Returns:
+        True if setup successful, False otherwise
+    """
+    if platform.system() != "Darwin":
+        ui.print_warning("Auto-start via launchd is only available on macOS")
+        return False
+    
+    # Find ollama path
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        ui.print_error("Cannot find ollama command")
+        return False
+    
+    # Make path absolute
+    ollama_path = os.path.abspath(ollama_path)
+    
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LAUNCH_AGENT_LABEL}</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>{ollama_path}</string>
+        <string>serve</string>
+    </array>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>/tmp/ollama.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/tmp/ollama.error.log</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <key>Nice</key>
+    <integer>0</integer>
+</dict>
+</plist>
+"""
+    
+    # Create LaunchAgents directory if it doesn't exist
+    launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
+    try:
+        launch_agents_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        ui.print_error(f"Cannot create LaunchAgents directory: {e}")
+        return False
+    
+    # Write plist file
+    plist_path = launch_agents_dir / LAUNCH_AGENT_PLIST
+    
+    try:
+        # Check if file already exists
+        if plist_path.exists():
+            ui.print_warning(f"Launch Agent already exists at {plist_path}")
+            if not ui.prompt_yes_no("Overwrite existing configuration?", default=True):
+                return False
+            # Unload existing first
+            utils.run_command(["launchctl", "unload", str(plist_path)], timeout=5)
+        
+        # Write new plist file
+        with open(plist_path, 'w') as f:
+            f.write(plist_content)
+        
+        ui.print_success(f"Created Launch Agent: {plist_path}")
+        ui.print_info(f"Ollama path: {ollama_path}")
+        
+        # Load the launch agent immediately
+        code, stdout, stderr = utils.run_command(
+            ["launchctl", "load", str(plist_path)],
+            timeout=10
+        )
+        
+        if code == 0:
+            ui.print_success("Launch Agent loaded successfully")
+            
+            # Wait a moment for service to start
+            time.sleep(2)
+            
+            # Verify Ollama is running
+            if verify_ollama_running():
+                ui.print_success("Ollama service is now running")
+                ui.print_success("Ollama will start automatically on boot")
+                return True
+            else:
+                ui.print_warning("Launch Agent loaded but Ollama may not be running yet")
+                ui.print_info("It should start within a few seconds")
+                ui.print_info("Check logs at: /tmp/ollama.log and /tmp/ollama.error.log")
+                return True
+        else:
+            ui.print_error(f"Failed to load Launch Agent: {stderr}")
+            ui.print_info("The Launch Agent was created but couldn't be loaded")
+            ui.print_info("It will start automatically on next boot")
+            ui.print_info("To start it now manually, run:")
+            ui.print_info(f"  launchctl load {plist_path}")
+            return True  # Still return True since file was created
+            
+    except PermissionError as e:
+        ui.print_error(f"Permission denied: {e}")
+        ui.print_info("You may need to run this script with appropriate permissions")
+        return False
+    except Exception as e:
+        ui.print_error(f"Failed to create Launch Agent: {e}")
+        return False
+
+
+def remove_ollama_autostart_macos() -> bool:
+    """
+    Remove Ollama auto-start configuration on macOS.
+    
+    Unloads and removes the Launch Agent plist file.
+    
+    Returns:
+        True if removal successful or nothing to remove, False on error
+    """
+    if platform.system() != "Darwin":
+        ui.print_info("Auto-start removal via launchd is only available on macOS")
+        return True
+    
+    plist_path = Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+    
+    if not plist_path.exists():
+        ui.print_info("No Launch Agent configuration found")
+        return True
+    
+    try:
+        ui.print_info(f"Found Launch Agent: {plist_path}")
+        
+        # Unload the launch agent first
+        code, stdout, stderr = utils.run_command(
+            ["launchctl", "unload", str(plist_path)],
+            timeout=10
+        )
+        
+        if code == 0:
+            ui.print_success("Launch Agent unloaded")
+        else:
+            # May fail if already unloaded - that's OK
+            ui.print_warning(f"Could not unload Launch Agent (may not be loaded): {stderr}")
+        
+        # Remove the plist file
+        plist_path.unlink()
+        ui.print_success("Removed Launch Agent configuration")
+        ui.print_info("Ollama will no longer start automatically on boot")
+        
+        return True
+        
+    except Exception as e:
+        ui.print_error(f"Failed to remove Launch Agent: {e}")
+        return False
+
+
+def check_ollama_autostart_status_macos() -> Tuple[bool, str]:
+    """
+    Check if Ollama is configured to start automatically on macOS.
+    
+    Returns:
+        Tuple of (is_configured, details)
+        - is_configured: True if auto-start is set up
+        - details: String describing the configuration method or status
+    """
+    if platform.system() != "Darwin":
+        return False, "Not macOS"
+    
+    plist_path = Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+    
+    # Check for Launch Agent
+    if plist_path.exists():
+        # Verify it's loaded
+        code, stdout, stderr = utils.run_command(
+            ["launchctl", "list"],
+            timeout=5
+        )
+        
+        if code == 0 and LAUNCH_AGENT_LABEL in stdout:
+            return True, f"Launch Agent (loaded, path: {plist_path})"
+        else:
+            return True, f"Launch Agent (created but not loaded, path: {plist_path})"
+    
+    # Check if Homebrew service is running (secondary check)
+    if shutil.which("brew"):
+        code, stdout, _ = utils.run_command(["brew", "services", "list"], timeout=5)
+        if code == 0 and "ollama" in stdout.lower():
+            if "started" in stdout.lower():
+                return True, "Homebrew services (running)"
+            else:
+                return True, "Homebrew services (configured but not running)"
+    
+    # Check if Ollama Desktop app is handling auto-start
+    # (Ollama Desktop has its own auto-start mechanism)
+    ollama_app_path = Path("/Applications/Ollama.app")
+    if ollama_app_path.exists():
+        # Check if Ollama app is in login items (this is harder to detect)
+        # For now, just note that the app exists
+        pass
+    
+    return False, "Not configured"
+
+
+def verify_ollama_running() -> bool:
+    """
+    Verify that Ollama service is currently running.
+    
+    Returns:
+        True if Ollama is running and responding, False otherwise
+    """
+    try:
+        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags")
+        with urllib.request.urlopen(req, timeout=3, context=get_unverified_ssl_context()) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def get_autostart_plist_path() -> Optional[Path]:
+    """
+    Get the path to the Ollama Launch Agent plist file.
+    
+    Returns:
+        Path to the plist file, or None if not on macOS
+    """
+    if platform.system() != "Darwin":
+        return None
+    return Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST

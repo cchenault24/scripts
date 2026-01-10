@@ -29,7 +29,7 @@ import shutil
 import sys
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 # Add ollama directory to path so we can import lib modules
 script_path = Path(__file__).resolve() if __file__ else Path(sys.argv[0]).resolve()
@@ -42,6 +42,7 @@ if ollama_dir_str not in sys.path:
 from lib import ui
 from lib import config
 from lib import uninstaller
+from lib import ollama
 
 # Module logger
 _logger = logging.getLogger(__name__)
@@ -370,7 +371,35 @@ def main() -> int:
         else:
             ui.print_warning("Skipping IntelliJ plugin (--skip-intellij flag used)")
     
-    # Step 8: Remove manifest itself
+    # Step 8: Remove auto-start configuration (macOS only)
+    import platform
+    autostart_removed = False
+    
+    if platform.system() == "Darwin":
+        print()
+        ui.print_subheader("Auto-Start Configuration")
+        
+        is_configured, details = ollama.check_ollama_autostart_status_macos()
+        
+        if is_configured:
+            ui.print_info(f"Ollama is configured to auto-start: {details}")
+            print()
+            
+            if ui.prompt_yes_no("Remove auto-start configuration?", default=True):
+                print()
+                if ollama.remove_ollama_autostart_macos():
+                    autostart_removed = True
+                else:
+                    ui.print_warning("Could not remove auto-start configuration")
+                    ui.print_info("You may need to remove it manually:")
+                    ui.print_info("  rm ~/Library/LaunchAgents/com.ollama.server.plist")
+                    ui.print_info("  launchctl remove com.ollama.server")
+            else:
+                ui.print_info("Keeping auto-start configuration")
+        else:
+            ui.print_info("No auto-start configuration found")
+    
+    # Step 9: Remove manifest itself
     manifest_path = Path.home() / ".continue" / "setup-manifest.json"
     if manifest_path.exists():
         try:
@@ -379,14 +408,15 @@ def main() -> int:
         except (OSError, IOError, PermissionError) as e:
             ui.print_warning(f"Could not remove manifest: {e}")
     
-    # Step 9: Summary
+    # Step 10: Summary
     print()
     uninstaller.show_uninstall_summary(
         models_removed=models_removed,
         config_removed=config_removed,
         temp_removed=temp_removed,
         vscode_removed=ide_removed.get("vscode", False),
-        intellij_removed=ide_removed.get("intellij", False)
+        intellij_removed=ide_removed.get("intellij", False),
+        autostart_removed=autostart_removed
     )
     
     return 0
