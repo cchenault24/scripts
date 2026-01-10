@@ -868,6 +868,128 @@ tags
     return output_path
 
 
+def generate_codebase_rules(output_path: Optional[Path] = None) -> Path:
+    """
+    Generate Continue.dev codebase awareness rules file for Agent mode.
+    
+    This complements the legacy @Codebase embedding-based search by providing
+    structured context that Agent mode can use to understand the project.
+    
+    Args:
+        output_path: Optional output path (default: ~/.continue/rules/codebase-context.md)
+    
+    Returns:
+        Path to saved rules file
+    """
+    ui.print_subheader("📝 Generating Codebase Awareness Rules")
+    
+    if output_path is None:
+        output_path = Path.home() / ".continue" / "rules" / "codebase-context.md"
+    
+    # Create directory if needed
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Backup existing file if present
+    if output_path.exists():
+        backup_path = output_path.with_suffix(".md.backup")
+        shutil.copy(output_path, backup_path)
+        ui.print_info(f"Backed up existing rules to {backup_path}")
+    
+    rules_content = """# Codebase Context
+
+This file helps Continue's Agent mode understand your codebase.
+Edit this file to provide project-specific context for better AI assistance.
+
+## Project Structure
+
+<!-- Describe your project's key directories and their purposes -->
+Example:
+- `/src` - Main source code
+- `/tests` - Test files
+- `/docs` - Documentation
+- `/config` - Configuration files
+
+## Key Technologies
+
+<!-- List the main technologies, frameworks, and patterns used -->
+Example:
+- Language: Python 3.11+
+- Framework: FastAPI / Django / Flask
+- Database: PostgreSQL / MongoDB
+- Key Libraries: pandas, numpy, requests
+
+## Coding Standards
+
+<!-- Describe your team's coding conventions -->
+Example:
+- Follow PEP 8 for Python code
+- Use type hints for all functions
+- Write docstrings for public APIs
+- Maintain test coverage above 80%
+
+## Architecture Patterns
+
+<!-- Document architectural decisions and patterns -->
+Example:
+- MVC architecture with service layer
+- Repository pattern for data access
+- Event-driven for async operations
+- Microservices with REST APIs
+
+## Common Tasks
+
+<!-- List frequent development tasks and how to do them -->
+Example:
+- Adding new endpoints: Create in `/src/api/routes/`
+- Database migrations: Use `alembic revision --autogenerate`
+- Running tests: `pytest tests/`
+- Building: `docker-compose build`
+
+## Important Context
+
+<!-- Add any other context that helps AI understand your code -->
+Example:
+- Authentication is handled by JWT tokens in `/src/auth/`
+- Configuration uses environment variables (see `.env.example`)
+- Logging follows structured logging with JSON output
+- API documentation auto-generated from OpenAPI specs
+
+---
+
+## How This Works
+
+**Agent Mode** (New approach - Recommended):
+- Agent mode reads this file automatically
+- Uses the context to make better suggestions
+- No indexing required - works immediately
+- Best for: Complex tasks, architectural questions, multi-file changes
+
+**@Codebase Search** (Legacy approach - Still works):
+- Uses embedding models for semantic search
+- Type `@Codebase` or `@Folder` in chat
+- Best for: "Find all code related to X" queries
+- Requires: Embedding model (already configured)
+
+**💡 Pro Tip**: Use both! Agent mode for planning, @Codebase for discovery.
+
+---
+
+📝 **Edit this file** to match your actual project structure and conventions.
+The more specific you are, the better Agent mode will understand your codebase.
+"""
+    
+    # Add fingerprint header
+    rules_content = add_fingerprint_header(rules_content, "md")
+    
+    with open(output_path, "w") as f:
+        f.write(rules_content)
+    
+    ui.print_success(f"Codebase awareness rules created at {output_path}")
+    ui.print_info("💡 Edit this file to provide context about your project")
+    
+    return output_path
+
+
 def generate_global_rule(
     output_path: Optional[Path] = None
 ) -> Path:

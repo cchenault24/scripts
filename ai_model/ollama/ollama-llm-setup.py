@@ -231,6 +231,17 @@ def main() -> int:
     if rule_path:
         created_files_set.add(rule_path)
     
+    # Step 10b: Generate codebase awareness rules for Agent mode
+    print()
+    try:
+        codebase_rules_path = config.generate_codebase_rules()
+        if codebase_rules_path:
+            created_files_set.add(codebase_rules_path)
+        ui.print_info("Agent mode will use this file to understand your codebase")
+    except Exception as e:
+        ui.print_warning(f"Could not create codebase rules template: {e}")
+        ui.print_warning("You can manually create ~/.continue/rules/codebase-context.md later")
+    
     # Step 11: Generate .continueignore
     print()
     ignore_path = config.generate_continueignore()
@@ -258,7 +269,9 @@ def main() -> int:
     
     # Step 14: Show next steps
     print()
-    ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide)
+    # Check if we have an embedding model for the codebase awareness info
+    has_embedding = any("embed" in m.roles for m in models_for_config)
+    ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide, has_embedding=has_embedding)
     
     # Step 15: Configure auto-start (macOS only)
     import platform

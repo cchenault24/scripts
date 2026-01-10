@@ -2120,7 +2120,13 @@ def validate_model_selection(
     # Check: Always include embedding model
     has_embed = any("embed" in m.roles for m in models)
     if not has_embed:
-        warnings.append("No embedding model selected. Code indexing (@Codebase) will not work.")
+        warnings.append(
+            "⚠️  No embedding model selected:\n"
+            "   • Legacy @Codebase search will NOT work\n"
+            "   • CRITICAL for JetBrains: No transformers.js fallback available\n"
+            "   • Agent mode codebase awareness will still work via rules\n"
+            "   • Recommendation: Add an embedding model for full functionality"
+        )
     
     # Check: Docker resources
     if hw_info.docker_model_runner_available:

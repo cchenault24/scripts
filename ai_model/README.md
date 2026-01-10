@@ -700,6 +700,135 @@ The script automatically backs up existing configs to:
 - `~/.continue/config.json.backup` (if JSON exists)
 - `~/.continue/rules/global-rule.md.backup`
 
+## 🔍 Codebase Awareness: Dual Approach
+
+Continue.dev provides two complementary approaches for understanding your codebase. This setup script configures both:
+
+### 1. Embedding-Based Search (Legacy @Codebase)
+
+**What it does**: Creates vector embeddings of your code for semantic similarity search
+
+**Status**: Deprecated but fully functional in all current versions
+
+**Configuration**: 
+- Embedding model: Automatically selected (e.g., Nomic Embed Text)
+- Context provider: `{"provider": "codebase"}` (auto-configured)
+- Index location: `~/.continue/index/`
+
+**Usage**:
+```
+Type in Continue chat:
+@Codebase find all authentication code
+@Folder explain the structure of /src/api
+```
+
+**Best for**:
+- "Find all code related to X" queries
+- Discovering similar code patterns
+- Quick semantic searches across files
+
+**Important Notes**:
+- ⚠️ **Required for JetBrains**: IntelliJ/PyCharm cannot use the transformers.js fallback
+- 📦 Indexing happens automatically on first use
+- 🔄 Respects `.gitignore` and `.continueignore` files
+
+---
+
+### 2. Agent Mode Codebase Awareness (New & Recommended)
+
+**What it does**: Agent uses built-in tools and rules to understand your project structure
+
+**Status**: Current recommended approach by Continue.dev
+
+**Configuration**: 
+- Rules file: `~/.continue/rules/codebase-context.md` (auto-generated template)
+- No indexing required
+- Works immediately
+
+**Usage**:
+1. Edit `~/.continue/rules/codebase-context.md` with your project details
+2. Use Agent mode for complex tasks
+3. Agent automatically reads rules for context
+
+**Best for**:
+- Complex multi-step tasks
+- Architectural questions
+- Tasks requiring project knowledge
+- Understanding conventions and patterns
+
+**Template Sections**:
+- Project Structure (directories and purposes)
+- Key Technologies (frameworks, libraries)
+- Coding Standards (conventions, style guides)
+- Architecture Patterns (design decisions)
+- Common Tasks (how to perform frequent operations)
+
+---
+
+### 🌟 Best Practice: Use Both Together
+
+The hybrid approach gives you maximum flexibility:
+
+| Scenario | Use This Approach |
+|----------|------------------|
+| "Find all API endpoints" | @Codebase search |
+| "Explain the auth flow" | Agent mode with rules |
+| "Show similar components" | @Codebase search |
+| "Refactor user service" | Agent mode with rules |
+| "Where is JWT validation?" | @Codebase search |
+| "Add new feature X" | Agent mode with rules |
+
+**Quick Start**:
+1. ✅ Embedding model is already configured
+2. ✅ Rules template is already created at `~/.continue/rules/codebase-context.md`
+3. 📝 Edit the rules file with your project info
+4. 🚀 Use both @Codebase and Agent mode as needed
+
+---
+
+### Configuration Details
+
+**Embedding Model** (for @Codebase):
+```json
+{
+  "name": "Nomic Embed Text (Embedding)",
+  "provider": "openai",
+  "model": "nomic-embed-text:latest",
+  "apiBase": "http://localhost:11434/v1",
+  "roles": ["embed"]
+}
+```
+
+**Context Provider**:
+```json
+{
+  "context": [
+    {"provider": "codebase"},
+    {"provider": "folder"}
+  ]
+}
+```
+
+**Rules Locations**:
+- Global behavior: `~/.continue/rules/global-rule.md`
+- Codebase context: `~/.continue/rules/codebase-context.md`
+- Project-specific: `.continue/rules/*.md` (in your project root)
+
+---
+
+### Migration Notes
+
+If you're using older Continue versions:
+- Legacy @Codebase will continue working
+- New Agent mode features are opt-in
+- Both approaches can coexist
+- No breaking changes to your workflow
+
+**Learn More**:
+- [Agent Mode Guide](https://docs.continue.dev/guides/codebase-documentation-awareness)
+- [Embedding Models](https://docs.continue.dev/customize/model-roles/embeddings)
+- [Legacy @Codebase Reference](https://docs.continue.dev/reference/deprecated-codebase)
+
 ## 💻 IDE Support
 
 The setup script supports both VS Code and IntelliJ IDEA with the Continue plugin/extension.

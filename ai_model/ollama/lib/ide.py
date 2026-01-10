@@ -373,16 +373,18 @@ def show_next_steps(
     config_path: Path, 
     model_list: List, 
     hw_info: hardware.HardwareInfo,
-    target_ide: List[str] = ["vscode"]
+    target_ide: List[str] = ["vscode"],
+    has_embedding: bool = True
 ) -> None:
     """
-    Display next steps after setup.
+    Display next steps after setup with information about both codebase awareness approaches.
     
     Args:
         config_path: Path to the generated config file
         model_list: List of configured models (ModelInfo or RecommendedModel)
         hw_info: Hardware information
         target_ide: List of IDEs to configure (e.g., ["vscode"], ["intellij"], or ["vscode", "intellij"])
+        has_embedding: Whether an embedding model was selected
     """
     ui.print_header("✅ Setup Complete!")
     
@@ -403,6 +405,46 @@ def show_next_steps(
         print(f"    • {name} ({roles_str}) - ~{ram_gb}GB")
     print()
     print(f"  Config: {config_path}")
+    print()
+    
+    # Codebase Awareness Section
+    print(ui.colorize("━" * 60, ui.Colors.DIM))
+    print(ui.colorize("📚 Codebase Understanding - Two Approaches:", ui.Colors.BLUE + ui.Colors.BOLD))
+    print()
+    
+    # Approach 1: Legacy @Codebase
+    print(ui.colorize("  1️⃣  Embedding-Based Search (Legacy @Codebase)", ui.Colors.GREEN))
+    if has_embedding:
+        print(ui.colorize("     ✅ Configured with embedding model", ui.Colors.DIM))
+        print(ui.colorize("     📖 Usage: Type @Codebase or @Folder in the chat", ui.Colors.DIM))
+        print(ui.colorize("     💡 Best for: 'Find all code related to authentication'", ui.Colors.DIM))
+        print(ui.colorize("     ⚠️  Status: Deprecated but fully functional", ui.Colors.DIM))
+    else:
+        print(ui.colorize("     ❌ Not available (no embedding model selected)", ui.Colors.YELLOW))
+        print(ui.colorize("     ⚠️  Required for JetBrains IDEs (no fallback)", ui.Colors.YELLOW))
+        if "intellij" in target_ide:
+            print(ui.colorize("     🚨 CRITICAL: Re-run setup and select an embedding model!", ui.Colors.RED))
+    print()
+    
+    # Approach 2: Agent Mode
+    print(ui.colorize("  2️⃣  Agent Mode Codebase Awareness (New & Recommended)", ui.Colors.GREEN))
+    print(ui.colorize("     ✅ Rules template created: ~/.continue/rules/codebase-context.md", ui.Colors.DIM))
+    print(ui.colorize("     📝 Action: Edit this file with your project details", ui.Colors.DIM))
+    print(ui.colorize("     💡 Best for: Complex tasks, architectural changes", ui.Colors.DIM))
+    print(ui.colorize("     🎯 Uses: Built-in AI tools + your project context", ui.Colors.DIM))
+    print()
+    
+    # Combined recommendation
+    print(ui.colorize("  🌟 RECOMMENDED: Use Both Together", ui.Colors.YELLOW))
+    print(ui.colorize("     • Embedding search for quick code discovery", ui.Colors.DIM))
+    print(ui.colorize("     • Agent mode rules for intelligent assistance", ui.Colors.DIM))
+    print(ui.colorize("     • Edit ~/.continue/rules/codebase-context.md now!", ui.Colors.DIM))
+    print()
+    
+    # Documentation links
+    print(ui.colorize("  📖 Documentation:", ui.Colors.DIM))
+    print(ui.colorize("     • Agent Mode: https://docs.continue.dev/guides/codebase-documentation-awareness", ui.Colors.DIM))
+    print(ui.colorize("     • Legacy @Codebase: https://docs.continue.dev/reference/deprecated-codebase", ui.Colors.DIM))
     print()
     
     print(ui.colorize("━" * 60, ui.Colors.DIM))
