@@ -253,7 +253,6 @@ def discover_model_variants(base_model_name: str, hw_info: Optional[hardware.Har
         if code == 0:
             # Parse HTML to find model links
             # Look for href="/library/[model-name]" patterns
-            import re
             pattern = r'href="/library/([^"]+)"'
             found_models = re.findall(pattern, stdout)
             
@@ -291,7 +290,6 @@ def discover_ollama_library_models(query: str = "", limit: int = 50) -> List[Dic
         if code == 0:
             # Parse HTML to find model links
             # Look for href="/library/[model-name]" patterns
-            import re
             pattern = r'href="/library/([^"]+)"'
             found_models = re.findall(pattern, stdout)
             
@@ -3443,6 +3441,9 @@ def select_models(hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
 
 def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareInfo) -> List[ModelInfo]:
     """Pull selected models using Ollama."""
+    # Ensure re module is available in this scope
+    import re as re_module
+    
     # Input validation
     if not model_list:
         ui.print_warning("No models provided to pull")
@@ -3582,7 +3583,7 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                                 # Try to parse Ollama's text progress format
                                 # Format: "pulling <hash>: <percent>% ... <downloaded> <unit>/<total> <unit>"
                                 # Match: "pulling <hash>: <percent>% ... <downloaded> <KB|MB|GB>/<total> <KB|MB|GB>"
-                                ollama_progress_match = re.search(r'pulling\s+\w+:\s*(\d+)%\s+.*?(\d+\.?\d*)\s*(KB|MB|GB)/(\d+\.?\d*)\s*(KB|MB|GB)', line, re.IGNORECASE)
+                                ollama_progress_match = re_module.search(r'pulling\s+\w+:\s*(\d+)%\s+.*?(\d+\.?\d*)\s*(KB|MB|GB)/(\d+\.?\d*)\s*(KB|MB|GB)', line, re_module.IGNORECASE)
                                 if ollama_progress_match:
                                     percent = int(ollama_progress_match.group(1))
                                     downloaded_val = float(ollama_progress_match.group(2))
@@ -3616,8 +3617,8 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                                     if progress_bar and task_id is not None:
                                         progress_bar.update(task_id, completed=downloaded_bytes)
                                 # Try legacy format: "Downloaded X of Y"
-                                elif re.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re.IGNORECASE):
-                                    progress_match = re.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re.IGNORECASE)
+                                elif re_module.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re_module.IGNORECASE):
+                                    progress_match = re_module.search(r'Downloaded\s+([\d.]+)\s*(kB|MB|GB|B)?\s*(?:of|/)\s*([\d.]+)\s*(kB|MB|GB|B)?', line, re_module.IGNORECASE)
                                     downloaded_val = float(progress_match.group(1))
                                     downloaded_unit = (progress_match.group(2) or progress_match.group(4) or "B").upper()
                                     total_val = float(progress_match.group(3))
@@ -3747,9 +3748,8 @@ def pull_models_ollama(model_list: List[ModelInfo], hw_info: hardware.HardwareIn
                     if model_name_simple.lower() in line_lower:
                         # More specific check: the model name should appear as a word (not part of another word)
                         # Check if it's at the start of the line or after whitespace
-                        import re
-                        pattern = rf'\b{re.escape(model_name_simple.lower())}\b'
-                        if re.search(pattern, line_lower):
+                        pattern = rf'\b{re_module.escape(model_name_simple.lower())}\b'
+                        if re_module.search(pattern, line_lower):
                             model_found = True
                             break
             
