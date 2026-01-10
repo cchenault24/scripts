@@ -328,7 +328,8 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
             except subprocess.TimeoutExpired:
                 pass
         return False
-    except Exception:
+    except (OSError, IOError, FileNotFoundError, subprocess.SubprocessError):
+        # Process creation or execution failed
         return False
     finally:
         # Ensure process is cleaned up

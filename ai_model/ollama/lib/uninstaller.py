@@ -138,7 +138,7 @@ def scan_for_orphaned_files(manifest: Dict[str, Any]) -> List[Tuple[Path, str]]:
                     elif status == "maybe":
                         orphaned.append((filepath, "uncertain"))
         
-        except Exception as e:
+        except (OSError, IOError, PermissionError) as e:
             ui.print_warning(f"Error scanning {location}: {e}")
             continue
     
@@ -183,7 +183,8 @@ def check_running_processes(manifest: Dict[str, Any]) -> Dict[str, List[str]]:
                 data = json.loads(response.read())
                 if data.get("models"):
                     running["model_servers"] = [m.get("name", "unknown") for m in data["models"]]
-    except Exception:
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError, TimeoutError):
+        # API not available or returned invalid data - no active models
         pass
     
     return running
@@ -459,7 +460,7 @@ def uninstall_intellij_plugin() -> bool:
                 shutil.rmtree(plugin_path)
                 ui.print_success(f"Removed plugin from {plugin_path.parent.parent.name}")
                 removed_any = True
-        except Exception as e:
+        except (OSError, IOError, PermissionError, shutil.Error) as e:
             ui.print_error(f"Failed to remove {plugin_path}: {e}")
     
     if removed_any:

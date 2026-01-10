@@ -30,6 +30,7 @@ Author: AI-Generated for Local LLM Development
 License: MIT
 """
 
+import subprocess
 import sys
 import os
 from pathlib import Path
@@ -59,7 +60,8 @@ def get_pre_existing_models() -> List[str]:
     """Get list of models that exist before we start pulling."""
     try:
         return validator.get_installed_models()
-    except Exception:
+    except (OSError, IOError, subprocess.SubprocessError):
+        # Ollama not available or command failed
         return []
 
 

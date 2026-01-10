@@ -50,7 +50,7 @@ def load_manifest() -> Optional[Dict[str, Any]]:
     try:
         with open(manifest_path, 'r') as f:
             return json.load(f)
-    except Exception:
+    except (OSError, IOError, json.JSONDecodeError, PermissionError):
         return None
 
 
@@ -293,7 +293,7 @@ def main() -> int:
                     path.unlink()
                 temp_removed += 1
                 ui.print_success(f"Removed: {path.name}")
-        except Exception as e:
+        except (OSError, IOError, PermissionError, shutil.Error) as e:
             ui.print_warning(f"Could not remove {path.name}: {e}")
     
     if temp_removed == 0:
@@ -352,7 +352,7 @@ def main() -> int:
         try:
             manifest_path.unlink()
             ui.print_success("Removed installation manifest")
-        except Exception as e:
+        except (OSError, IOError, PermissionError) as e:
             ui.print_warning(f"Could not remove manifest: {e}")
     
     # Step 9: Summary
