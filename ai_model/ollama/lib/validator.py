@@ -157,13 +157,13 @@ def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> 
     
     # Find alternative from catalog
     if role == ModelRole.EMBED:
-        # Embedding fallbacks
+        # Embedding fallbacks - using widely available models
         fallbacks = [
-            ("mxbai-embed-large:latest", 0.7),
-            ("all-minilm:latest", 0.1),
+            ("all-minilm", 0.1),  # Very small and widely available
+            ("mxbai-embed-large", 0.7),
         ]
         for name, ram in fallbacks:
-            if name != model.ollama_name:
+            if name != model.ollama_name and name not in model.ollama_name:
                 return RecommendedModel(
                     name="Fallback Embedding",
                     ollama_name=name,
@@ -174,13 +174,13 @@ def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> 
                 )
     
     elif role == ModelRole.AUTOCOMPLETE:
-        # Autocomplete fallbacks
+        # Autocomplete fallbacks - using reliable models
         fallbacks = [
+            ("codegemma:2b", 1.5),  # Very reliable Google model
             ("starcoder2:3b", 2.0),
-            ("codegemma:2b", 1.5),
         ]
         for name, ram in fallbacks:
-            if name != model.ollama_name:
+            if name != model.ollama_name and name not in model.ollama_name:
                 return RecommendedModel(
                     name="Fallback Autocomplete",
                     ollama_name=name,
@@ -197,14 +197,14 @@ def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> 
             if option.ollama_name != model.ollama_name:
                 return option
         
-        # If no tier-specific fallback, try general fallbacks
+        # If no tier-specific fallback, try general fallbacks (reliable models)
         fallbacks = [
-            ("granite-code:8b", 5.0),
-            ("granite-code:3b", 2.0),
-            ("codellama:7b", 4.0),
+            ("codellama:7b", 4.0),  # Meta's CodeLlama - very reliable
+            ("qwen2.5-coder:3b", 2.0),  # Smaller Qwen coder
+            ("codegemma:7b", 4.5),  # Google's CodeGemma
         ]
         for name, ram in fallbacks:
-            if name != model.ollama_name:
+            if name != model.ollama_name and name not in model.ollama_name:
                 return RecommendedModel(
                     name="Fallback Coding Model",
                     ollama_name=name,
@@ -237,7 +237,7 @@ def pull_model_with_verification(
         ui.print_info(f"Pulling {model.name} ({model.ollama_name})...")
     
     # Try to pull the model
-    success = _pull_model(model.ollama_name, show_progress)
+    success, error_msg = _pull_model(model.ollama_name, show_progress)
     
     if success:
         # Verify the model exists
@@ -251,9 +251,17 @@ def pull_model_with_verification(
         else:
             if show_progress:
                 ui.print_warning(f"{model.name} pull succeeded but verification failed")
+            error_msg = "Pull appeared to succeed but model not found in Ollama"
     else:
         if show_progress:
-            ui.print_warning(f"Failed to pull {model.name}")
+            ui.print_error(f"Failed to pull {model.name}")
+            if error_msg:
+                # Show truncated error for readability
+                display_error = error_msg[:300] if len(error_msg) > 300 else error_msg
+                ui.print_error(f"  Error: {display_error}")
+    
+    # Store the error for reporting
+    primary_error = error_msg
     
     # Try fallback
     fallback = get_fallback_model(model, tier)
@@ -261,7 +269,7 @@ def pull_model_with_verification(
         if show_progress:
             ui.print_info(f"Trying fallback: {fallback.ollama_name}")
         
-        fallback_success = _pull_model(fallback.ollama_name, show_progress)
+        fallback_success, fallback_error = _pull_model(fallback.ollama_name, show_progress)
         
         if fallback_success:
             time.sleep(VERIFICATION_DELAY)
@@ -273,51 +281,93 @@ def pull_model_with_verification(
                 if show_progress:
                     ui.print_success(f"Fallback {fallback.name} downloaded and verified")
                 return result
+            else:
+                if show_progress:
+                    ui.print_warning(f"Fallback {fallback.name} pull succeeded but verification failed")
+        else:
+            if show_progress:
+                ui.print_error(f"Fallback {fallback.ollama_name} also failed")
+                if fallback_error:
+                    ui.print_error(f"  Error: {fallback_error[:200]}")
     
-    # All attempts failed
-    result.error_message = "Model pull and fallback both failed"
+    # All attempts failed - include detailed error
+    result.error_message = primary_error or "Model pull and fallback both failed"
     return result
 
 
-def _pull_model(model_name: str, show_progress: bool = True) -> bool:
+def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
     """
     Execute ollama pull command.
     
-    Returns True if the command succeeded.
+    Returns:
+        Tuple of (success, error_message):
+        - success: True if the command succeeded
+        - error_message: Error details if failed, empty string if successful
+    
     Ensures proper process cleanup on timeout or error.
     """
     process = None
+    output_lines: List[str] = []
+    
     try:
         if show_progress:
-            # Show live progress
+            # Show live progress with separate stdout/stderr for better error capture
             process = subprocess.Popen(
                 ["ollama", "pull", model_name],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1
             )
             
+            # Read stdout for progress
             if process.stdout:
                 for line in process.stdout:
                     line = line.strip()
                     if line:
+                        output_lines.append(line)
                         # Show progress updates
                         if "pulling" in line.lower() or "%" in line:
                             print(f"    {line}", end="\r")
                         elif "success" in line.lower() or "done" in line.lower():
                             print()
                             ui.print_success(f"    {line}")
+                        elif "error" in line.lower():
+                            print()
+                            ui.print_error(f"    {line}")
+            
+            # Read stderr for errors
+            stderr_output = ""
+            if process.stderr:
+                stderr_output = process.stderr.read()
+                if stderr_output:
+                    output_lines.append(stderr_output)
             
             process.wait(timeout=MODEL_PULL_TIMEOUT)
-            return process.returncode == 0
+            
+            if process.returncode == 0:
+                return True, ""
+            else:
+                # Collect error info
+                error_msg = stderr_output.strip() if stderr_output else ""
+                if not error_msg and output_lines:
+                    # Look for error in output
+                    for line in output_lines:
+                        if "error" in line.lower() or "failed" in line.lower():
+                            error_msg = line
+                            break
+                return False, error_msg or "Unknown error during pull"
         else:
-            # Silent pull
-            code, _, _ = utils.run_command(
+            # Silent pull - capture output
+            code, stdout, stderr = utils.run_command(
                 ["ollama", "pull", model_name],
                 timeout=MODEL_PULL_TIMEOUT
             )
-            return code == 0
+            if code == 0:
+                return True, ""
+            else:
+                error_msg = stderr.strip() if stderr else stdout.strip()
+                return False, error_msg or "Unknown error during pull"
     
     except subprocess.TimeoutExpired:
         # Clean up the process on timeout
@@ -327,10 +377,11 @@ def _pull_model(model_name: str, show_progress: bool = True) -> bool:
                 process.wait(timeout=PROCESS_KILL_TIMEOUT)
             except subprocess.TimeoutExpired:
                 pass
-        return False
-    except (OSError, IOError, FileNotFoundError, subprocess.SubprocessError):
-        # Process creation or execution failed
-        return False
+        return False, f"Timeout after {MODEL_PULL_TIMEOUT}s - model download may be stuck"
+    except FileNotFoundError:
+        return False, "Ollama command not found - is Ollama installed?"
+    except (OSError, IOError, subprocess.SubprocessError) as e:
+        return False, f"Process error: {type(e).__name__}: {e}"
     finally:
         # Ensure process is cleaned up
         if process and process.poll() is None:
@@ -424,9 +475,13 @@ def display_setup_result(result: SetupResult) -> None:
     for model in result.successful_models:
         ui.print_success(f"{model.ollama_name} - Ready to use")
     
-    # Show failed models
+    # Show failed models with error details
     for model, error in result.failed_models:
         ui.print_error(f"{model.ollama_name} - Failed to download")
+        if error:
+            # Show truncated error for readability
+            display_error = error[:150] if len(error) > 150 else error
+            print(ui.colorize(f"    └─ {display_error}", ui.Colors.DIM))
     
     print()
     
@@ -468,6 +523,15 @@ def display_setup_result(result: SetupResult) -> None:
             for issue in not_working:
                 print(ui.colorize(f"⚠ {issue} until missing model is installed.", ui.Colors.YELLOW))
         
+        print()
+    
+    # If complete failure, provide diagnostic guidance
+    if result.complete_failure:
+        print(ui.colorize("Troubleshooting:", ui.Colors.YELLOW + ui.Colors.BOLD))
+        print("  1. Check if Ollama is running: ollama list")
+        print("  2. Test network: ollama search granite")
+        print("  3. Try pulling manually: ollama pull <model-name>")
+        print("  4. If on corporate network, check proxy/SSL settings")
         print()
     
     # Show retry commands for failed models
@@ -537,6 +601,75 @@ def retry_failed_models(
     return new_result
 
 
+def test_ollama_connectivity() -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Comprehensive connectivity test for Ollama model pulling.
+    
+    Tests:
+    1. Local Ollama API is running
+    2. Can reach ollama.com (model registry)
+    3. Can perform a model search (validates registry access)
+    
+    Returns:
+        Tuple of (success, message, details):
+        - success: True if all tests pass
+        - message: Human-readable status message
+        - details: Dict with individual test results
+    """
+    details: Dict[str, Any] = {
+        "ollama_api": False,
+        "registry_reachable": False,
+        "search_works": False,
+        "errors": []
+    }
+    
+    ui.print_info("Testing connectivity...")
+    
+    # Test 1: Local Ollama API
+    try:
+        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT, context=get_unverified_ssl_context()) as response:
+            if response.status == 200:
+                details["ollama_api"] = True
+                ui.print_success("  Local Ollama API is running")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+        details["errors"].append(f"Ollama API: {type(e).__name__}: {e}")
+        ui.print_error("  Local Ollama API is not available")
+        return False, "Ollama is not running. Start Ollama and try again.", details
+    
+    # Test 2: Can reach ollama.com
+    try:
+        req = urllib.request.Request("https://ollama.com")
+        req.add_header("User-Agent", "Ollama-LLM-Setup/2.0")
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT_LONG, context=get_unverified_ssl_context()) as response:
+            if response.status == 200:
+                details["registry_reachable"] = True
+                ui.print_success("  Ollama registry (ollama.com) is reachable")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+        details["errors"].append(f"Registry: {type(e).__name__}: {e}")
+        ui.print_warning("  Cannot reach ollama.com - may be SSL/proxy issue")
+    
+    # Test 3: Try ollama search command
+    code, stdout, stderr = utils.run_command(["ollama", "search", "granite"], timeout=15)
+    if code == 0 and stdout:
+        details["search_works"] = True
+        ui.print_success("  Ollama search is working")
+    else:
+        # Try an alternative test - list existing models
+        code2, stdout2, stderr2 = utils.run_command(["ollama", "list"], timeout=10)
+        if code2 == 0:
+            ui.print_info("  Ollama list works (search may not be available)")
+        else:
+            details["errors"].append(f"Search: exit={code}, stderr={stderr[:100] if stderr else 'none'}")
+            ui.print_warning("  Ollama search/list not working properly")
+    
+    # Determine overall status
+    if not details["registry_reachable"] and not details["search_works"]:
+        return False, "Cannot reach Ollama registry. Check network/proxy settings.", details
+    
+    return True, "Connectivity OK", details
+
+
 def validate_pre_install(
     models: List[RecommendedModel],
     hw_info: hardware.HardwareInfo
@@ -547,13 +680,13 @@ def validate_pre_install(
     Checks:
     - Ollama is installed and running
     - Models fit in available RAM
-    - Network connectivity
+    - Network connectivity (with detailed diagnostics)
     
     Returns: (is_valid, list_of_warnings)
     """
     warnings = []
     
-    # Check Ollama
+    # Check Ollama API
     if not is_ollama_api_available():
         warnings.append("Ollama API is not available. Please ensure Ollama is running.")
     
@@ -573,16 +706,18 @@ def validate_pre_install(
             f"System may be slow. Consider reducing model count."
         )
     
-    # Check network
-    try:
-        req = urllib.request.Request("https://ollama.com")
-        req.add_header("User-Agent", "Ollama-LLM-Setup/1.0")
-        with urllib.request.urlopen(req, timeout=API_TIMEOUT_LONG, context=get_unverified_ssl_context()) as response:
-            pass  # Just checking connectivity
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+    # Comprehensive network connectivity test
+    conn_ok, conn_msg, conn_details = test_ollama_connectivity()
+    
+    if not conn_ok:
+        warnings.append(f"Network issue: {conn_msg}")
+        if conn_details.get("errors"):
+            for err in conn_details["errors"][:3]:  # Show up to 3 errors
+                warnings.append(f"  - {err}")
+    elif not conn_details.get("registry_reachable"):
         warnings.append(
-            "Cannot reach ollama.com. Model downloads may fail. "
-            "Proceed if models are already cached."
+            "Cannot reach ollama.com directly. Model downloads may work via Ollama CLI. "
+            "Proceed if models are already cached or behind proxy."
         )
     
     is_valid = not any("API is not available" in w for w in warnings)

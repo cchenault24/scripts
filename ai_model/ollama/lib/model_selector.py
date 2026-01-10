@@ -78,53 +78,56 @@ class ModelRecommendation:
 # =============================================================================
 
 # Embedding models - universal across all tiers
+# Note: nomic-embed-text is widely available and reliable
 EMBED_MODEL = RecommendedModel(
     name="Nomic Embed Text",
-    ollama_name="nomic-embed-text:latest",
+    ollama_name="nomic-embed-text",
     ram_gb=0.3,
     role=ModelRole.EMBED,
     roles=["embed"],
     description="Best open embedding model for code indexing (8192 tokens)",
-    fallback_name="mxbai-embed-large:latest"
+    fallback_name="all-minilm"
 )
 
 # Autocomplete models by tier
+# Note: Using starcoder2:3b as primary autocomplete - it's proven and reliable
+# Granite-code models may have availability issues in some regions
 AUTOCOMPLETE_MODELS = {
     hardware.HardwareTier.S: RecommendedModel(
-        name="Granite Code 3B",
-        ollama_name="granite-code:3b",
+        name="StarCoder2 3B",
+        ollama_name="starcoder2:3b",
         ram_gb=2.0,
         role=ModelRole.AUTOCOMPLETE,
         roles=["autocomplete", "chat", "edit"],
-        description="Fast autocomplete with IBM Granite",
-        fallback_name="starcoder2:3b"
+        description="Fast autocomplete - optimized for code completion",
+        fallback_name="codegemma:2b"
     ),
     hardware.HardwareTier.A: RecommendedModel(
-        name="Granite Code 3B",
-        ollama_name="granite-code:3b",
+        name="StarCoder2 3B",
+        ollama_name="starcoder2:3b",
         ram_gb=2.0,
         role=ModelRole.AUTOCOMPLETE,
         roles=["autocomplete", "chat", "edit"],
-        description="Fast autocomplete with IBM Granite",
-        fallback_name="starcoder2:3b"
+        description="Fast autocomplete - optimized for code completion",
+        fallback_name="codegemma:2b"
     ),
     hardware.HardwareTier.B: RecommendedModel(
-        name="Granite Code 3B",
-        ollama_name="granite-code:3b",
+        name="StarCoder2 3B",
+        ollama_name="starcoder2:3b",
         ram_gb=2.0,
         role=ModelRole.AUTOCOMPLETE,
         roles=["autocomplete", "chat", "edit"],
-        description="Fast autocomplete with IBM Granite",
-        fallback_name="starcoder2:3b"
+        description="Fast autocomplete - optimized for code completion",
+        fallback_name="codegemma:2b"
     ),
     hardware.HardwareTier.C: RecommendedModel(
-        name="Granite Code 3B",
-        ollama_name="granite-code:3b",
+        name="StarCoder2 3B",
+        ollama_name="starcoder2:3b",
         ram_gb=2.0,
         role=ModelRole.AUTOCOMPLETE,
         roles=["autocomplete", "chat", "edit"],
         description="Fast autocomplete - also serves as primary on 16GB",
-        fallback_name="starcoder2:3b"
+        fallback_name="codegemma:2b"
     ),
 }
 
@@ -196,23 +199,24 @@ PRIMARY_MODELS = {
     ],
     hardware.HardwareTier.C: [
         # Tier C (16-24GB): 3-8B models
+        # Using Qwen2.5 Coder as first choice - very reliable
         RecommendedModel(
-            name="Granite Code 8B",
-            ollama_name="granite-code:8b",
+            name="Qwen2.5 Coder 7B",
+            ollama_name="qwen2.5-coder:7b",
             ram_gb=5.0,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
-            description="IBM's Granite Code - Reliable coding model",
-            fallback_name="granite-code:latest"
+            description="Alibaba's Qwen2.5 Coder 7B - Fast and capable",
+            fallback_name="codellama:7b"
         ),
         RecommendedModel(
-            name="Granite Code 3B",
-            ollama_name="granite-code:3b",
-            ram_gb=2.0,
+            name="DeepSeek Coder V2 Lite",
+            ollama_name="deepseek-coder-v2:lite",
+            ram_gb=3.0,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
-            description="IBM's Granite Code 3B - Compact but capable",
-            fallback_name="codegemma:2b"
+            description="DeepSeek Coder V2 Lite - Good balance of size and quality",
+            fallback_name="starcoder2:3b"
         ),
     ],
 }
