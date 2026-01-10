@@ -132,57 +132,57 @@ AUTOCOMPLETE_MODELS = {
 # These are the "best quality model that safely fits in available RAM"
 PRIMARY_MODELS = {
     hardware.HardwareTier.S: [
-        # Tier S (>64GB): Can run 70B models
-        RecommendedModel(
-            name="Codestral 22B Q5",
-            ollama_name="codestral:22b-v0.1-q5_K_M",
-            ram_gb=17.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="Mistral's Codestral - Best coding model with Q5 quality",
-            fallback_name="codestral:22b"
-        ),
-        RecommendedModel(
-            name="Codestral 22B Q4",
-            ollama_name="codestral:22b-v0.1-q4_K_M",
-            ram_gb=13.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="Mistral's Codestral - Excellent coding model",
-            fallback_name="codestral:22b"
-        ),
-    ],
-    hardware.HardwareTier.A: [
-        # Tier A (32-64GB): 22B models with Q4
+        # Tier S (>64GB): Can run 22B models comfortably
         RecommendedModel(
             name="Codestral 22B",
             ollama_name="codestral:22b",
             ram_gb=13.0,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
-            description="Mistral's Codestral - Excellent code generation",
+            description="Mistral's Codestral - Best open coding model",
             fallback_name="codestral:latest"
         ),
         RecommendedModel(
-            name="Phi-4 14B",
-            ollama_name="phi4:14b",
-            ram_gb=8.0,
+            name="Qwen2.5 Coder 14B",
+            ollama_name="qwen2.5-coder:14b",
+            ram_gb=9.0,
             role=ModelRole.CHAT,
-            roles=["chat", "edit", "agent"],
-            description="Microsoft's Phi-4 - State-of-the-art reasoning",
-            fallback_name="phi4:latest"
+            roles=["chat", "edit", "autocomplete"],
+            description="Alibaba's Qwen2.5 Coder - Excellent code generation",
+            fallback_name="qwen2.5-coder:7b"
+        ),
+    ],
+    hardware.HardwareTier.A: [
+        # Tier A (32-64GB): 14B models with good quality
+        RecommendedModel(
+            name="Qwen2.5 Coder 14B",
+            ollama_name="qwen2.5-coder:14b",
+            ram_gb=9.0,
+            role=ModelRole.CHAT,
+            roles=["chat", "edit", "autocomplete"],
+            description="Alibaba's Qwen2.5 Coder - Excellent code generation",
+            fallback_name="qwen2.5-coder:7b"
+        ),
+        RecommendedModel(
+            name="Codestral 22B",
+            ollama_name="codestral:22b",
+            ram_gb=13.0,
+            role=ModelRole.CHAT,
+            roles=["chat", "edit", "autocomplete"],
+            description="Mistral's Codestral - Best open coding model",
+            fallback_name="codestral:latest"
         ),
     ],
     hardware.HardwareTier.B: [
-        # Tier B (24-32GB): 14B models or smaller 22B quantized
+        # Tier B (24-32GB): 7-8B models
         RecommendedModel(
-            name="Phi-4 14B",
-            ollama_name="phi4:14b",
-            ram_gb=8.0,
+            name="Qwen2.5 Coder 7B",
+            ollama_name="qwen2.5-coder:7b",
+            ram_gb=5.0,
             role=ModelRole.CHAT,
-            roles=["chat", "edit", "agent"],
-            description="Microsoft's Phi-4 - Excellent reasoning for coding",
-            fallback_name="phi4:latest"
+            roles=["chat", "edit", "autocomplete"],
+            description="Alibaba's Qwen2.5 Coder 7B - Fast and capable",
+            fallback_name="granite-code:8b"
         ),
         RecommendedModel(
             name="Granite Code 8B",
@@ -195,7 +195,7 @@ PRIMARY_MODELS = {
         ),
     ],
     hardware.HardwareTier.C: [
-        # Tier C (16-24GB): 8B models or smaller
+        # Tier C (16-24GB): 3-8B models
         RecommendedModel(
             name="Granite Code 8B",
             ollama_name="granite-code:8b",
@@ -218,24 +218,26 @@ PRIMARY_MODELS = {
 }
 
 # Optional reasoning models (for Multi-Model presets)
+# Note: Using "chat" and "edit" roles which are valid in Continue.dev schema
+# The "agent" role is not part of the schema, so we use standard roles
 REASONING_MODELS = {
     hardware.HardwareTier.S: RecommendedModel(
-        name="Phi-4 14B",
-        ollama_name="phi4:14b",
-        ram_gb=8.0,
+        name="Phi-4",
+        ollama_name="phi4:latest",
+        ram_gb=9.0,
         role=ModelRole.CHAT,
-        roles=["chat", "edit", "agent"],
+        roles=["chat", "edit"],
         description="Microsoft's Phi-4 - Reasoning and architecture",
-        fallback_name="phi4:latest"
+        fallback_name="llama3.2:3b"
     ),
     hardware.HardwareTier.A: RecommendedModel(
-        name="Phi-4 14B",
-        ollama_name="phi4:14b",
-        ram_gb=8.0,
+        name="Phi-4",
+        ollama_name="phi4:latest",
+        ram_gb=9.0,
         role=ModelRole.CHAT,
-        roles=["chat", "edit", "agent"],
+        roles=["chat", "edit"],
         description="Microsoft's Phi-4 - Reasoning and architecture",
-        fallback_name="phi4:latest"
+        fallback_name="llama3.2:3b"
     ),
 }
 
@@ -443,9 +445,12 @@ def generate_conservative_recommendation(hw_info: hardware.HardwareInfo) -> Mode
             embeddings=embeddings
         )
     
+    # Don't include autocomplete if it's the same model as primary
+    include_autocomplete = autocomplete.ollama_name != primary.ollama_name
+    
     return ModelRecommendation(
         primary=primary,
-        autocomplete=autocomplete if autocomplete != primary else None,
+        autocomplete=autocomplete if include_autocomplete else None,
         embeddings=embeddings
     )
 
