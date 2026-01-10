@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from . import hardware
-from . import models
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context

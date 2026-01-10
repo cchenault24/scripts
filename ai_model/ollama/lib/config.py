@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from . import hardware
-from . import models
 from . import ui
 
 
@@ -170,7 +169,7 @@ def generate_setup_summary(
 
 
 def save_setup_summary(
-    model_list: List[models.ModelInfo],
+    model_list: List[Any],
     hw_info: hardware.HardwareInfo,
     output_path: Optional[Path] = None
 ) -> Path:
