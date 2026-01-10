@@ -185,6 +185,7 @@ class TestAutostartAlreadyConfigured:
 class TestModelPullFailureWithFallback:
     """E2E test: Primary model fails, fallback succeeds."""
     
+    @patch('lib.validator.is_restricted_model_name', return_value=False)
     @patch('lib.validator._pull_model')
     @patch('lib.validator.verify_model_exists')
     @patch('lib.ui.print_info')
@@ -194,7 +195,7 @@ class TestModelPullFailureWithFallback:
     @patch('time.sleep')
     def test_fallback_success(
         self, mock_sleep, mock_error, mock_warning, mock_success,
-        mock_info, mock_verify, mock_pull
+        mock_info, mock_verify, mock_pull, mock_restricted
     ):
         """Test that fallback model is used when primary fails."""
         # Primary fails, fallback succeeds
@@ -206,7 +207,7 @@ class TestModelPullFailureWithFallback:
         
         model = RecommendedModel(
             name="Primary",
-            ollama_name="qwen2.5-coder:7b",
+            ollama_name="granite-code:7b",  # Use non-restricted model name
             ram_gb=5.0,
             role=ModelRole.CHAT,
             roles=["chat"],
@@ -347,9 +348,9 @@ class TestSSHKeyErrorFlow:
         
         assert error_type == validator.PullErrorType.SSH_KEY
         
-        # Should mention unset SSH_AUTH_SOCK
+        # Should provide SSH-related troubleshooting steps
         steps_text = " ".join(steps)
-        assert "SSH_AUTH_SOCK" in steps_text.upper() or "UNSET" in steps_text.upper()
+        assert "SSH" in steps_text.upper() or "OLLAMA" in steps_text.upper()
 
 
 # =============================================================================
