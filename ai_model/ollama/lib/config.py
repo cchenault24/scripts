@@ -2,16 +2,59 @@
 Continue.dev configuration generation.
 
 Provides functions to generate Continue.dev config.yaml and config.json files.
+Supports both old ModelInfo and new RecommendedModel types.
 """
 
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from . import hardware
 from . import models
 from . import ui
+
+
+def _normalize_model(model: Any) -> Dict[str, Any]:
+    """
+    Normalize a model to a common dictionary format.
+    
+    Supports:
+    - models.ModelInfo (old format)
+    - model_selector.RecommendedModel (new format)
+    
+    Returns:
+        Dictionary with normalized model info
+    """
+    # Try to import RecommendedModel type
+    try:
+        from .model_selector import RecommendedModel
+        if isinstance(model, RecommendedModel):
+            return {
+                "name": model.name,
+                "ollama_name": model.ollama_name,
+                "ram_gb": model.ram_gb,
+                "roles": model.roles,
+                "context_length": 32768,  # Default for RecommendedModel
+            }
+    except ImportError:
+        pass
+    
+    # Handle old ModelInfo format
+    if hasattr(model, 'ollama_name'):
+        return {
+            "name": model.name,
+            "ollama_name": model.ollama_name,
+            "ram_gb": model.ram_gb,
+            "roles": getattr(model, 'roles', ["chat"]),
+            "context_length": getattr(model, 'context_length', 32768),
+        }
+    
+    # Handle dictionary format
+    if isinstance(model, dict):
+        return model
+    
+    raise ValueError(f"Unknown model type: {type(model)}")
 
 
 def format_yaml_value(value: Any) -> str:
@@ -73,32 +116,35 @@ def generate_yaml(config: Dict[str, Any], indent: int = 0) -> str:
 
 
 def generate_setup_summary(
-    model_list: List[models.ModelInfo],
+    model_list: List[Any],
     hw_info: hardware.HardwareInfo
 ) -> Dict[str, Any]:
     """
     Generate setup summary with hardware tier, models, and RAM usage.
     
     Args:
-        model_list: List of selected models
+        model_list: List of selected models (ModelInfo or RecommendedModel)
         hw_info: Hardware information
     
     Returns:
         Dictionary with setup summary
     """
-    total_ram_used = sum(m.ram_gb for m in model_list)
+    # Normalize models
+    normalized_models = [_normalize_model(m) for m in model_list]
+    
+    total_ram_used = sum(m["ram_gb"] for m in normalized_models)
     usable_ram = hw_info.get_estimated_model_memory()
     reserve_ram = usable_ram - total_ram_used
     
     models_summary = []
-    for model in model_list:
+    for model in normalized_models:
         models_summary.append({
-            "name": model.name,
-            "ollama_name": model.ollama_name,
-            "variant": model.selected_variant or "default",
-            "ram_gb": model.ram_gb,
-            "roles": model.roles,
-            "context_length": model.context_length
+            "name": model["name"],
+            "ollama_name": model["ollama_name"],
+            "variant": "default",
+            "ram_gb": model["ram_gb"],
+            "roles": model["roles"],
+            "context_length": model["context_length"]
         })
     
     summary = {
@@ -159,7 +205,7 @@ def save_setup_summary(
 
 
 def generate_continue_config(
-    model_list: List[models.ModelInfo],
+    model_list: List[Any],
     hw_info: hardware.HardwareInfo,
     output_path: Optional[Path] = None,
     target_ide: Optional[List[str]] = None
@@ -168,7 +214,7 @@ def generate_continue_config(
     Generate continue.dev config files.
     
     Args:
-        model_list: List of selected models
+        model_list: List of selected models (ModelInfo or RecommendedModel)
         hw_info: Hardware information
         output_path: Optional output path (default: ~/.continue/config.yaml)
         target_ide: List of IDEs to configure (e.g., ["vscode"], ["intellij"], or ["vscode", "intellij"])
@@ -183,6 +229,9 @@ def generate_continue_config(
         raise ValueError("model_list cannot be empty")
     if not hw_info:
         raise ValueError("hw_info is required")
+    
+    # Normalize all models
+    normalized_models = [_normalize_model(m) for m in model_list]
     
     # Default to VS Code for backward compatibility
     if target_ide is None:
@@ -249,16 +298,16 @@ def generate_continue_config(
         "",
     ]
     
-    # Find models by role
-    chat_models = [m for m in model_list if "chat" in m.roles or "edit" in m.roles]
-    autocomplete_models = [m for m in model_list if "autocomplete" in m.roles]
-    embed_models = [m for m in model_list if "embed" in m.roles]
+    # Find models by role (using normalized models)
+    chat_models = [m for m in normalized_models if "chat" in m["roles"] or "edit" in m["roles"]]
+    autocomplete_models = [m for m in normalized_models if "autocomplete" in m["roles"]]
+    embed_models = [m for m in normalized_models if "embed" in m["roles"]]
     
     # Sort chat models by RAM (largest first = highest quality)
-    chat_models.sort(key=lambda m: m.ram_gb, reverse=True)
+    chat_models.sort(key=lambda m: m["ram_gb"], reverse=True)
     
     # Sort autocomplete models by RAM (smallest first = fastest)
-    autocomplete_models.sort(key=lambda m: m.ram_gb)
+    autocomplete_models.sort(key=lambda m: m["ram_gb"])
     
     # Build models section
     # YAML indentation rules:
@@ -270,10 +319,10 @@ def generate_continue_config(
     yaml_lines.append("models:")
     
     for i, model in enumerate(chat_models):
-        model_id = models.get_model_id_for_continue(model, hw_info)
+        model_id = model["ollama_name"]  # Use ollama_name directly
         # Model list item: 2 spaces before dash, 4 spaces for properties
         yaml_lines.extend([
-            f"  - name: {model.name}",
+            f"  - name: {model['name']}",
             f"    provider: openai",
             f"    model: {model_id}",
             f"    apiBase: {api_base_clean}",
@@ -282,9 +331,9 @@ def generate_continue_config(
         # Add roles (only valid roles per schema: chat, autocomplete, embed, rerank, edit, apply, summarize)
         roles = ["chat", "edit", "apply"]
         # Note: "agent" is not in the schema's role enum, so we don't include it
-        if "autocomplete" in model.roles:
+        if "autocomplete" in model["roles"]:
             roles.append("autocomplete")
-        if "embed" in model.roles:
+        if "embed" in model["roles"]:
             roles.append("embed")
         # Roles property: 4 spaces, nested list items: 6 spaces before dash
         yaml_lines.append("    roles:")
@@ -292,7 +341,7 @@ def generate_continue_config(
             yaml_lines.append(f"      - {role}")
         
         # Add autocompleteOptions if model has autocomplete role
-        if "autocomplete" in model.roles:
+        if "autocomplete" in model["roles"]:
             # autocompleteOptions property: 4 spaces, nested properties: 6 spaces
             yaml_lines.extend([
                 "    autocompleteOptions:",
@@ -304,7 +353,7 @@ def generate_continue_config(
         # defaultCompletionOptions property: 4 spaces, nested properties: 6 spaces
         yaml_lines.extend([
             "    defaultCompletionOptions:",
-            f"      contextLength: {model.context_length}",
+            f"      contextLength: {model['context_length']}",
         ])
         
         # Note: supportsToolCalls is not in the official schema and causes validation errors
@@ -313,11 +362,12 @@ def generate_continue_config(
     
     # Add autocomplete models (with autocompleteOptions)
     # Same indentation rules: 2 spaces before dash, 4 spaces for properties, 6 spaces for nested items
-    autocomplete_only = [m for m in autocomplete_models if m not in chat_models]
+    chat_ollama_names = {m["ollama_name"] for m in chat_models}
+    autocomplete_only = [m for m in autocomplete_models if m["ollama_name"] not in chat_ollama_names]
     for model in autocomplete_only:
-        model_id = models.get_model_id_for_continue(model, hw_info)
+        model_id = model["ollama_name"]
         yaml_lines.extend([
-            f"  - name: {model.name} (Autocomplete)",
+            f"  - name: {model['name']} (Autocomplete)",
             f"    provider: openai",
             f"    model: {model_id}",
             f"    apiBase: {api_base_clean}",
@@ -327,24 +377,25 @@ def generate_continue_config(
             "      debounceDelay: 300",
             "      modelTimeout: 3000",
             "    defaultCompletionOptions:",
-            f"      contextLength: {model.context_length}",
+            f"      contextLength: {model['context_length']}",
             "",
         ])
     
     # Add embedding models (if different from chat and autocomplete models)
     # Same indentation rules: 2 spaces before dash, 4 spaces for properties, 6 spaces for nested items
-    embed_only = [m for m in embed_models if m not in chat_models and m not in autocomplete_models]
+    auto_ollama_names = {m["ollama_name"] for m in autocomplete_models}
+    embed_only = [m for m in embed_models if m["ollama_name"] not in chat_ollama_names and m["ollama_name"] not in auto_ollama_names]
     for model in embed_only:
-        model_id = models.get_model_id_for_continue(model, hw_info)
+        model_id = model["ollama_name"]
         yaml_lines.extend([
-            f"  - name: {model.name} (Embedding)",
+            f"  - name: {model['name']} (Embedding)",
             f"    provider: openai",
             f"    model: {model_id}",
             f"    apiBase: {api_base_clean}",
             "    roles:",
             "      - embed",
             "    defaultCompletionOptions:",
-            f"      contextLength: {model.context_length}",
+            f"      contextLength: {model['context_length']}",
             "",
         ])
     
@@ -406,28 +457,28 @@ def generate_continue_config(
     }
     
     for model in chat_models:
-        model_id = models.get_model_id_for_continue(model, hw_info)
+        model_id = model["ollama_name"]
         # Only valid roles per schema: chat, autocomplete, embed, rerank, edit, apply, summarize
         # Note: "agent" is not in the schema's role enum, so we don't include it
         roles = ["chat", "edit", "apply"]
-        if "autocomplete" in model.roles:
+        if "autocomplete" in model["roles"]:
             roles.append("autocomplete")
-        if "embed" in model.roles:
+        if "embed" in model["roles"]:
             roles.append("embed")
         
         model_config = {
-            "name": model.name,
+            "name": model["name"],
             "provider": "openai",
             "model": model_id,
             "apiBase": api_base_clean,
             "defaultCompletionOptions": {
-                "contextLength": model.context_length,
+                "contextLength": model["context_length"],
             },
             "roles": roles,
         }
         
         # Add autocompleteOptions if model has autocomplete role
-        if "autocomplete" in model.roles:
+        if "autocomplete" in model["roles"]:
             model_config["autocompleteOptions"] = {
                 "debounceDelay": 300,
                 "modelTimeout": 3000,
@@ -436,9 +487,9 @@ def generate_continue_config(
         json_config["models"].append(model_config)
     
     for model in autocomplete_only:
-        model_id = models.get_model_id_for_continue(model, hw_info)
+        model_id = model["ollama_name"]
         json_config["models"].append({
-            "name": f"{model.name} (Autocomplete)",
+            "name": f"{model['name']} (Autocomplete)",
             "provider": "openai", 
             "model": model_id,
             "apiBase": api_base_clean,
@@ -448,22 +499,21 @@ def generate_continue_config(
                 "modelTimeout": 3000,
             },
             "defaultCompletionOptions": {
-                "contextLength": model.context_length,
+                "contextLength": model["context_length"],
             },
         })
     
-    # Add embedding models
-    embed_only = [m for m in embed_models if m not in chat_models and m not in autocomplete_models]
+    # Add embedding models (already filtered above in YAML section)
     for model in embed_only:
-        model_id = models.get_model_id_for_continue(model, hw_info)
+        model_id = model["ollama_name"]
         json_config["models"].append({
-            "name": f"{model.name} (Embedding)",
+            "name": f"{model['name']} (Embedding)",
             "provider": "openai",
             "model": model_id,
             "apiBase": api_base_clean,
             "roles": ["embed"],
             "defaultCompletionOptions": {
-                "contextLength": model.context_length,
+                "contextLength": model["context_length"],
             },
         })
     

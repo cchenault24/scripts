@@ -1,10 +1,14 @@
 """
-IDE integration functionality for VS Code and IntelliJ IDEA.
+IDE integration functionality for VS Code, Cursor, and IntelliJ IDEA.
 
-Provides functions to install extensions/plugins, restart IDEs, and display next steps
-for both VS Code (Continue.dev extension) and IntelliJ IDEA (Continue plugin).
+Provides functions to:
+- Auto-detect installed IDEs (VS Code, Cursor, IntelliJ IDEA)
+- Install extensions/plugins
+- Restart IDEs
+- Display next steps
 """
 
+import os
 import platform
 import shutil
 import subprocess
@@ -12,13 +16,186 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from . import hardware
 from . import models
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
+
+
+# =============================================================================
+# IDE AUTO-DETECTION
+# =============================================================================
+
+def detect_installed_ides() -> List[str]:
+    """
+    Auto-detect installed IDEs that support Continue.dev.
+    
+    Scans for:
+    - VS Code (Visual Studio Code)
+    - Cursor
+    - IntelliJ IDEA (Community and Ultimate)
+    
+    Returns:
+        List of installed IDE names
+    """
+    installed = []
+    
+    # Check VS Code
+    if is_vscode_installed():
+        installed.append("VS Code")
+    
+    # Check Cursor
+    if is_cursor_installed():
+        installed.append("Cursor")
+    
+    # Check IntelliJ IDEA
+    if is_intellij_installed():
+        installed.append("IntelliJ IDEA")
+    
+    return installed
+
+
+def is_vscode_installed() -> bool:
+    """Check if VS Code is installed."""
+    # Check CLI in PATH
+    if shutil.which("code"):
+        return True
+    
+    # Check common installation paths
+    if platform.system() == "Darwin":
+        app_paths = [
+            Path("/Applications/Visual Studio Code.app"),
+            Path.home() / "Applications/Visual Studio Code.app",
+        ]
+        for path in app_paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Linux":
+        paths = [
+            Path("/usr/bin/code"),
+            Path("/usr/share/code"),
+            Path.home() / ".local/share/applications/code.desktop",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Windows":
+        paths = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Microsoft VS Code/Code.exe",
+            Path("C:/Program Files/Microsoft VS Code/Code.exe"),
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    
+    return False
+
+
+def is_cursor_installed() -> bool:
+    """Check if Cursor IDE is installed."""
+    # Check CLI in PATH
+    if shutil.which("cursor"):
+        return True
+    
+    # Check common installation paths
+    if platform.system() == "Darwin":
+        app_paths = [
+            Path("/Applications/Cursor.app"),
+            Path.home() / "Applications/Cursor.app",
+        ]
+        for path in app_paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Linux":
+        paths = [
+            Path("/usr/bin/cursor"),
+            Path.home() / ".local/share/applications/cursor.desktop",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Windows":
+        paths = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Cursor/Cursor.exe",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    
+    return False
+
+
+def is_intellij_installed() -> bool:
+    """Check if IntelliJ IDEA is installed."""
+    # Check CLI in PATH
+    if shutil.which("idea"):
+        return True
+    
+    # Check common installation paths
+    if platform.system() == "Darwin":
+        app_paths = [
+            Path("/Applications/IntelliJ IDEA.app"),
+            Path("/Applications/IntelliJ IDEA Ultimate.app"),
+            Path("/Applications/IntelliJ IDEA Community Edition.app"),
+        ]
+        for path in app_paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Linux":
+        paths = [
+            Path("/usr/local/bin/idea"),
+            Path("/opt/idea"),
+            Path.home() / ".local/share/JetBrains/Toolbox/scripts/idea",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Windows":
+        paths = [
+            Path("C:/Program Files/JetBrains/IntelliJ IDEA/bin/idea64.exe"),
+            Path(os.environ.get("LOCALAPPDATA", "")) / "JetBrains/Toolbox/scripts/idea.bat",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    
+    return False
+
+
+def get_ide_info() -> Dict[str, bool]:
+    """
+    Get detailed information about installed IDEs.
+    
+    Returns:
+        Dictionary mapping IDE names to installation status
+    """
+    return {
+        "vscode": is_vscode_installed(),
+        "cursor": is_cursor_installed(),
+        "intellij": is_intellij_installed(),
+    }
+
+
+def display_detected_ides() -> List[str]:
+    """
+    Detect and display installed IDEs.
+    
+    Returns:
+        List of installed IDE names
+    """
+    installed = detect_installed_ides()
+    
+    if installed:
+        ide_str = ", ".join(installed)
+        ui.print_success(f"Detected IDEs: {ide_str}")
+    else:
+        ui.print_warning("No supported IDEs detected")
+        ui.print_info("Continue.dev supports: VS Code, Cursor, IntelliJ IDEA")
+    
+    return installed
 
 
 def install_vscode_extension(extension_id: str) -> bool:
@@ -184,9 +361,18 @@ def start_model_server(model_name: str) -> Optional[subprocess.Popen]:
     return None
 
 
+def _get_model_attr(model, attr: str, default=None):
+    """Get attribute from model, supporting both object and dict access."""
+    if hasattr(model, attr):
+        return getattr(model, attr)
+    elif isinstance(model, dict) and attr in model:
+        return model[attr]
+    return default
+
+
 def show_next_steps(
     config_path: Path, 
-    model_list: List[models.ModelInfo], 
+    model_list: List, 
     hw_info: hardware.HardwareInfo,
     target_ide: List[str] = ["vscode"]
 ) -> None:
@@ -195,7 +381,7 @@ def show_next_steps(
     
     Args:
         config_path: Path to the generated config file
-        model_list: List of configured models
+        model_list: List of configured models (ModelInfo or RecommendedModel)
         hw_info: Hardware information
         target_ide: List of IDEs to configure (e.g., ["vscode"], ["intellij"], or ["vscode", "intellij"])
     """
@@ -211,8 +397,11 @@ def show_next_steps(
     print()
     print(f"  Models Configured: {len(model_list)}")
     for model in model_list:
-        roles_str = ", ".join(model.roles)
-        print(f"    • {model.name} ({roles_str}) - ~{model.ram_gb}GB")
+        roles = _get_model_attr(model, 'roles', [])
+        roles_str = ", ".join(roles) if roles else "general"
+        name = _get_model_attr(model, 'name', 'Unknown')
+        ram_gb = _get_model_attr(model, 'ram_gb', 0)
+        print(f"    • {name} ({roles_str}) - ~{ram_gb}GB")
     print()
     print(f"  Config: {config_path}")
     print()
@@ -310,16 +499,17 @@ def show_next_steps(
         step += 1
         
         # Run a model if needed
-        chat_models = [m for m in model_list if "chat" in m.roles]
+        chat_models = [m for m in model_list if "chat" in _get_model_attr(m, 'roles', [])]
         if chat_models:
             print(f"  {step}. Start the model server (if not already running):")
             
             # Use Ollama model name directly (no conversion needed)
-            model_to_run = chat_models[0].ollama_name
+            model_to_run = _get_model_attr(chat_models[0], 'ollama_name', '')
             # If model has a variant, include it
-            if chat_models[0].selected_variant:
+            selected_variant = _get_model_attr(chat_models[0], 'selected_variant', None)
+            if selected_variant:
                 if ":" not in model_to_run:
-                    model_to_run = f"{model_to_run}:{chat_models[0].selected_variant}"
+                    model_to_run = f"{model_to_run}:{selected_variant}"
             
             # Check if API is already running
             api_running = False
@@ -358,7 +548,8 @@ def show_next_steps(
         
         print(f"  {step}. Pull the models:")
         for model in model_list:
-            print(ui.colorize(f"     ollama pull {model.ollama_name}", ui.Colors.CYAN))
+            ollama_name = _get_model_attr(model, 'ollama_name', '')
+            print(ui.colorize(f"     ollama pull {ollama_name}", ui.Colors.CYAN))
         print()
         step += 1
     
@@ -489,9 +680,10 @@ def show_next_steps(
     print()
     print("  Run a model interactively:")
     if model_list:
-        model_name = model_list[0].ollama_name
-        if model_list[0].selected_variant and ":" not in model_name:
-            model_name = f"{model_name}:{model_list[0].selected_variant}"
+        model_name = _get_model_attr(model_list[0], 'ollama_name', '')
+        selected_variant = _get_model_attr(model_list[0], 'selected_variant', None)
+        if selected_variant and ":" not in model_name:
+            model_name = f"{model_name}:{selected_variant}"
         print(ui.colorize(f"     ollama run {model_name}", ui.Colors.CYAN))
     else:
         print(ui.colorize("     ollama run <model-name>", ui.Colors.CYAN))

@@ -52,13 +52,15 @@ class HardwareInfo:
     usable_ram_gb: float = 0.0  # Calculated usable RAM after OS overhead
     
     def get_tier_label(self) -> str:
-        """Get human-readable tier label."""
+        """Get human-readable tier label with tier-based reservation info."""
         usable = self.get_estimated_model_memory()
+        reservation = int(self.get_tier_ram_reservation() * 100)
+        usable_percent = 100 - reservation
         labels = {
-            HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
-            HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
-            HardwareTier.B: f"Tier B (>24-32GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
-            HardwareTier.C: f"Tier C (16-24GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable for models",
+            HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
+            HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
+            HardwareTier.B: f"Tier B (24-32GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
+            HardwareTier.C: f"Tier C (16-24GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
             HardwareTier.D: f"Tier D (<16GB RAM) - {self.ram_gb:.1f}GB total (UNSUPPORTED - minimum 16GB required)",
         }
         return labels.get(self.tier, "Unknown")
@@ -77,23 +79,48 @@ class HardwareInfo:
         
         return " | ".join(info_parts)
     
+    def get_tier_ram_reservation(self) -> float:
+        """
+        Get tier-based RAM reservation percentage.
+        
+        Variable reservation based on system RAM:
+        - Tier C (16-24GB): Reserve 40% for OS/apps (limited RAM, need more buffer)
+        - Tier B (24-32GB): Reserve 35% for OS/apps
+        - Tier A/S (32GB+): Reserve 30% for OS/apps (more headroom)
+        
+        Returns:
+            Reservation percentage as a float (e.g., 0.40 for 40%)
+        """
+        reservations = {
+            HardwareTier.S: 0.30,  # 30% reserved, 70% for models
+            HardwareTier.A: 0.30,  # 30% reserved, 70% for models
+            HardwareTier.B: 0.35,  # 35% reserved, 65% for models
+            HardwareTier.C: 0.40,  # 40% reserved, 60% for models
+            HardwareTier.D: 0.50,  # 50% reserved (unsupported tier)
+        }
+        return reservations.get(self.tier, 0.40)
+    
     def calculate_os_overhead(self) -> float:
         """
-        Calculate OS overhead based on total RAM.
-        Uses 30% of total RAM for macOS, apps, browser, IDE, and model context/KV cache.
-        This is more realistic than the previous 10-15% reservation.
+        Calculate OS overhead based on tier-based RAM reservation.
+        
+        Uses variable reservation:
+        - Tier C (16-24GB): 40% for OS/apps
+        - Tier B (24-32GB): 35% for OS/apps
+        - Tier A/S (32GB+): 30% for OS/apps
         """
-        return self.ram_gb * 0.30
+        return self.ram_gb * self.get_tier_ram_reservation()
     
     def get_estimated_model_memory(self) -> float:
         """
         Get estimated memory available for models.
-        Reserves 30% of total RAM for macOS, apps, browser, and IDE overhead.
-        This is more realistic than the previous 10-15% reservation.
         
-        Formula: usable_ram = total_ram * 0.70
+        Uses tier-based RAM reservation:
+        - Tier C (16-24GB): 60% for models (40% reserved)
+        - Tier B (24-32GB): 65% for models (35% reserved)
+        - Tier A/S (32GB+): 70% for models (30% reserved)
         
-        Breakdown of 30% overhead:
+        Breakdown of overhead:
         - macOS system: 4-6GB
         - VS Code/IntelliJ: 2-4GB  
         - Browser (Chrome/Safari): 3-6GB
@@ -105,8 +132,8 @@ class HardwareInfo:
         if self.usable_ram_gb > 0:
             return self.usable_ram_gb
         
-        # Reserve 30% for macOS + apps (more realistic than previous 10-15%)
-        reserved_percent = 0.30
+        # Use tier-based reservation
+        reserved_percent = self.get_tier_ram_reservation()
         usable_ram = self.ram_gb * (1 - reserved_percent)
         
         # For discrete GPU systems, use VRAM if available and larger
@@ -330,11 +357,8 @@ def detect_hardware() -> HardwareInfo:
         ui.print_error("Please upgrade your hardware to at least 16GB RAM")
         raise SystemExit("Hardware requirements not met: Minimum 16GB RAM required")
     
-    # Calculate usable RAM (70% of total, 30% reserved for macOS/apps)
-    info.usable_ram_gb = info.get_estimated_model_memory()
-    
-    # Classify tier based on total RAM
-    # Updated tier system: S (>64GB), A (32-64GB), B (>24-32GB), C (16-24GB), D (<16GB - unsupported)
+    # Classify tier based on total RAM (MUST happen before usable_ram_gb calculation)
+    # Tier system: S (>64GB), A (32-64GB), B (24-32GB), C (16-24GB), D (<16GB - unsupported)
     if info.ram_gb > 64:
         info.tier = HardwareTier.S
     elif info.ram_gb >= 32:
@@ -346,6 +370,9 @@ def detect_hardware() -> HardwareInfo:
     else:
         # This should never be reached due to validation above, but kept for safety
         info.tier = HardwareTier.D
+    
+    # Calculate usable RAM using tier-based reservation (after tier classification)
+    info.usable_ram_gb = info.get_estimated_model_memory()
     
     # Print detected hardware
     if info.os_name == "Darwin" and info.macos_version:

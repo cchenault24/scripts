@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-Ollama + Continue.dev Setup Script
+Ollama + Continue.dev Setup Script (v2.0)
 
 An interactive Python script that helps you set up a locally hosted LLM
 via Ollama and generates a continue.dev config.yaml for VS Code.
+
+NEW in v2.0:
+- Smart model recommendations that fit your RAM
+- Tier-based RAM reservation (40%/35%/30%)
+- Single "best recommendation" approach with [Accept]/[Customize]
+- Reliable model pulling with verification and fallbacks
+- Auto-detection of installed IDEs
 
 Optimized for Mac with Apple Silicon (M1/M2/M3/M4) using Ollama.
 
@@ -36,55 +43,56 @@ ollama_dir_str = str(ollama_dir)
 if ollama_dir_str not in sys.path:
     sys.path.insert(0, ollama_dir_str)
 
-# Import from lib modules (from ollama/lib/)
+# Import from lib modules
 from lib import config
 from lib import ollama
 from lib import hardware
 from lib import ide
-from lib import models
 from lib import ui
+from lib import model_selector
+from lib import validator
 
 
 def main() -> int:
-    """Main entry point."""
+    """Main entry point with new smart recommendation flow."""
     ui.clear_screen()
     
-    ui.print_header("🚀 Ollama + Continue.dev Setup")
-    ui.print_info("This script will help you set up a locally hosted LLM")
-    ui.print_info("via Ollama and configure Continue.dev for VS Code and IntelliJ IDEA.")
+    ui.print_header("🚀 Ollama + Continue.dev Setup v2.0")
+    ui.print_info("Smart model recommendations that fit your hardware")
+    ui.print_info("Powered by Continue.dev + Ollama")
     print()
     
     if not ui.prompt_yes_no("Ready to begin setup?", default=True):
         ui.print_info("Setup cancelled. Run again when ready!")
         return 0
     
-    # Install rich in background for better progress bars (non-blocking)
-    models._install_rich_background()
-    
     # Step 1: Hardware detection
     print()
     hw_info = hardware.detect_hardware()
     
-    # Step 2: IDE selection
+    # Step 2: Auto-detect installed IDEs
     print()
-    ui.print_subheader("IDE Selection")
-    ide_choices = ["VS Code only", "IntelliJ only", "Both"]
-    ide_choice_idx = ui.prompt_choice("Which IDE(s) do you want to configure?", ide_choices, default=2)
+    ui.print_subheader("Detecting Installed IDEs")
+    installed_ides = ide.detect_installed_ides()
     
-    # Map choice to target_ide list
-    if ide_choice_idx == 0:
+    if installed_ides:
+        ide_str = ", ".join(installed_ides)
+        ui.print_success(f"Found: {ide_str}")
+    else:
+        ui.print_warning("No supported IDEs detected")
+        ui.print_info("Continue.dev supports: VS Code, Cursor, IntelliJ IDEA")
+    
+    # Map detected IDEs to target_ide list
+    target_ide = []
+    if "VS Code" in installed_ides or "Cursor" in installed_ides:
+        target_ide.append("vscode")
+    if "IntelliJ IDEA" in installed_ides:
+        target_ide.append("intellij")
+    
+    # Default to vscode if no IDEs detected
+    if not target_ide:
         target_ide = ["vscode"]
-    elif ide_choice_idx == 1:
-        target_ide = ["intellij"]
-    else:  # Both
-        target_ide = ["vscode", "intellij"]
-    
-    ide_names = []
-    if "vscode" in target_ide:
-        ide_names.append("VS Code")
-    if "intellij" in target_ide:
-        ide_names.append("IntelliJ IDEA")
-    ui.print_success(f"Selected: {', '.join(ide_names)}")
+        ui.print_info("Defaulting to VS Code configuration")
     
     # Step 3: Check Ollama (with automatic installation prompt)
     print()
@@ -106,44 +114,18 @@ def main() -> int:
         ui.print_info("Please ensure Ollama service is running.")
         return 1
     
-    # Step 5: Preset selection
+    # Step 5: Smart model selection (new approach)
     print()
-    preset = models.select_preset(hw_info)
-    
-    # Step 6: Model selection
-    print()
-    if preset and preset != "Custom":
-        # Get portfolio option based on preset
-        ui.print_info(f"Generating {preset} portfolio recommendation...")
-        selected_models = models.get_portfolio_option_by_preset(hw_info, preset)
-        
-        if not selected_models:
-            ui.print_warning("Could not generate portfolio recommendation. Falling back to manual selection.")
-            selected_models = models.select_models(hw_info)
-        else:
-            # Display what was selected
-            options = models.generate_portfolio_options(hw_info)
-            for option_name, models_list, _ in options:
-                if models_list == selected_models:
-                    ui.print_success(f"Selected {preset} preset: {option_name}")
-                    break
-            print()
-    else:
-        # Custom selection - show all options
-        selected_models = models.select_models(hw_info)
+    selected_models = model_selector.select_models_smart(hw_info, installed_ides)
     
     if not selected_models:
         ui.print_error("No models selected. Aborting setup.")
         return 1
     
-    # Step 7: Display RAM usage
+    # Step 6: Pre-install validation
     print()
-    models.display_ram_usage(selected_models, hw_info)
-    
-    # Step 8: Validate selection
-    print()
-    ui.print_subheader("Safety Validation")
-    is_valid, warnings = models.validate_model_selection(selected_models, hw_info)
+    ui.print_subheader("Pre-Installation Validation")
+    is_valid, warnings = validator.validate_pre_install(selected_models, hw_info)
     
     if warnings:
         for warning in warnings:
@@ -151,50 +133,82 @@ def main() -> int:
         print()
     
     if not is_valid:
-        ui.print_error("Validation failed. Please adjust your model selection.")
+        ui.print_error("Validation failed. Please check warnings above.")
         if not ui.prompt_yes_no("Continue anyway? (Not recommended)", default=False):
             ui.print_info("Setup cancelled.")
             return 0
+    else:
+        ui.print_success("Validation passed")
     
-    # Step 9: Confirm selection
+    # Step 7: Confirm selection
     print()
     ui.print_subheader("Configuration Summary")
     total_ram = sum(m.ram_gb for m in selected_models)
+    usable_ram = model_selector.get_usable_ram(hw_info)
+    buffer = usable_ram - total_ram
+    
     print(f"  Selected {len(selected_models)} model(s):")
     for model in selected_models:
-        variant_info = f" ({model.selected_variant})" if model.selected_variant else ""
-        print(f"    • {model.name}{variant_info} (~{model.ram_gb:.1f}GB RAM)")
-    print(f"  Total estimated RAM: ~{total_ram:.1f}GB")
-    print(f"  Target IDE(s): {', '.join(ide_names)}")
+        roles_str = ", ".join(model.roles)
+        print(f"    • {model.ollama_name} (~{model.ram_gb:.1f}GB RAM) - {roles_str}")
+    print(f"  Total RAM: ~{total_ram:.1f}GB / {usable_ram:.1f}GB usable ({buffer:.1f}GB buffer)")
+    print(f"  Target IDE(s): {', '.join([i for i in installed_ides] if installed_ides else ['VS Code'])}")
     print()
     
     if not ui.prompt_yes_no("Proceed with this configuration?", default=True):
         ui.print_info("Setup cancelled. Run again to reconfigure.")
         return 0
     
-    # Step 10: Pull models
+    # Step 8: Pull models with verification
     print()
-    pulled_models = models.pull_models_ollama(selected_models, hw_info)
+    setup_result = validator.pull_models_with_tracking(selected_models, hw_info)
     
-    # Step 11: Generate config
+    # Display setup result with actionable feedback
+    validator.display_setup_result(setup_result)
+    
+    # Handle partial or complete failure
+    if setup_result.complete_failure:
+        ui.print_error("No models were installed. Please check your network connection.")
+        return 1
+    
+    # Prompt for next action if there were failures
+    if setup_result.failed_models:
+        action = validator.prompt_setup_action(setup_result)
+        
+        if action == "retry":
+            # Retry failed models
+            setup_result = validator.retry_failed_models(setup_result, hw_info)
+            validator.display_setup_result(setup_result)
+        elif action == "exit":
+            ui.print_info("Exiting. You can retry later with 'ollama pull <model>'")
+            return 1
+    
+    # Use successfully installed models for config
+    models_for_config = setup_result.successful_models
+    
+    if not models_for_config:
+        ui.print_error("No models available for configuration.")
+        return 1
+    
+    # Step 9: Generate config
     print()
-    config_path = config.generate_continue_config(pulled_models, hw_info, target_ide=target_ide)
+    config_path = config.generate_continue_config(models_for_config, hw_info, target_ide=target_ide)
     
-    # Step 12: Generate global-rule.md
+    # Step 10: Generate global-rule.md
     print()
     rule_path = config.generate_global_rule()
     
-    # Step 13: Generate .continueignore
+    # Step 11: Generate .continueignore
     print()
     ignore_path = config.generate_continueignore()
     
-    # Step 14: Save setup summary
+    # Step 12: Save setup summary
     print()
-    summary_path = config.save_setup_summary(pulled_models, hw_info)
+    summary_path = config.save_setup_summary(models_for_config, hw_info)
     
-    # Step 15: Show next steps
+    # Step 13: Show next steps
     print()
-    ide.show_next_steps(config_path, pulled_models, hw_info, target_ide=target_ide)
+    ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide)
     
     return 0
 

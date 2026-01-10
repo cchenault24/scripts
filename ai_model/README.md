@@ -69,7 +69,16 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 - **VS Code Integration**: Optional automatic extension installation and setup
 - **IntelliJ IDEA Support**: Full support for IntelliJ IDEA with Continue plugin
 
-### Advanced Features
+### Advanced Features (Ollama v4.0)
+
+- **Smart Model Recommendations**: Automatically selects the highest quality models that fit your RAM
+- **Tier-Based RAM Reservation**: Variable overhead (40%/35%/30%) based on hardware tier
+- **Two-Level Customization**: Role swapping (Level 1) and optional model adding (Level 2)
+- **Reliable Model Pulling**: Verification after each pull with automatic fallback on failure
+- **IDE Auto-Detection**: Automatically finds VS Code, Cursor, and IntelliJ IDEA
+- **Retry Mechanism**: Re-attempt failed model installations with one command
+
+### Advanced Features (Both Backends)
 
 - **Variant Discovery**: Automatically discovers and selects optimal model variants (quantization levels)
 - **RAM Validation**: Validates model selections against available system memory
@@ -184,18 +193,39 @@ The script will:
 6. Generate global rules file
 7. Provide next steps
 
-### Preset Selection
+### Preset Selection (Docker)
 
-The script offers presets based on your hardware tier:
+The Docker script offers presets based on your hardware tier:
 - **Tier S** (>64GB RAM): Large models for complex tasks
 - **Tier A** (32-64GB RAM): High-quality models
 - **Tier B** (>24-32GB RAM): Balanced models
 - **Tier C** (16-24GB RAM): Efficient models
 - **Tier D** (<16GB RAM): Unsupported - minimum 16GB RAM required
 
-### Custom Selection
-
 Choose "Custom" preset to manually select models based on your needs.
+
+### Smart Recommendations (Ollama v4.0)
+
+The Ollama script uses intelligent recommendations:
+- **Automatic portfolio**: Best models for your exact RAM, no questions asked
+- **Coding-focused**: Prioritizes models optimized for code assistance
+- **Balanced setup**: All-rounder chat + fast autocomplete + embeddings
+- **Two-level customization**:
+  - Level 1: Swap roles (e.g., pick a different chat model)
+  - Level 2: Add optional models (reasoning, vision)
+
+Example recommendation for 32GB RAM (Tier A):
+```
+┌─────────────────────────────────────────────────────────┐
+│  RECOMMENDED SETUP FOR YOUR SYSTEM                       │
+│                                                          │
+│  Primary (Chat/Edit):  qwen2.5-coder:14b     ~8.5 GB    │
+│  Autocomplete:         granite-code:3b        ~2.0 GB    │
+│  Embeddings:           nomic-embed-text       ~0.3 GB    │
+│                                                          │
+│  Total RAM usage: ~10.8 GB (48% of 22.4 GB usable)      │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## 📖 Usage
 
@@ -215,10 +245,10 @@ cd ai_model
 python3 ollama/ollama-llm-setup.py
 ```
 
-**Interactive Flow (both options):**
+**Interactive Flow (Docker):**
 1. Hardware detection
 2. IDE selection (VS Code, IntelliJ IDEA, or Both)
-3. Backend verification (Docker Model Runner or Ollama)
+3. Backend verification (Docker Model Runner)
 4. API check
 5. Preset selection (or Custom)
 6. Model selection (with recommendations)
@@ -227,6 +257,23 @@ python3 ollama/ollama-llm-setup.py
 9. Configuration generation
 10. Global rules generation
 11. Next steps display
+
+**Interactive Flow (Ollama v4.0 - Smart Recommendations):**
+1. Hardware detection and tier classification
+2. IDE auto-detection (VS Code, Cursor, IntelliJ IDEA)
+3. Ollama service verification
+4. API check
+5. **Smart recommendation display** - shows optimal portfolio for your hardware
+6. **Accept or Customize decision**:
+   - Accept: Proceed with recommended models
+   - Customize Level 1: Swap individual model roles (2-3 alternatives each)
+   - Customize Level 2: Add optional reasoning/vision models
+7. Pre-installation validation (RAM, network, API)
+8. Model pulling with verification and automatic fallback
+9. Setup result display (success/failures with retry options)
+10. Configuration generation
+11. Global rules generation
+12. Next steps display
 
 ### Uninstall Scripts
 
@@ -372,18 +419,20 @@ ai_model/
 │       ├── ui.py
 │       └── utils.py
 ├── ollama/                      # Ollama implementation
-│   ├── ollama-llm-setup.py      # Ollama setup script
+│   ├── ollama-llm-setup.py      # Ollama setup script (v4.0 - smart recommendations)
 │   ├── ollama-llm-uninstall.py  # Ollama uninstaller script
 │   ├── requirements-ollama-setup.txt
 │   └── lib/                     # Ollama-specific modules
-│       ├── __init__.py
-│       ├── config.py
-│       ├── ollama.py
-│       ├── hardware.py
-│       ├── ide.py
-│       ├── models.py
-│       ├── ui.py
-│       └── utils.py
+│       ├── __init__.py          # Module exports (v2.0.0)
+│       ├── config.py            # Continue.dev config generation
+│       ├── hardware.py          # Hardware detection with tier-based RAM
+│       ├── ide.py               # IDE detection and integration
+│       ├── model_selector.py    # NEW: Smart model recommendation engine
+│       ├── models.py            # Legacy model catalog (backward compat)
+│       ├── ollama.py            # Ollama service management
+│       ├── ui.py                # Terminal UI utilities
+│       ├── utils.py             # General utilities
+│       └── validator.py         # NEW: Robust model pulling & verification
 ├── lib/                         # Shared hardware detection module
 │   └── hardware.py              # Hardware detection & classification
 └── README.md                    # This file
@@ -411,8 +460,36 @@ Hardware detection and classification:
 - **calculate_os_overhead()**: Calculates OS memory overhead
 - **get_estimated_model_memory()**: Estimates available RAM for models
 
-#### `lib/models.py` (Docker & Ollama)
-Model catalog and selection:
+#### `lib/model_selector.py` (Ollama v4.0 - NEW)
+Smart model recommendation engine:
+- **ModelRole**: Enum for model roles (CHAT, EDIT, AUTOCOMPLETE, EMBED, REASONING, VISION)
+- **RecommendedModel**: Dataclass for recommended models with role, RAM, and Ollama name
+- **EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS**: Tier-aware model catalogs
+- **REASONING_MODELS, VISION_MODELS**: Optional advanced model catalogs
+- **get_tier_ram_reservation()**: Returns tier-specific RAM reservation percentage
+- **get_usable_ram()**: Calculates available RAM for models
+- **generate_best_recommendation()**: Selects optimal model portfolio for hardware
+- **display_recommendation()**: User-friendly formatting of recommendations
+- **get_alternatives_for_role()**: Finds alternative models for role swapping
+- **show_customization_menu()**: Two-level customization UI
+- **select_models_smart()**: Main entry point for smart model selection
+
+#### `lib/validator.py` (Ollama v4.0 - NEW)
+Robust model pulling with verification and fallback:
+- **PullResult**: Dataclass tracking individual model pull outcomes
+- **SetupResult**: Dataclass tracking overall setup success/failure
+- **is_ollama_api_available()**: Checks Ollama API status
+- **get_installed_models()**: Lists currently installed models
+- **verify_model_exists()**: Confirms model installation
+- **get_fallback_model()**: Finds alternatives from hardcoded catalog
+- **pull_model_with_verification()**: Pulls with verification and fallback
+- **pull_models_with_tracking()**: Manages multi-model installation
+- **display_setup_result()**: Clear summary with actionable next steps
+- **retry_failed_models()**: Re-attempts failed installations
+- **validate_pre_install()**: Pre-flight checks before downloading
+
+#### `lib/models.py` (Docker & Ollama - Legacy)
+Legacy model catalog (maintained for backward compatibility):
 - **ModelInfo**: Dataclass for model metadata
 - **MODEL_CATALOG**: Comprehensive model catalog
 - **select_preset()**: Preset selection based on hardware tier
@@ -463,7 +540,7 @@ Terminal UI utilities:
 General utilities:
 - **run_command()**: Execute shell commands with timeout
 
-### Data Flow
+### Data Flow (Docker)
 
 ```
 User Input
@@ -479,6 +556,42 @@ Model Selection → RAM Validation
 Model Pulling → Configuration Generation → Global Rules Generation
     ↓
 IDE Setup → Next Steps
+```
+
+### Data Flow (Ollama v4.0 Smart Recommendations)
+
+```
+Hardware Detection → Tier Classification → Tier-Based RAM Reservation
+    ↓
+IDE Auto-Detection (VS Code, Cursor, IntelliJ)
+    ↓
+Ollama Service Check → API Verification
+    ↓
+Smart Recommendation (model_selector.generate_best_recommendation)
+    ↓
+User Choice: Accept ─────────────────────────────────────┐
+    │                                                     │
+    ├── Customize Level 1: Role Swapping                  │
+    │       (get_alternatives_for_role)                   │
+    │                                                     │
+    └── Customize Level 2: Add Optional Models            │
+            (reasoning, vision)                           │
+                                                          ↓
+Pre-Install Validation (validator.validate_pre_install)
+    ↓
+Model Pulling with Verification (validator.pull_models_with_tracking)
+    │
+    ├── Success → Continue
+    │
+    └── Failure → Fallback (get_fallback_model) → Retry
+                                                          ↓
+Setup Result Display → Retry Option for Failures
+    ↓
+Configuration Generation (config.generate_continue_config)
+    ↓
+Global Rules Generation (config.generate_global_rule)
+    ↓
+Next Steps Display (ide.show_next_steps)
 ```
 
 ## ⚙️ Configuration
@@ -648,16 +761,24 @@ When running the setup script, you'll be prompted to select:
 
 ### RAM Allocation Strategy
 
-The setup uses a **conservative 30% overhead reservation** for system stability:
+The setup uses a **tier-based overhead reservation** for optimal balance between model quality and system stability:
+
+| Tier | RAM Range | Reserved | Usable | Rationale |
+|------|-----------|----------|--------|-----------|
+| **C** | 16-24GB | 40% | 60% | Conservative - limited headroom |
+| **B** | 24-32GB | 35% | 65% | Balanced - moderate headroom |
+| **A/S** | 32GB+ | 30% | 70% | Aggressive - ample headroom |
+
 ```
-Total RAM:           XX GB
-macOS + Apps (30%):  -XX GB (reserved)
-Usable for Models:   XX GB (70% of total)
-Model Budget (85%):  XX GB (85% of usable)
-Safety Buffer (15%): XX GB (15% of usable)
+Example: 32GB RAM (Tier A)
+Total RAM:           32 GB
+Reserved (30%):      -9.6 GB
+Usable for Models:   22.4 GB (70% of total)
+Model Budget (70%):  15.7 GB (70% of usable)
+Safety Buffer (30%): 6.7 GB (for OS, apps, context)
 ```
 
-**Why 30% overhead?**
+**What the overhead covers:**
 - macOS system: 4-6GB
 - VS Code/IntelliJ: 2-4GB
 - Browser (Chrome/Safari): 3-6GB
@@ -749,6 +870,15 @@ Valid roles per Continue.dev schema:
 - **embed**: Semantic code search embeddings
 - **rerank**: Reranking search results
 - **summarize**: Summarization tasks
+
+### Smart Selection Roles (Ollama v4.0)
+
+The smart model selector uses functional roles for portfolio building:
+- **PRIMARY**: All-rounder for chat, edit, and apply (main workhorse)
+- **AUTOCOMPLETE**: Fast model for tab completion
+- **EMBED**: Embedding model for semantic code search
+- **REASONING**: Optional - advanced reasoning capabilities (Level 2)
+- **VISION**: Optional - multimodal image understanding (Level 2)
 
 ## 🔧 Troubleshooting
 
@@ -1017,11 +1147,43 @@ ModelInfo(
 # Test hardware detection
 python3 -c "from lib import hardware; print(hardware.detect_hardware())"
 
-# Test Docker check
+# Test Docker check (Docker backend)
 python3 -c "from lib import docker; print(docker.check_docker())"
 
-# Test model catalog
+# Test model catalog (legacy)
 python3 -c "from lib import models; print(len(models.MODEL_CATALOG))"
+```
+
+**Testing Ollama v4.0 Modules:**
+
+```bash
+cd ai_model/ollama
+
+# Test smart model selector
+python3 -c "
+from lib import hardware, model_selector
+hw = hardware.detect_hardware()
+rec = model_selector.generate_best_recommendation(hw)
+print(f'Tier: {hw.tier.name}')
+print(f'Usable RAM: {model_selector.get_usable_ram(hw):.1f} GB')
+print(f'Models: {len(rec.models)}')
+for m in rec.models:
+    print(f'  - {m.name}: {m.ollama_name} ({m.ram_gb:.1f}GB)')
+"
+
+# Test validator module
+python3 -c "
+from lib import validator
+print(f'Ollama API available: {validator.is_ollama_api_available()}')
+print(f'Installed models: {validator.get_installed_models()}')
+"
+
+# Test IDE detection
+python3 -c "
+from lib import ide
+ides = ide.detect_installed_ides()
+print(f'Detected IDEs: {ides}')
+"
 ```
 
 ### Debugging
@@ -1065,6 +1227,40 @@ MIT License - See LICENSE file for details.
 - **Docker Desktop**: [docker.com/desktop](https://docker.com/desktop)
 
 ## 📝 Changelog
+
+### Version 4.0.0 (Ollama Smart Recommendations)
+- **Smart Model Recommendations**: Intelligent model selection based on hardware capabilities
+  - Automatically recommends the highest quality models that safely fit into available RAM
+  - Assumes users want the best quality for coding workflows
+  - Prioritizes a balanced portfolio: all-rounder chat, fast autocomplete, embeddings
+  - Hardware-based recommendations without user questions
+  - Uses Continue.dev's recommended models, filtered for Ollama compatibility
+  - Hardcoded backup catalog for API failures
+- **Tier-Based RAM Reservation**: Variable overhead based on hardware tier
+  - 40% reserved for Tier C (16-24GB) - conservative for limited RAM
+  - 35% reserved for Tier B (24-32GB) - balanced approach
+  - 30% reserved for Tier A/S (32GB+) - more RAM for models
+- **Model Variant Selection**: Intelligent variant picker
+  - Queries Ollama API for available variants (Q4/Q5/F16, 3B/8B/70B)
+  - Selects the largest variant that fits RAM budget
+  - Falls back to hardcoded catalog if API fails
+  - Immediate verification after each pull
+- **Two-Level Customization UI**: Streamlined user experience
+  - Single "best recommendation" approach with Accept/Customize options
+  - Level 1: Role swapping (2-3 vetted alternatives per role)
+  - Level 2: Advanced options (add reasoning or vision models)
+- **Reliable Model Pulling**: Robust installation with fallbacks
+  - Immediate verification after each model pull
+  - Automatic fallback to alternatives from hardcoded catalog
+  - Continues with remaining models on individual failures
+  - Clear feedback and actionable next steps for partial setups
+  - Retry mechanism for failed models
+- **New Modules**: Modular architecture for maintainability
+  - `lib/model_selector.py`: Smart recommendation engine and customization UI
+  - `lib/validator.py`: Robust model pulling with verification and fallback
+- **IDE Auto-Detection**: Automatically finds installed IDEs
+  - Detects VS Code, Cursor, and IntelliJ IDEA installations
+  - No manual IDE selection required
 
 ### Version 3.0.0
 - **Full Ollama support**: Complete parallel implementation of Ollama backend alongside Docker Model Runner
