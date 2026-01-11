@@ -760,25 +760,6 @@ def get_autostart_plist_path() -> Optional[Path]:
     return Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
 
 
-def check_ssh_environment_pollution() -> bool:
-    """
-    Check if SSH_AUTH_SOCK is set (informational only).
-    
-    The script automatically handles this by using clean environments
-    when calling Ollama commands.
-    
-    Returns:
-        True if SSH_AUTH_SOCK is set, False otherwise
-    """
-    ssh_auth_sock = os.environ.get('SSH_AUTH_SOCK')
-    
-    if ssh_auth_sock:
-        ui.print_info("SSH agent detected (will be handled automatically)")
-        return True
-    
-    return False
-
-
 def remove_ollama() -> Tuple[bool, List[str]]:
     """
     Remove Ollama installation from the system.

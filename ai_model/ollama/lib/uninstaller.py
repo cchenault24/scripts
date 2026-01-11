@@ -224,9 +224,48 @@ def check_running_processes(manifest: Dict[str, Any]) -> Dict[str, List[str]]:
     return running
 
 
+def handle_ide_processes(running: Dict[str, List[str]]) -> bool:
+    """
+    Handle IDE processes only (not Ollama - we need it for model removal).
+    
+    Returns:
+        True if safe to proceed, False to abort
+    """
+    if not any(running.values()):
+        return True  # Nothing running
+    
+    ui.print_warning("Found active IDE processes:")
+    print()
+    
+    for process_type, processes in running.items():
+        if processes:
+            print(f"  • {process_type}: {', '.join(processes)}")
+    
+    print()
+    ui.print_info("Recommendation:")
+    if running.get("vscode") or running.get("intellij"):
+        print("  1. Save your work in IDE")
+        print("  2. Close IDE to uninstall extensions")
+    print()
+    
+    choices = ["Stop processes and continue", "Let me handle it manually", "Cancel uninstall"]
+    choice = ui.prompt_choice("How would you like to proceed?", choices, default=1)
+    
+    if choice == 2:  # Cancel
+        return False
+    elif choice == 1:  # Manual
+        ui.print_info("Please stop the processes manually, then run uninstaller again")
+        return False
+    else:  # Stop IDEs only
+        return stop_ide_processes_gracefully(running)
+
+
 def handle_running_processes(running: Dict[str, List[str]]) -> bool:
     """
     Handle running processes with user guidance.
+    
+    NOTE: This function is kept for backward compatibility but should not be used
+    for uninstall flow. Use handle_ide_processes() instead.
     
     Returns:
         True if safe to proceed, False to abort
@@ -265,6 +304,22 @@ def handle_running_processes(running: Dict[str, List[str]]) -> bool:
         return False
     else:  # Stop all
         return stop_processes_gracefully(running)
+
+
+def stop_ide_processes_gracefully(running: Dict[str, List[str]]) -> bool:
+    """Stop IDE processes only (not Ollama)."""
+    # IDEs - ask user to close manually
+    if running.get("vscode") or running.get("intellij"):
+        ui.print_warning("Please close your IDE(s) manually to avoid losing unsaved work")
+        print()
+        for ide_name in ["vscode", "intellij"]:
+            if running.get(ide_name):
+                display_name = "VS Code" if ide_name == "vscode" else "IntelliJ IDEA"
+                if not ui.prompt_yes_no(f"Have you closed {display_name}?", default=False):
+                    ui.print_info("Uninstall cancelled. Close IDE and try again.")
+                    return False
+    
+    return True
 
 
 def stop_processes_gracefully(running: Dict[str, List[str]]) -> bool:
@@ -371,6 +426,64 @@ def handle_config_removal(config_path: Path, manifest: Dict[str, Any]) -> bool:
         return False
 
 
+def normalize_model_name(model_name: str) -> str:
+    """
+    Normalize model name for comparison.
+    
+    Handles tags like:
+    - codellama:7b -> codellama:7b
+    - codellama:7b-latest -> codellama:7b
+    - codellama:7b-v0.1 -> codellama:7b
+    
+    Returns base model name with tag (without version suffixes).
+    """
+    if not model_name:
+        return ""
+    
+    # Split on colon to separate model name and tag
+    if ":" in model_name:
+        base, tag = model_name.split(":", 1)
+        # Remove version suffixes from tag (e.g., -latest, -v0.1, -q4_K_M)
+        # Keep only the main tag part (e.g., 7b, 13b, 22b)
+        tag_parts = tag.split("-")
+        if tag_parts:
+            # Keep the first part which is usually the size tag
+            normalized_tag = tag_parts[0]
+            return f"{base}:{normalized_tag}"
+        return model_name
+    return model_name
+
+
+def models_overlap(model1: str, model2: str) -> bool:
+    """
+    Check if two model names refer to the same model (handling tags).
+    
+    Examples:
+    - codellama:7b and codellama:7b-latest -> True
+    - codellama:7b and codellama:13b -> False
+    - codellama:7b and starcoder2:3b -> False
+    - nomic-embed-text and nomic-embed-text:latest -> True (same base, tag ignored)
+    - nomic-embed-text:latest and nomic-embed-text -> True
+    """
+    if not model1 or not model2:
+        return False
+    
+    # Get base names (without tags) - this handles cases like:
+    # nomic-embed-text vs nomic-embed-text:latest
+    base1 = model1.split(":")[0] if ":" in model1 else model1
+    base2 = model2.split(":")[0] if ":" in model2 else model2
+    
+    # If base names match, they're the same model (tags are just variants)
+    if base1 == base2:
+        return True
+    
+    # Also check normalized versions for cases like codellama:7b vs codellama:7b-latest
+    # where we want to preserve tag differences (7b vs 13b are different)
+    norm1 = normalize_model_name(model1)
+    norm2 = normalize_model_name(model2)
+    return norm1 == norm2
+
+
 def get_installed_models() -> List[str]:
     """Get list of currently installed Ollama models."""
     code, stdout, _ = utils.run_command(["ollama", "list"], timeout=10, clean_env=True)
@@ -394,23 +507,109 @@ def remove_model(model_name: str) -> bool:
     if code == 0:
         return True
     else:
-        ui.print_error(f"Failed to remove {model_name}: {stderr or stdout}")
+        # Don't print error here - let caller handle it
         return False
 
 
+def ensure_ollama_running_for_removal() -> bool:
+    """
+    Ensure Ollama service is running for model removal operations.
+    
+    Returns:
+        True if Ollama is running (or was started), False if cannot start
+    """
+    from . import ollama
+    
+    # Check if Ollama is already running
+    if ollama.verify_ollama_running():
+        return True
+    
+    # Try to start Ollama
+    ui.print_info("Ollama service is not running. Starting it for model removal...")
+    if ollama.start_ollama_service():
+        ui.print_success("Ollama service started")
+        return True
+    else:
+        ui.print_error("Could not start Ollama service")
+        ui.print_info("Model removal requires Ollama to be running")
+        ui.print_info("Please start Ollama manually: ollama serve")
+        return False
+
+
+def find_actual_model_name(manifest_model_name: str, installed_models: List[str]) -> Optional[str]:
+    """
+    Find the actual model name in Ollama that matches the manifest model name.
+    
+    Handles cases where manifest has 'nomic-embed-text' but Ollama has 'nomic-embed-text:latest'.
+    
+    Returns:
+        The actual model name from installed_models, or None if not found
+    """
+    # First try exact match
+    if manifest_model_name in installed_models:
+        return manifest_model_name
+    
+    # Try to find by base name (handles tag variations)
+    base_name = manifest_model_name.split(":")[0] if ":" in manifest_model_name else manifest_model_name
+    
+    for installed_model in installed_models:
+        installed_base = installed_model.split(":")[0] if ":" in installed_model else installed_model
+        if base_name == installed_base:
+            # Check if they overlap (same model, different tags)
+            if models_overlap(manifest_model_name, installed_model):
+                return installed_model
+    
+    return None
+
+
 def remove_models(model_names: List[str]) -> int:
-    """Remove multiple Ollama models, returns count removed."""
+    """
+    Remove multiple Ollama models, returns count removed.
+    
+    First queries `ollama list` to get actual installed models, then matches
+    manifest model names to actual names and removes them using the exact names
+    from `ollama list`.
+    
+    Ensures Ollama service is running before attempting removal.
+    """
     if not model_names:
         return 0
     
+    # Ensure Ollama is running (required for model removal)
+    if not ensure_ollama_running_for_removal():
+        ui.print_warning("Cannot remove models - Ollama service is not available")
+        return 0
+    
+    # Get actual installed models from Ollama (run ollama list)
+    installed_models = get_installed_models()
+    if not installed_models:
+        return 0
+    
+    # Match manifest model names to actual installed model names
+    models_to_remove = []
+    not_found = []
+    
+    for manifest_model_name in model_names:
+        actual_name = find_actual_model_name(manifest_model_name, installed_models)
+        if actual_name:
+            models_to_remove.append(actual_name)
+        else:
+            not_found.append(manifest_model_name)
+    
+    if not models_to_remove:
+        return 0
+    
+    # Remove the matched models using their actual names from ollama list
+    # Quiet mode: only show progress, errors are returned via exceptions
     removed = 0
-    for i, model in enumerate(model_names, 1):
-        print(f"[{i}/{len(model_names)}] Removing {model}...")
+    for i, model in enumerate(models_to_remove, 1):
+        # Show progress: [1/3] Removing model...
+        print(f"[{i}/{len(models_to_remove)}] Removing {model}...", end="", flush=True)
         if remove_model(model):
-            ui.print_success(f"Removed {model}")
+            print(" ✓")
             removed += 1
         else:
-            ui.print_warning(f"Could not remove {model}")
+            print(" ✗")
     
     return removed
 

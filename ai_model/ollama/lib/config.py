@@ -1163,6 +1163,35 @@ def add_fingerprint_to_json(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _normalize_model_name_for_comparison(model_name: str) -> str:
+    """
+    Normalize model name for comparison (handles tags).
+    
+    Examples:
+    - codellama:7b -> codellama:7b
+    - codellama:7b-latest -> codellama:7b
+    - codellama:7b-v0.1 -> codellama:7b
+    """
+    if not model_name:
+        return ""
+    
+    if ":" in model_name:
+        base, tag = model_name.split(":", 1)
+        # Remove version suffixes from tag
+        tag_parts = tag.split("-")
+        if tag_parts:
+            normalized_tag = tag_parts[0]
+            return f"{base}:{normalized_tag}"
+    return model_name
+
+
+def _models_overlap(model1: str, model2: str) -> bool:
+    """Check if two model names refer to the same model."""
+    norm1 = _normalize_model_name_for_comparison(model1)
+    norm2 = _normalize_model_name_for_comparison(model2)
+    return norm1 == norm2
+
+
 def create_installation_manifest(
     installed_models: List[Any],
     created_files: List[Path],
@@ -1183,17 +1212,30 @@ def create_installation_manifest(
     Returns:
         Path to the created manifest file
     """
-    # Normalize models
+    # Normalize models and filter out any that overlap with pre-existing
+    # This prevents the same model from appearing in both lists due to tag differences
     normalized_models = []
     for m in installed_models:
         model_dict = _normalize_model(m)
-        normalized_models.append({
-            "name": model_dict["ollama_name"],
-            "display_name": model_dict["name"],
-            "size_gb": model_dict["ram_gb"],
-            "pulled_at": _get_utc_timestamp(),
-            "roles": model_dict["roles"]
-        })
+        model_name = model_dict["ollama_name"]
+        
+        # Check if this model overlaps with any pre-existing model
+        overlaps = False
+        for pre_existing_name in pre_existing_models:
+            if _models_overlap(model_name, pre_existing_name):
+                overlaps = True
+                _logger.debug(f"Filtering out {model_name} - overlaps with pre-existing {pre_existing_name}")
+                break
+        
+        # Only add if it doesn't overlap with pre-existing
+        if not overlaps:
+            normalized_models.append({
+                "name": model_name,
+                "display_name": model_dict["name"],
+                "size_gb": model_dict["ram_gb"],
+                "pulled_at": _get_utc_timestamp(),
+                "roles": model_dict["roles"]
+            })
     
     # Create file entries with fingerprints
     file_entries = []

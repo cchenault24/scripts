@@ -181,14 +181,6 @@ def main() -> int:
         ui.print_info("Setup cancelled. Run again to reconfigure.")
         return 0
     
-    # Step 7b: Check for SSH environment pollution (macOS)
-    print()
-    ui.print_subheader("Checking Environment")
-    if ollama.check_ssh_environment_pollution():
-        ui.print_success("Script will automatically handle SSH environment issue")
-    else:
-        ui.print_success("Environment is clean")
-    
     # Step 8: Pull models with verification
     print()
     setup_result = validator.pull_models_with_tracking(selected_models, hw_info)

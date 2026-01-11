@@ -537,7 +537,185 @@ def run_preflight_check(show_progress: bool = True) -> Tuple[bool, str, Optional
     return False, error_msg, error_type
 
 
-def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
+def _pull_model_via_api(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
+    """
+    Pull a model using Ollama API with streaming JSON progress.
+    
+    This is the preferred method as it provides clean JSON progress data
+    instead of parsing ANSI-formatted CLI output.
+    
+    Returns:
+        Tuple of (success, error_message)
+    """
+    import json as json_module
+    
+    try:
+        # Try to use rich progress bar
+        try:
+            from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
+            from rich.console import Console
+            use_rich = True
+        except ImportError:
+            use_rich = False
+        
+        # Prepare API request
+        import urllib.request
+        import urllib.parse
+        
+        url = f"{OLLAMA_API_BASE}/api/pull"
+        data = json_module.dumps({"name": model_name}).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        
+        if use_rich:
+            console = Console()
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+                transient=False,
+                refresh_per_second=10
+            ) as progress:
+                # Track multiple layers (Ollama pulls multiple blobs)
+                tasks: Dict[str, Any] = {}  # digest -> task_id
+                total_bytes_all_layers = 0
+                completed_bytes_all_layers = 0
+                
+                try:
+                    with urllib.request.urlopen(req, timeout=MODEL_PULL_TIMEOUT, context=get_unverified_ssl_context()) as response:
+                        for line_bytes in response:
+                            try:
+                                line = line_bytes.decode('utf-8').strip()
+                                if not line:
+                                    continue
+                                
+                                # Parse JSON response
+                                data = json_module.loads(line)
+                                status = data.get("status", "")
+                                
+                                if status == "pulling manifest":
+                                    # Skip manifest - we'll show progress for actual layer downloads
+                                    # No need to create a progress bar for manifest
+                                    continue
+                                
+                                elif status.startswith("pulling ") and data.get("digest"):
+                                    # Layer download progress
+                                    digest = data.get("digest", "")
+                                    total = data.get("total")
+                                    completed = data.get("completed", 0)
+                                    
+                                    if digest and total:
+                                        # Create task for this layer if it doesn't exist
+                                        if digest not in tasks:
+                                            tasks[digest] = progress.add_task(
+                                                f"Pulling {model_name}",
+                                                total=total
+                                            )
+                                        
+                                        # Update progress for this layer
+                                        # Note: TransferSpeedColumn may show "?" for very small files
+                                        # that complete too quickly (< 1 second) - this is expected behavior
+                                        progress.update(
+                                            tasks[digest],
+                                            completed=completed,
+                                            total=total,
+                                            description=f"Pulling {model_name}"
+                                        )
+                                
+                                elif status == "verifying sha256 digest":
+                                    # Verification phase - update all layer tasks
+                                    for task_id in tasks.values():
+                                        progress.update(task_id, description=f"Pulling {model_name} (verifying)")
+                                
+                                elif status == "success":
+                                    # Complete all tasks
+                                    for task_id in tasks.values():
+                                        progress.update(task_id, completed=progress.tasks[task_id].total or 100, total=progress.tasks[task_id].total or 100)
+                                    print()
+                                    ui.print_success(f"Downloaded {model_name}")
+                                    return True, ""
+                                
+                                elif "error" in status.lower():
+                                    error_msg = data.get("error", status)
+                                    print()
+                                    ui.print_error(f"Error: {error_msg}")
+                                    return False, error_msg
+                            
+                            except json_module.JSONDecodeError:
+                                # Skip malformed JSON lines
+                                continue
+                            except Exception as e:
+                                # Log but continue
+                                continue
+                
+                except urllib.error.HTTPError as e:
+                    error_body = e.read().decode('utf-8') if e.fp else ""
+                    try:
+                        error_data = json_module.loads(error_body)
+                        error_msg = error_data.get("error", error_body)
+                    except:
+                        error_msg = error_body or str(e)
+                    return False, error_msg
+                except Exception as e:
+                    return False, str(e)
+        
+        else:
+            # Fallback: simple progress without rich
+            try:
+                with urllib.request.urlopen(req, timeout=MODEL_PULL_TIMEOUT, context=get_unverified_ssl_context()) as response:
+                    last_percent = 0
+                    for line_bytes in response:
+                        try:
+                            line = line_bytes.decode('utf-8').strip()
+                            if not line:
+                                continue
+                            
+                            data = json_module.loads(line)
+                            status = data.get("status", "")
+                            total = data.get("total")
+                            completed = data.get("completed", 0)
+                            
+                            if status.startswith("pulling ") and total and completed:
+                                percent = int((completed / total) * 100) if total > 0 else 0
+                                if percent != last_percent:
+                                    downloaded_mb = completed / (1024 * 1024)
+                                    total_mb = total / (1024 * 1024)
+                                    print(f"\r    {percent:3d}% ({downloaded_mb:.1f} MB / {total_mb:.1f} MB)", end="", flush=True)
+                                    last_percent = percent
+                            elif status == "success":
+                                print()
+                                ui.print_success(f"Downloaded {model_name}")
+                                return True, ""
+                            elif "error" in status.lower():
+                                error_msg = data.get("error", status)
+                                print()
+                                ui.print_error(f"Error: {error_msg}")
+                                return False, error_msg
+                        
+                        except json_module.JSONDecodeError:
+                            continue
+                        except Exception:
+                            continue
+            
+            except Exception as e:
+                return False, str(e)
+        
+        return False, "Unexpected end of stream"
+    
+    except Exception as e:
+        return False, f"API error: {type(e).__name__}: {e}"
+
+
+def _pull_model_single_attempt(model_name: str, show_progress: bool = True, use_api: bool = True) -> Tuple[bool, str]:
     """
     Execute a single ollama pull attempt without retries.
     
@@ -546,6 +724,16 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
         - success: True if the command succeeded
         - error_message: Error details if failed, empty string if successful
     """
+    # Try API first (preferred method with clean JSON progress)
+    if use_api:
+        try:
+            return _pull_model_via_api(model_name, show_progress)
+        except Exception as e:
+            # Fall back to CLI if API fails
+            if show_progress:
+                ui.print_warning(f"API pull failed, falling back to CLI: {e}")
+    
+    # Fallback to CLI method (parsing ANSI output)
     process = None
     output_lines: List[str] = []
     
@@ -573,6 +761,24 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
             )
             
             if use_rich:
+                # #region agent log
+                # Log that we're using rich
+                import json as json_module
+                try:
+                    with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                        f.write(json_module.dumps({
+                            "id": f"log_{int(time.time() * 1000)}_rich_start",
+                            "timestamp": int(time.time() * 1000),
+                            "location": "validator.py:_pull_model_single_attempt:rich_start",
+                            "message": "Starting rich progress bar",
+                            "data": {"model_name": model_name, "use_rich": True},
+                            "sessionId": "debug-session",
+                            "runId": "run1"
+                        }) + "\n")
+                except Exception as e:
+                    pass  # Don't fail on logging errors
+                # #endregion
+                
                 # Use rich progress bar
                 console = Console()
                 with Progress(
@@ -592,14 +798,75 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                     total_bytes = None
                     last_percent = 0
                     
-                    # Read stdout for progress
-                    if process.stdout:
-                        for line in process.stdout:
+                    # #region agent log
+                    try:
+                        with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                            f.write(json_module.dumps({
+                                "id": f"log_{int(time.time() * 1000)}_before_stderr",
+                                "timestamp": int(time.time() * 1000),
+                                "location": "validator.py:_pull_model_single_attempt:before_stderr",
+                                "message": "About to read stderr (Ollama writes progress to stderr!)",
+                                "data": {"model_name": model_name, "stderr_is_none": process.stderr is None},
+                                "sessionId": "debug-session",
+                                "runId": "run1"
+                            }) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
+                    
+                    # Read stderr for progress (Ollama writes progress to stderr, not stdout!)
+                    if process.stderr:
+                        for line in process.stderr:
+                            # #region agent log
+                            # Log raw line for debugging
+                            import json as json_module
+                            with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                                f.write(json_module.dumps({
+                                    "id": f"log_{int(time.time() * 1000)}_raw",
+                                    "timestamp": int(time.time() * 1000),
+                                    "location": "validator.py:_pull_model_single_attempt:raw_line",
+                                    "message": "Raw line from Ollama stdout",
+                                    "data": {
+                                        "model_name": model_name,
+                                        "raw_line": repr(line),
+                                        "raw_length": len(line),
+                                        "has_percent": "%" in line,
+                                        "has_pulling": "pulling" in line.lower()
+                                    },
+                                    "sessionId": "debug-session",
+                                    "runId": "run1"
+                                }) + "\n")
+                            # #endregion
+                            
                             # Clean ANSI escape codes - be more aggressive
-                            # Remove all ANSI escape sequences including cursor positioning
-                            clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
+                            # Remove all ANSI escape sequences including cursor positioning and OSC sequences
+                            clean_line = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', line)  # Include ? for escape sequences like [?25h
                             clean_line = re.sub(r'\x1b\][0-9;]*', '', clean_line)  # Remove OSC sequences
                             clean_line = clean_line.strip()
+                            
+                            # Extract progress part if line contains both progress and "pulling manifest"
+                            # Ollama sometimes appends "pulling manifest" to progress lines
+                            if "pulling manifest" in clean_line.lower() and "%" in clean_line:
+                                # Split on "pulling manifest" and take the progress part
+                                clean_line = clean_line.split("pulling manifest")[0].strip()
+                            
+                            # #region agent log
+                            # Log cleaned line
+                            with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                                f.write(json_module.dumps({
+                                    "id": f"log_{int(time.time() * 1000)}_clean",
+                                    "timestamp": int(time.time() * 1000),
+                                    "location": "validator.py:_pull_model_single_attempt:clean_line",
+                                    "message": "Cleaned line after ANSI removal",
+                                    "data": {
+                                        "model_name": model_name,
+                                        "clean_line": clean_line,
+                                        "clean_length": len(clean_line) if clean_line else 0
+                                    },
+                                    "sessionId": "debug-session",
+                                    "runId": "run1"
+                                }) + "\n")
+                            # #endregion
                             
                             # Skip empty lines but keep track of progress lines even if they're mostly ANSI
                             if not clean_line and "%" not in line:
@@ -611,11 +878,27 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                             # Parse Ollama progress output
                             # Format: "pulling <hash>:   X% ▕█...▏  Y MB/Z GB   speed   time"
                             # Or: "pulling manifest"
-                            if "pulling manifest" in clean_line.lower():
-                                progress.update(task, description=f"Pulling {model_name} (manifest)", total=None)
-                            elif "pulling" in clean_line.lower() and "%" in clean_line:
+                            # IMPORTANT: Check for percentage FIRST, then manifest (lines can contain both)
+                            if "pulling" in clean_line.lower() and "%" in clean_line:
                                 # Extract percentage
                                 percent_match = re.search(r'(\d+)%', clean_line)
+                                # #region agent log
+                                with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                                    f.write(json_module.dumps({
+                                        "id": f"log_{int(time.time() * 1000)}_parse",
+                                        "timestamp": int(time.time() * 1000),
+                                        "location": "validator.py:_pull_model_single_attempt:parse",
+                                        "message": "Parsing progress line",
+                                        "data": {
+                                            "model_name": model_name,
+                                            "clean_line": clean_line,
+                                            "percent_match": percent_match.group(1) if percent_match else None
+                                        },
+                                        "sessionId": "debug-session",
+                                        "runId": "run1"
+                                    }) + "\n")
+                                # #endregion
+                                
                                 if percent_match:
                                     percent = int(percent_match.group(1))
                                     last_percent = percent
@@ -623,6 +906,23 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                                     # Extract size info if available
                                     # Pattern: "X MB/Y GB" or "X MB/Y MB" etc.
                                     size_match = re.search(r'(\d+(?:\.\d+)?)\s*(MB|GB)\s*/\s*(\d+(?:\.\d+)?)\s*(MB|GB)', clean_line)
+                                    # #region agent log
+                                    with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                                        f.write(json_module.dumps({
+                                            "id": f"log_{int(time.time() * 1000)}_size",
+                                            "timestamp": int(time.time() * 1000),
+                                            "location": "validator.py:_pull_model_single_attempt:size",
+                                            "message": "Size match result",
+                                            "data": {
+                                                "model_name": model_name,
+                                                "percent": percent,
+                                                "size_match": size_match.groups() if size_match else None
+                                            },
+                                            "sessionId": "debug-session",
+                                            "runId": "run1"
+                                        }) + "\n")
+                                    # #endregion
+                                    
                                     if size_match:
                                         downloaded = float(size_match.group(1))
                                         downloaded_unit = size_match.group(2)
@@ -641,6 +941,23 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                                             total_bytes = int(total * 1024 * 1024)
                                         
                                         # Update with bytes - this enables DownloadColumn and TransferSpeedColumn
+                                        # #region agent log
+                                        with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                                            f.write(json_module.dumps({
+                                                "id": f"log_{int(time.time() * 1000)}_update",
+                                                "timestamp": int(time.time() * 1000),
+                                                "location": "validator.py:_pull_model_single_attempt:update",
+                                                "message": "Updating progress bar with bytes",
+                                                "data": {
+                                                    "model_name": model_name,
+                                                    "downloaded_bytes": downloaded_bytes,
+                                                    "total_bytes": total_bytes,
+                                                    "percent": percent
+                                                },
+                                                "sessionId": "debug-session",
+                                                "runId": "run1"
+                                            }) + "\n")
+                                        # #endregion
                                         progress.update(
                                             task, 
                                             completed=downloaded_bytes, 
@@ -657,6 +974,21 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                                             # Calculate bytes from percentage
                                             completed_bytes = int((percent / 100) * total_bytes)
                                             progress.update(task, completed=completed_bytes, total=total_bytes, description=f"Pulling {model_name}")
+                            elif "pulling manifest" in clean_line.lower():
+                                # Only update for manifest if there's no percentage in the line
+                                # #region agent log
+                                with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
+                                    f.write(json_module.dumps({
+                                        "id": f"log_{int(time.time() * 1000)}_manifest",
+                                        "timestamp": int(time.time() * 1000),
+                                        "location": "validator.py:_pull_model_single_attempt:manifest",
+                                        "message": "Updating progress for manifest",
+                                        "data": {"model_name": model_name},
+                                        "sessionId": "debug-session",
+                                        "runId": "run1"
+                                    }) + "\n")
+                                # #endregion
+                                progress.update(task, description=f"Pulling {model_name} (manifest)", total=None)
                             
                             # Check for completion
                             if "success" in clean_line.lower() or "done" in clean_line.lower() or "complete" in clean_line.lower():
@@ -670,17 +1002,17 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                                 print()
                                 ui.print_error(f"    {clean_line}")
                         
-                        # Wait for process to complete (it should already be done after reading all stdout)
+                        # Wait for process to complete (it should already be done after reading all stderr)
                         if process.poll() is None:
                             process.wait(timeout=MODEL_PULL_TIMEOUT)
                     else:
-                        # If stdout is None, wait for process
+                        # If stderr is None, wait for process
                         process.wait(timeout=MODEL_PULL_TIMEOUT)
             else:
                 # Fallback: simple progress output (rich not available)
-                # Read stdout for progress
-                if process.stdout:
-                    for line in process.stdout:
+                # Read stderr for progress (Ollama writes progress to stderr!)
+                if process.stderr:
+                    for line in process.stderr:
                         # Clean ANSI escape codes
                         clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line).strip()
                         if clean_line:
@@ -700,14 +1032,18 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> T
                 else:
                     process.wait(timeout=MODEL_PULL_TIMEOUT)
             
-            # Read stderr for errors
+            # Note: stderr has already been read in the loop above, so we don't need to read it again
+            # Collect any remaining error info from output_lines
             stderr_output = ""
-            if process.stderr:
-                stderr_output = process.stderr.read()
-                if stderr_output:
-                    output_lines.append(stderr_output)
+            # Check output_lines for errors (stderr was already consumed in the loop)
+            for line in output_lines:
+                if "error" in line.lower() or "ssh:" in line.lower():
+                    stderr_output = line
+                    break
             
-            process.wait(timeout=MODEL_PULL_TIMEOUT)
+            # Process should already be done, but ensure it's finished
+            if process.poll() is None:
+                process.wait(timeout=MODEL_PULL_TIMEOUT)
             
             if process.returncode == 0:
                 return True, ""
