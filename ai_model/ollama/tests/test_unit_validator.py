@@ -367,6 +367,20 @@ class TestSetupResult:
         assert result.complete_failure is True
         assert result.complete_success is False
         assert result.partial_success is False
+    
+    def test_complete_failure_no_models(self):
+        """
+        Test complete_failure when there are no models at all.
+        
+        Specification: complete_failure should be False when there are no models.
+        """
+        result = validator.SetupResult()
+        
+        # No models at all
+        assert result.complete_failure is False, \
+            "complete_failure should be False when there are no models"
+        assert result.complete_success is False
+        assert result.partial_success is False
 
 
 # =============================================================================

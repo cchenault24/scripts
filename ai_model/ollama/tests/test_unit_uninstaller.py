@@ -717,3 +717,282 @@ class TestIDEProcessHandling:
         assert result is True
         # Verify only IDE prompts were shown, not Ollama
         # (Ollama should not be stopped here)
+    
+    @patch('lib.uninstaller.ui.prompt_choice')
+    def test_handle_ide_processes_cancel(self, mock_prompt_choice):
+        """Test that handle_ide_processes returns False when user cancels."""
+        running = {"vscode": ["VS Code"]}
+        mock_prompt_choice.return_value = 2  # Cancel
+        
+        result = uninstaller.handle_ide_processes(running)
+        
+        assert result is False
+    
+    @patch('lib.uninstaller.ui.prompt_choice')
+    def test_handle_ide_processes_manual(self, mock_prompt_choice):
+        """Test that handle_ide_processes returns False for manual handling."""
+        running = {"vscode": ["VS Code"]}
+        mock_prompt_choice.return_value = 1  # Manual
+        
+        result = uninstaller.handle_ide_processes(running)
+        
+        assert result is False
+    
+    def test_handle_ide_processes_nothing_running(self):
+        """Test that handle_ide_processes returns True when nothing is running."""
+        running = {
+            "vscode": [],
+            "intellij": [],
+            "ollama_serve": []
+        }
+        
+        result = uninstaller.handle_ide_processes(running)
+        
+        assert result is True
+
+
+class TestRunningProcesses:
+    """Test running process detection."""
+    
+    @patch('lib.uninstaller.utils.run_command')
+    def test_check_running_processes_ollama(self, mock_run):
+        """Test detecting running Ollama service."""
+        mock_run.return_value = (0, "12345", "")  # pgrep found process
+        
+        manifest = {}
+        running = uninstaller.check_running_processes(manifest)
+        
+        assert len(running["ollama_serve"]) > 0
+    
+    @patch('lib.uninstaller.utils.run_command')
+    @patch('platform.system')
+    def test_check_running_processes_vscode_macos(self, mock_system, mock_run):
+        """Test detecting VS Code on macOS."""
+        mock_system.return_value = "Darwin"
+        mock_run.return_value = (0, "12345", "")
+        
+        manifest = {}
+        running = uninstaller.check_running_processes(manifest)
+        
+        # Should check for "Visual Studio Code" on macOS
+        assert mock_run.called
+    
+    @patch('lib.uninstaller.utils.run_command')
+    @patch('urllib.request.urlopen')
+    def test_check_running_processes_active_models(self, mock_urlopen, mock_run):
+        """Test detecting active models via Ollama API."""
+        mock_run.return_value = (1, "", "")  # No processes found
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.read.return_value = b'{"models": [{"name": "test:model"}]}'
+        mock_response.__enter__ = Mock(return_value=mock_response)
+        mock_response.__exit__ = Mock(return_value=False)
+        mock_urlopen.return_value = mock_response
+        
+        manifest = {}
+        running = uninstaller.check_running_processes(manifest)
+        
+        assert len(running["model_servers"]) > 0
+
+
+class TestOrphanedFiles:
+    """Test orphaned file scanning."""
+    
+    def test_scan_for_orphaned_files_empty_manifest(self):
+        """Test scanning with empty manifest."""
+        manifest = uninstaller.create_empty_manifest()
+        
+        orphaned = uninstaller.scan_for_orphaned_files(manifest)
+        
+        # Should return list (may be empty)
+        assert isinstance(orphaned, list)
+    
+    @patch('pathlib.Path.exists')
+    @patch('pathlib.Path.rglob')
+    @patch('lib.uninstaller.config_module.is_our_file')
+    def test_scan_for_orphaned_files_finds_ours(self, mock_is_our, mock_rglob, mock_exists):
+        """Test finding files that are ours but not in manifest."""
+        manifest = uninstaller.create_empty_manifest()
+        mock_exists.return_value = True
+        mock_rglob.return_value = [Path("/test/file.yaml")]
+        mock_is_our.return_value = True  # File is ours
+        
+        orphaned = uninstaller.scan_for_orphaned_files(manifest)
+        
+        assert len(orphaned) > 0
+        assert orphaned[0][1] == "certain"  # Status should be "certain"
+    
+    def test_is_safe_location_safe(self):
+        """Test that safe locations are identified."""
+        safe_path = Path.home() / ".continue" / "config.yaml"
+        
+        result = uninstaller.is_safe_location(safe_path)
+        
+        assert result is True
+    
+    def test_is_safe_location_unsafe(self):
+        """Test that unsafe locations are identified."""
+        unsafe_path = Path("/usr/bin/test")
+        
+        result = uninstaller.is_safe_location(unsafe_path)
+        
+        assert result is False
+
+
+class TestIDEExtensions:
+    """Test IDE extension detection and removal."""
+    
+    @patch('shutil.which')
+    @patch('lib.uninstaller.utils.run_command')
+    def test_check_vscode_extension_installed(self, mock_run, mock_which):
+        """Test checking if VS Code extension is installed."""
+        mock_which.return_value = "/usr/local/bin/code"
+        mock_run.return_value = (0, "Continue.continue\nother.extension", "")
+        
+        result = uninstaller.check_vscode_extension_installed()
+        
+        assert result is True
+    
+    @patch('shutil.which')
+    def test_check_vscode_extension_no_cli(self, mock_which):
+        """Test checking VS Code extension when CLI not available."""
+        mock_which.return_value = None
+        
+        result = uninstaller.check_vscode_extension_installed()
+        
+        assert result is False
+    
+    @patch('shutil.which')
+    @patch('lib.uninstaller.utils.run_command')
+    @patch('lib.uninstaller.ui.print_info')
+    @patch('lib.uninstaller.ui.print_success')
+    @patch('lib.uninstaller.ui.print_warning')
+    @patch('lib.uninstaller.ui.print_error')
+    def test_uninstall_vscode_extension_success(
+        self, mock_error, mock_warning, mock_success, mock_info, mock_run, mock_which
+    ):
+        """Test successful VS Code extension uninstallation."""
+        mock_which.return_value = "/usr/local/bin/code"
+        mock_run.side_effect = [
+            (0, "Continue.continue", ""),  # Check installed
+            (0, "", ""),  # Uninstall succeeds
+        ]
+        
+        result = uninstaller.uninstall_vscode_extension()
+        
+        assert result is True
+    
+    @patch('platform.system')
+    @patch('pathlib.Path.exists')
+    def test_check_intellij_plugin_installed_macos(self, mock_exists, mock_system):
+        """Test checking IntelliJ plugin on macOS."""
+        mock_system.return_value = "Darwin"
+        mock_exists.return_value = True
+        
+        is_installed, paths = uninstaller.check_intellij_plugin_installed()
+        
+        # Should check plugin directories
+        assert isinstance(is_installed, bool)
+        assert isinstance(paths, list)
+    
+    @patch('lib.uninstaller.check_intellij_plugin_installed')
+    @patch('shutil.rmtree')
+    @patch('lib.uninstaller.ui.print_info')
+    @patch('lib.uninstaller.ui.print_success')
+    @patch('lib.uninstaller.ui.print_error')
+    def test_uninstall_intellij_plugin_success(
+        self, mock_error, mock_success, mock_info, mock_rmtree, mock_check
+    ):
+        """Test successful IntelliJ plugin uninstallation."""
+        from pathlib import Path
+        mock_check.return_value = (True, [Path("/test/plugin")])
+        
+        result = uninstaller.uninstall_intellij_plugin()
+        
+        assert result is True
+        mock_rmtree.assert_called()
+
+
+class TestModelRemoval:
+    """Test model removal functionality."""
+    
+    @patch('lib.uninstaller.get_installed_models')
+    @patch('lib.uninstaller.find_actual_model_name')
+    @patch('lib.uninstaller.remove_model')
+    def test_remove_models_success(self, mock_remove, mock_find, mock_get):
+        """Test successful model removal."""
+        mock_get.return_value = ["test:model", "other:model"]
+        mock_find.return_value = "test:model"
+        mock_remove.return_value = True
+        
+        result = uninstaller.remove_models(["test:model"])
+        
+        assert result == 1
+        mock_remove.assert_called()
+    
+    @patch('lib.uninstaller.get_installed_models')
+    def test_remove_models_not_found(self, mock_get):
+        """Test removing models that aren't installed."""
+        mock_get.return_value = []
+        
+        result = uninstaller.remove_models(["test:model"])
+        
+        assert result == 0
+    
+    @patch('lib.uninstaller.get_installed_models')
+    @patch('lib.uninstaller.find_actual_model_name')
+    @patch('lib.uninstaller.remove_model')
+    def test_remove_models_partial_failure(self, mock_remove, mock_find, mock_get):
+        """Test partial failure when removing models."""
+        mock_get.return_value = ["test:model", "other:model"]
+        mock_find.side_effect = ["test:model", "other:model"]
+        mock_remove.side_effect = [True, False]  # First succeeds, second fails
+        
+        result = uninstaller.remove_models(["test:model", "other:model"])
+        
+        assert result == 1  # Only one removed
+    
+    def test_find_actual_model_name_exact_match(self):
+        """Test finding model name with exact match."""
+        installed = ["test:model", "other:model"]
+        
+        result = uninstaller.find_actual_model_name("test:model", installed)
+        
+        assert result == "test:model"
+    
+    def test_find_actual_model_name_base_match(self):
+        """Test finding model name with base name match."""
+        installed = ["test:model:latest"]
+        
+        result = uninstaller.find_actual_model_name("test:model", installed)
+        
+        # Should find by base name
+        assert result is not None
+    
+    def test_find_actual_model_name_not_found(self):
+        """Test finding model name when not installed."""
+        installed = ["other:model"]
+        
+        result = uninstaller.find_actual_model_name("test:model", installed)
+        
+        assert result is None
+
+
+class TestManifestOperations:
+    """Test manifest creation and operations."""
+    
+    def test_create_empty_manifest_structure(self):
+        """Test that empty manifest has correct structure."""
+        manifest = uninstaller.create_empty_manifest()
+        
+        assert "version" in manifest
+        assert "installed" in manifest
+        assert "pre_existing" in manifest
+        assert isinstance(manifest["installed"]["models"], list)
+        assert isinstance(manifest["pre_existing"]["models"], list)
+    
+    def test_create_empty_manifest_version(self):
+        """Test that empty manifest has correct version."""
+        manifest = uninstaller.create_empty_manifest()
+        
+        assert manifest["version"] == "2.0"
