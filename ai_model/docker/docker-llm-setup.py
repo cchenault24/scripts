@@ -175,6 +175,15 @@ def main() -> int:
     print()
     rule_path = config.generate_global_rule()
     
+    # Step 12b: Generate codebase awareness rules for Agent mode
+    print()
+    try:
+        codebase_rules_path = config.generate_codebase_rules()
+        ui.print_info("Agent mode will use this file to understand your codebase")
+    except Exception as e:
+        ui.print_warning(f"Could not create codebase rules template: {e}")
+        ui.print_warning("You can manually create ~/.continue/rules/codebase-context.md later")
+    
     # Step 13: Generate .continueignore
     print()
     ignore_path = config.generate_continueignore()
@@ -185,7 +194,9 @@ def main() -> int:
     
     # Step 15: Show next steps
     print()
-    ide.show_next_steps(config_path, pulled_models, hw_info, target_ide=target_ide)
+    # Check if we have an embedding model for the codebase awareness info
+    has_embedding = any("embed" in m.roles for m in pulled_models)
+    ide.show_next_steps(config_path, pulled_models, hw_info, target_ide=target_ide, has_embedding=has_embedding)
     
     return 0
 

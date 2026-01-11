@@ -13,12 +13,17 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from typing import List, Tuple
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 from . import hardware
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
+
+# Launch Agent configuration
+LAUNCH_AGENT_LABEL = "com.ollama.server"
+LAUNCH_AGENT_PLIST = f"{LAUNCH_AGENT_LABEL}.plist"
 
 # Ollama API configuration
 # Ollama exposes an OpenAI-compatible API endpoint
@@ -37,9 +42,11 @@ def get_installation_instructions() -> str:
         if shutil.which("brew"):
             return "brew install ollama"
         else:
-            return "Download from https://ollama.com/download or install Homebrew first: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            # Use -k flag for corporate SSL compatibility
+            return "Download from https://ollama.com/download or install Homebrew first: /bin/bash -c \"$(curl -k -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     elif os_name == "Linux":
-        return "curl -fsSL https://ollama.com/install.sh | sh"
+        # Use -k flag for corporate SSL compatibility
+        return "curl -k -fsSL https://ollama.com/install.sh | sh"
     elif os_name == "Windows":
         return "Download installer from https://ollama.com/download"
     else:
@@ -66,7 +73,7 @@ def install_ollama() -> Tuple[bool, str]:
                 # Verify installation
                 ollama_path = shutil.which("ollama")
                 if ollama_path:
-                    version_code, version_out, _ = utils.run_command(["ollama", "--version"])
+                    version_code, version_out, _ = utils.run_command(["ollama", "--version"], clean_env=True)
                     if version_code == 0:
                         return True, version_out.strip()
                     return True, "installed"
@@ -87,6 +94,7 @@ def install_ollama() -> Tuple[bool, str]:
         ui.print_info("The script will install Ollama to ~/.local/bin or /usr/local/bin")
         
         # Download and run the install script
+        process = None
         try:
             import urllib.request
             install_script_url = "https://ollama.com/install.sh"
@@ -109,7 +117,7 @@ def install_ollama() -> Tuple[bool, str]:
                 # Verify installation
                 ollama_path = shutil.which("ollama")
                 if ollama_path:
-                    version_code, version_out, _ = utils.run_command(["ollama", "--version"])
+                    version_code, version_out, _ = utils.run_command(["ollama", "--version"], clean_env=True)
                     if version_code == 0:
                         return True, version_out.strip()
                     return True, "installed"
@@ -117,10 +125,29 @@ def install_ollama() -> Tuple[bool, str]:
             else:
                 ui.print_error(f"Installation failed: {stderr}")
                 return False, f"Installation failed: {stderr}"
+        except subprocess.TimeoutExpired:
+            # Clean up the process on timeout
+            if process:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            ui.print_error("Installation timed out")
+            ui.print_info("Please install manually: curl -k -fsSL https://ollama.com/install.sh | sh")
+            return False, "Installation timed out"
         except Exception as e:
             ui.print_error(f"Failed to install Ollama: {e}")
-            ui.print_info("Please install manually: curl -fsSL https://ollama.com/install.sh | sh")
+            ui.print_info("Please install manually: curl -k -fsSL https://ollama.com/install.sh | sh")
             return False, str(e)
+        finally:
+            # Ensure process is cleaned up
+            if process and process.poll() is None:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
     
     else:
         ui.print_warning(f"Automatic installation not supported on {os_name}")
@@ -232,7 +259,7 @@ def check_ollama() -> Tuple[bool, str]:
     
     # If we get here, ollama_path should exist (either was already installed or just installed)
     # Check ollama version
-    code, stdout, stderr = utils.run_command(["ollama", "--version"])
+    code, stdout, stderr = utils.run_command(["ollama", "--version"], clean_env=True)
     if code != 0:
         ui.print_error(f"Failed to get Ollama version: {stderr}")
         return False, ""
@@ -334,12 +361,16 @@ def start_ollama_service() -> bool:
     # Start Ollama service
     ui.print_info("Starting Ollama service...")
     try:
+        # Create clean environment without SSH_AUTH_SOCK to prevent Go HTTP client issues
+        clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
+        
         # Start ollama serve in background
         process = subprocess.Popen(
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True
+            start_new_session=True,
+            env=clean_env  # Pass clean environment
         )
         
         # Wait for API to become available (up to 15 seconds)
@@ -432,7 +463,7 @@ def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
         ui.print_info(f"API endpoint (default): {hw_info.ollama_api_endpoint}")
     
     # Check for existing models using ollama list command
-    code, stdout, stderr = utils.run_command(["ollama", "list"])
+    code, stdout, stderr = utils.run_command(["ollama", "list"], clean_env=True)
     
     if code == 0:
         hw_info.ollama_available = True
@@ -471,3 +502,407 @@ def check_ollama_api(hw_info: hardware.HardwareInfo) -> bool:
         # Couldn't reach API and couldn't start service - but still return True
         # to allow setup to continue (user can start manually)
         return True
+
+
+# =============================================================================
+# macOS Auto-Start Functions (launchd Launch Agent)
+# =============================================================================
+
+def setup_ollama_autostart_macos() -> bool:
+    """
+    Set up Ollama to start automatically on macOS using launchd.
+    
+    Creates a Launch Agent plist file at:
+    ~/Library/LaunchAgents/com.ollama.server.plist
+    
+    This is more reliable than Homebrew services and works regardless
+    of how Ollama was installed.
+    
+    Returns:
+        True if setup successful, False otherwise
+    """
+    if platform.system() != "Darwin":
+        ui.print_warning("Auto-start via launchd is only available on macOS")
+        return False
+    
+    # Find ollama path
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        ui.print_error("Cannot find ollama command")
+        return False
+    
+    # Make path absolute
+    ollama_path = os.path.abspath(ollama_path)
+    
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LAUNCH_AGENT_LABEL}</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>{ollama_path}</string>
+        <string>serve</string>
+    </array>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <string>/tmp/ollama.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/tmp/ollama.error.log</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <key>Nice</key>
+    <integer>0</integer>
+</dict>
+</plist>
+"""
+    
+    # Create LaunchAgents directory if it doesn't exist
+    launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
+    try:
+        launch_agents_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        ui.print_error(f"Cannot create LaunchAgents directory: {e}")
+        return False
+    
+    # Write plist file
+    plist_path = launch_agents_dir / LAUNCH_AGENT_PLIST
+    
+    try:
+        # Check if file already exists
+        if plist_path.exists():
+            ui.print_warning(f"Launch Agent already exists at {plist_path}")
+            if not ui.prompt_yes_no("Overwrite existing configuration?", default=True):
+                return False
+            # Unload existing first
+            utils.run_command(["launchctl", "unload", str(plist_path)], timeout=5)
+        
+        # Write new plist file
+        with open(plist_path, 'w') as f:
+            f.write(plist_content)
+        
+        ui.print_success(f"Created Launch Agent: {plist_path}")
+        ui.print_info(f"Ollama path: {ollama_path}")
+        
+        # Load the launch agent immediately
+        code, stdout, stderr = utils.run_command(
+            ["launchctl", "load", str(plist_path)],
+            timeout=10
+        )
+        
+        if code == 0:
+            ui.print_success("Launch Agent loaded successfully")
+            
+            # Wait a moment for service to start
+            time.sleep(2)
+            
+            # Verify Ollama is running
+            if verify_ollama_running():
+                ui.print_success("Ollama service is now running")
+                ui.print_success("Ollama will start automatically on boot")
+                return True
+            else:
+                ui.print_warning("Launch Agent loaded but Ollama may not be running yet")
+                ui.print_info("It should start within a few seconds")
+                ui.print_info("Check logs at: /tmp/ollama.log and /tmp/ollama.error.log")
+                return True
+        else:
+            ui.print_error(f"Failed to load Launch Agent: {stderr}")
+            ui.print_info("The Launch Agent was created but couldn't be loaded")
+            ui.print_info("It will start automatically on next boot")
+            ui.print_info("To start it now manually, run:")
+            ui.print_info(f"  launchctl load {plist_path}")
+            return True  # Still return True since file was created
+            
+    except PermissionError as e:
+        ui.print_error(f"Permission denied: {e}")
+        ui.print_info("You may need to run this script with appropriate permissions")
+        return False
+    except Exception as e:
+        ui.print_error(f"Failed to create Launch Agent: {e}")
+        return False
+
+
+def remove_ollama_autostart_macos() -> bool:
+    """
+    Remove Ollama auto-start configuration on macOS.
+    
+    Unloads and removes the Launch Agent plist file.
+    
+    Returns:
+        True if removal successful or nothing to remove, False on error
+    """
+    if platform.system() != "Darwin":
+        ui.print_info("Auto-start removal via launchd is only available on macOS")
+        return True
+    
+    plist_path = Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+    
+    if not plist_path.exists():
+        ui.print_info("No Launch Agent configuration found")
+        return True
+    
+    try:
+        ui.print_info(f"Found Launch Agent: {plist_path}")
+        
+        # Unload the launch agent first
+        code, stdout, stderr = utils.run_command(
+            ["launchctl", "unload", str(plist_path)],
+            timeout=10
+        )
+        
+        if code == 0:
+            ui.print_success("Launch Agent unloaded")
+        else:
+            # May fail if already unloaded - that's OK
+            ui.print_warning(f"Could not unload Launch Agent (may not be loaded): {stderr}")
+        
+        # Remove the plist file
+        plist_path.unlink()
+        ui.print_success("Removed Launch Agent configuration")
+        ui.print_info("Ollama will no longer start automatically on boot")
+        
+        return True
+        
+    except Exception as e:
+        ui.print_error(f"Failed to remove Launch Agent: {e}")
+        return False
+
+
+def check_ollama_autostart_status_macos() -> Tuple[bool, str]:
+    """
+    Check if Ollama is configured to start automatically on macOS.
+    
+    Returns:
+        Tuple of (is_configured, details)
+        - is_configured: True if auto-start is set up
+        - details: String describing the configuration method or status
+    """
+    if platform.system() != "Darwin":
+        return False, "Not macOS"
+    
+    plist_path = Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+    
+    # Check for Launch Agent
+    if plist_path.exists():
+        # Verify it's loaded
+        code, stdout, stderr = utils.run_command(
+            ["launchctl", "list"],
+            timeout=5
+        )
+        
+        if code == 0 and LAUNCH_AGENT_LABEL in stdout:
+            return True, f"Launch Agent (loaded, path: {plist_path})"
+        else:
+            return True, f"Launch Agent (created but not loaded, path: {plist_path})"
+    
+    # Check if Homebrew service is running (secondary check)
+    if shutil.which("brew"):
+        code, stdout, _ = utils.run_command(["brew", "services", "list"], timeout=5)
+        if code == 0 and "ollama" in stdout.lower():
+            if "started" in stdout.lower():
+                return True, "Homebrew services (running)"
+            else:
+                return True, "Homebrew services (configured but not running)"
+    
+    # Check if Ollama Desktop app is handling auto-start
+    # (Ollama Desktop has its own auto-start mechanism)
+    ollama_app_path = Path("/Applications/Ollama.app")
+    if ollama_app_path.exists():
+        # Check if Ollama app is in login items (this is harder to detect)
+        # For now, just note that the app exists
+        pass
+    
+    return False, "Not configured"
+
+
+def verify_ollama_running() -> bool:
+    """
+    Verify that Ollama service is currently running.
+    
+    Returns:
+        True if Ollama is running and responding, False otherwise
+    """
+    try:
+        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags")
+        with urllib.request.urlopen(req, timeout=3, context=get_unverified_ssl_context()) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def get_autostart_plist_path() -> Optional[Path]:
+    """
+    Get the path to the Ollama Launch Agent plist file.
+    
+    Returns:
+        Path to the plist file, or None if not on macOS
+    """
+    if platform.system() != "Darwin":
+        return None
+    return Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+
+
+def remove_ollama() -> Tuple[bool, List[str]]:
+    """
+    Remove Ollama installation from the system.
+    
+    Based on official Ollama uninstall documentation:
+    https://docs.ollama.com/macos#uninstall
+    
+    Returns:
+        Tuple of (success, list_of_errors):
+        - success: True if removal was successful
+        - list_of_errors: List of error messages for items that couldn't be removed
+    """
+    errors: List[str] = []
+    removed_items: List[str] = []
+    
+    # Check if Ollama is running
+    if verify_ollama_running():
+        ui.print_warning("Ollama is currently running")
+        ui.print_info("Attempting to stop Ollama service...")
+        
+        # Try to stop Ollama
+        try:
+            code, _, _ = utils.run_command(["pkill", "ollama"], timeout=5, clean_env=True)
+            time.sleep(2)  # Give it time to stop
+        except Exception as e:
+            errors.append(f"Could not stop Ollama service: {e}")
+    
+    # Check if installed via Homebrew (macOS)
+    is_homebrew_install = False
+    if platform.system() == "Darwin" and shutil.which("brew"):
+        try:
+            code, stdout, _ = utils.run_command(["brew", "list", "ollama"], timeout=5, clean_env=True)
+            if code == 0:
+                is_homebrew_install = True
+                ui.print_info("Detected Ollama installed via Homebrew")
+                ui.print_warning("For Homebrew installations, it's recommended to use: brew uninstall ollama")
+                ui.print_info("This script will attempt to remove files, but Homebrew-managed files may remain")
+                print()
+        except Exception:
+            pass  # Ignore errors checking Homebrew
+    
+    # Remove auto-start configuration first (if exists)
+    if platform.system() == "Darwin":
+        autostart_removed = remove_ollama_autostart_macos()
+        if autostart_removed:
+            removed_items.append("Auto-start configuration")
+    
+    # Paths to remove (macOS)
+    paths_to_remove = []
+    
+    if platform.system() == "Darwin":
+        # Application
+        paths_to_remove.append(("/Applications/Ollama.app", "Ollama application"))
+        
+        # CLI binary
+        paths_to_remove.append(("/usr/local/bin/ollama", "Ollama CLI binary"))
+        
+        # Application Support
+        app_support = Path.home() / "Library" / "Application Support" / "Ollama"
+        paths_to_remove.append((str(app_support), "Application Support directory"))
+        
+        # Saved Application State
+        saved_state = Path.home() / "Library" / "Saved Application State" / "com.electron.ollama.savedState"
+        paths_to_remove.append((str(saved_state), "Saved Application State"))
+        
+        # Caches
+        cache1 = Path.home() / "Library" / "Caches" / "com.electron.ollama"
+        paths_to_remove.append((str(cache1), "Electron cache"))
+        
+        cache2 = Path.home() / "Library" / "Caches" / "ollama"
+        paths_to_remove.append((str(cache2), "Ollama cache"))
+        
+        # WebKit cache
+        webkit_cache = Path.home() / "Library" / "WebKit" / "com.electron.ollama"
+        paths_to_remove.append((str(webkit_cache), "WebKit cache"))
+    
+    # User data directory (all platforms)
+    ollama_data = Path.home() / ".ollama"
+    paths_to_remove.append((str(ollama_data), "Ollama data directory (~/.ollama)"))
+    
+    # Remove each path
+    for path_str, description in paths_to_remove:
+        path = Path(path_str)
+        
+        if not path.exists():
+            continue
+        
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+                removed_items.append(description)
+                ui.print_success(f"Removed: {description}")
+            elif path.is_file() or path.is_symlink():
+                # For /usr/local/bin/ollama, might need sudo
+                if path_str == "/usr/local/bin/ollama":
+                    # Try without sudo first
+                    try:
+                        path.unlink()
+                        removed_items.append(description)
+                        ui.print_success(f"Removed: {description}")
+                    except PermissionError:
+                        # Need sudo - inform user
+                        errors.append(f"{description} requires sudo to remove. Run: sudo rm {path_str}")
+                        ui.print_warning(f"{description} requires sudo. Run: sudo rm {path_str}")
+                else:
+                    path.unlink()
+                    removed_items.append(description)
+                    ui.print_success(f"Removed: {description}")
+        except PermissionError as e:
+            error_msg = f"{description}: Permission denied. May need sudo."
+            errors.append(error_msg)
+            ui.print_warning(f"Could not remove {description}: Permission denied")
+        except (OSError, IOError, shutil.Error) as e:
+            error_msg = f"{description}: {e}"
+            errors.append(error_msg)
+            ui.print_warning(f"Could not remove {description}: {e}")
+    
+    # Summary
+    if removed_items:
+        ui.print_success(f"Removed {len(removed_items)} item(s)")
+    
+    if errors:
+        ui.print_warning(f"Could not remove {len(errors)} item(s) (see details above)")
+        ui.print_info("You may need to remove these manually or use sudo")
+    
+    # Verify removal
+    ollama_exists = shutil.which("ollama")
+    if ollama_exists:
+        if is_homebrew_install:
+            errors.append("Ollama CLI still found. If installed via Homebrew, run: brew uninstall ollama")
+            ui.print_warning("Ollama CLI still found in PATH")
+            ui.print_info("If installed via Homebrew, run: brew uninstall ollama")
+        else:
+            errors.append("Ollama CLI still found in PATH. May need to restart terminal or check other locations.")
+            ui.print_warning("Ollama CLI still found in PATH")
+    else:
+        ui.print_success("Ollama CLI no longer found in PATH")
+    
+    # If Homebrew install, suggest proper uninstall method
+    if is_homebrew_install and ollama_exists:
+        ui.print_info("")
+        ui.print_info("To complete removal of Homebrew-installed Ollama:")
+        ui.print_info("  brew uninstall ollama")
+    
+    success = len(errors) == 0
+    return success, errors
