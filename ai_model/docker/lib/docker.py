@@ -9,7 +9,7 @@ import json
 import shutil
 import urllib.error
 import urllib.request
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from . import hardware
 from . import models
@@ -224,3 +224,197 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
     
     ui.print_error(f"Error checking Docker Model Runner: {stderr}")
     return False
+
+
+def get_docker_memory_allocation() -> Optional[float]:
+    """
+    Get Docker memory allocation in GB.
+    
+    Returns:
+        Memory allocation in GB as float, or None if unable to detect
+    """
+    try:
+        code, stdout, _ = utils.run_command(
+            ["docker", "info", "--format", "{{.MemTotal}}"],
+            timeout=10,
+            clean_env=True
+        )
+        if code == 0 and stdout.strip():
+            # Docker returns memory in bytes
+            mem_bytes = int(stdout.strip())
+            mem_gb = mem_bytes / (1024 ** 3)
+            return mem_gb
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def get_docker_cpu_allocation() -> Optional[int]:
+    """
+    Get Docker CPU allocation.
+    
+    Returns:
+        Number of CPUs allocated to Docker, or None if unable to detect
+    """
+    try:
+        code, stdout, _ = utils.run_command(
+            ["docker", "info", "--format", "{{.NCPU}}"],
+            timeout=10,
+            clean_env=True
+        )
+        if code == 0 and stdout.strip():
+            cpu_count = int(stdout.strip())
+            return cpu_count
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, bool]:
+    """
+    Validate Docker resource allocation (memory and CPU).
+    
+    Checks:
+    - Docker memory allocation vs system RAM
+    - Recommends: Total RAM - 8GB (for macOS + React Native app)
+    - Minimum acceptable: 8GB after allocation (16GB total system RAM minimum)
+    - Warns if allocation is too high (within 7GB of total system RAM)
+    
+    Args:
+        hw_info: Hardware information containing system RAM
+        
+    Returns:
+        Tuple of (is_acceptable, should_continue):
+        - is_acceptable: True if resources meet minimum requirements
+        - should_continue: True if user wants to proceed (or resources are acceptable)
+    """
+    ui.print_subheader("Validating Docker Resource Allocation")
+    
+    system_ram_gb = hw_info.ram_gb
+    docker_mem_gb = get_docker_memory_allocation()
+    docker_cpu = get_docker_cpu_allocation()
+    
+    # Display current allocation
+    if docker_mem_gb is not None:
+        ui.print_info(f"Docker Memory Allocation: {docker_mem_gb:.1f}GB")
+    else:
+        ui.print_warning("Could not detect Docker memory allocation")
+    
+    if docker_cpu is not None:
+        ui.print_info(f"Docker CPU Allocation: {docker_cpu} cores")
+    else:
+        ui.print_info("Could not detect Docker CPU allocation")
+    
+    ui.print_info(f"System RAM: {system_ram_gb:.1f}GB")
+    print()
+    
+    # Calculate recommendations
+    recommended_mem_gb = max(0, system_ram_gb - 8.0)  # Reserve 8GB for macOS + React Native app
+    minimum_system_ram = 16.0  # Minimum total system RAM
+    minimum_available = 8.0  # Minimum available after Docker allocation
+    
+    # Determine CPU recommendation based on system
+    if hw_info.cpu_cores > 0:
+        # Recommend 6-10 CPUs depending on system
+        if hw_info.cpu_cores >= 10:
+            recommended_cpu = 10
+        elif hw_info.cpu_cores >= 8:
+            recommended_cpu = 8
+        else:
+            recommended_cpu = min(6, hw_info.cpu_cores)
+    else:
+        recommended_cpu = 6
+    
+    # Check if system RAM meets minimum
+    if system_ram_gb < minimum_system_ram:
+        ui.print_error(f"System RAM ({system_ram_gb:.1f}GB) is below minimum ({minimum_system_ram:.0f}GB)")
+        ui.print_error("This setup requires at least 16GB total system RAM")
+        print()
+        if not ui.prompt_yes_no("Continue anyway? (Not recommended)", default=False):
+            return False, False
+        return False, True
+    
+    # If we couldn't detect Docker memory, warn but allow continuation
+    if docker_mem_gb is None:
+        ui.print_warning("Could not verify Docker memory allocation")
+        ui.print_info("Please verify Docker Desktop settings manually")
+        print()
+        ui.print_info("Recommended settings:")
+        ui.print_info(f"  Memory: {recommended_mem_gb:.1f}GB (Total RAM - 8GB)")
+        ui.print_info(f"  CPUs: {recommended_cpu} cores")
+        print()
+        if ui.prompt_yes_no("Continue with setup?", default=True):
+            return True, True
+        return False, False
+    
+    # Calculate available RAM after Docker allocation
+    available_after_docker = system_ram_gb - docker_mem_gb
+    
+    # Check if allocation is too high (within 7GB of total system RAM)
+    if available_after_docker < 7.0:
+        ui.print_warning("Docker memory allocation is very high")
+        ui.print_warning(f"Only {available_after_docker:.1f}GB will remain for macOS and your React Native app")
+        ui.print_warning("This may starve the system and cause performance issues")
+        print()
+    
+    # Check if below minimum available
+    is_below_minimum = available_after_docker < minimum_available
+    
+    # Check if significantly different from recommendation
+    mem_diff = abs(docker_mem_gb - recommended_mem_gb)
+    is_suboptimal = mem_diff > 2.0 or is_below_minimum  # More than 2GB difference or below minimum
+    
+    if is_suboptimal:
+        ui.print_warning("Docker resource allocation is suboptimal")
+        print()
+        
+        # Show current vs recommended
+        print(ui.colorize("Current Configuration:", ui.Colors.BOLD))
+        print(f"  Memory: {docker_mem_gb:.1f}GB allocated")
+        print(f"  Available for system/apps: {available_after_docker:.1f}GB")
+        if docker_cpu is not None:
+            print(f"  CPUs: {docker_cpu} cores")
+        print()
+        
+        print(ui.colorize("Recommended Configuration:", ui.Colors.BOLD))
+        print(f"  Memory: {recommended_mem_gb:.1f}GB (Total RAM - 8GB)")
+        print(f"  Available for system/apps: 8.0GB")
+        print(f"  CPUs: {recommended_cpu} cores")
+        print()
+        
+        # Explanation
+        ui.print_info("Why these settings?")
+        ui.print_info("  • We need ~8GB reserved for macOS system operations")
+        ui.print_info("  • Your React Native app also needs memory to run")
+        ui.print_info("  • Too much Docker memory can starve the system")
+        print()
+        
+        # Instructions
+        ui.print_info(ui.colorize("How to adjust:", ui.Colors.BOLD))
+        ui.print_info("  1. Open Docker Desktop")
+        ui.print_info("  2. Click the ⚙️ Settings icon (top right)")
+        ui.print_info("  3. Go to 'Resources' → 'Advanced'")
+        ui.print_info("  4. Adjust the following:")
+        print(ui.colorize(f"     • Memory: Set to {recommended_mem_gb:.1f}GB", ui.Colors.CYAN))
+        print(ui.colorize(f"     • CPUs: Set to {recommended_cpu} cores", ui.Colors.CYAN))
+        ui.print_info("  5. Click 'Apply & restart'")
+        print()
+        
+        if is_below_minimum:
+            ui.print_error(f"Available RAM ({available_after_docker:.1f}GB) is below minimum ({minimum_available:.0f}GB)")
+            ui.print_error("This may cause system instability and app crashes")
+            print()
+            if not ui.prompt_yes_no("Continue anyway? (Not recommended)", default=False):
+                return False, False
+            return False, True
+        else:
+            if not ui.prompt_yes_no("Continue with current settings? (Recommended to adjust first)", default=False):
+                return False, False
+            return False, True
+    else:
+        # Resources are acceptable
+        ui.print_success("Docker resource allocation looks good")
+        if docker_cpu is not None and docker_cpu < recommended_cpu:
+            ui.print_info(f"Note: Consider increasing CPU allocation to {recommended_cpu} cores for better performance")
+        print()
+        return True, True

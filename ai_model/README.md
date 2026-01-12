@@ -206,27 +206,37 @@ The Docker script offers presets based on your hardware tier:
 
 Choose "Custom" preset to manually select models based on your needs.
 
-### Smart Recommendations (Ollama Setup v4.0)
+### Smart Recommendations (Ollama Setup)
 
-The Ollama script uses intelligent recommendations:
-- **Automatic portfolio**: Best models for your exact RAM, no questions asked
-- **Coding-focused**: Prioritizes models optimized for code assistance
-- **Balanced setup**: All-rounder chat + fast autocomplete + embeddings
-- **Two-level customization**:
-  - Level 1: Swap roles (e.g., pick a different chat model)
-  - Level 2: Add optional models (reasoning, vision)
+The Ollama script uses intelligent hardware-based recommendations:
+- **Automatic selection**: Best model for your Mac model + RAM configuration
+- **Simplified setup**: One primary model + embedding model
+- **Hardware-aware**: Automatically selects Llama 3.1 8B or Llama 3.3 70B based on your hardware
+- **No customization needed**: The script selects the optimal model for your system
 
-Example recommendation for 32GB RAM (Tier A):
+Example recommendation for M3 Max 36GB:
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
 │  RECOMMENDED SETUP FOR YOUR SYSTEM                       │
 │                                                          │
-│  Primary (Chat/Edit):  qwen2.5-coder:14b     ~8.5 GB    │
-│  Autocomplete:         granite-code:3b        ~2.0 GB    │
-│  Embeddings:           nomic-embed-text       ~0.3 GB    │
+│  Primary (Chat/Edit):  llama3.1:8b            ~4.58 GB   │
+│  Embeddings:           nomic-embed-text        ~0.3 GB    │
 │                                                          │
-│  Total RAM usage: ~10.8 GB (48% of 22.4 GB usable)      │
+│  Total RAM usage: ~4.88 GB                               │
+└─────────────────────────────────────────────────────────┘
+```
+
+Example recommendation for M4 Pro 48GB:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  RECOMMENDED SETUP FOR YOUR SYSTEM                       │
+│                                                          │
+│  Primary (Chat/Edit):  llama3.3:70b           ~37.22 GB  │
+│  Embeddings:           nomic-embed-text        ~0.3 GB    │
+│                                                          │
+│  Total RAM usage: ~37.52 GB                              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -261,16 +271,13 @@ python3 ollama/ollama-llm-setup.py
 10. Global rules generation
 11. Next steps display
 
-**Interactive Flow (Ollama Setup v4.0 - Smart Recommendations):**
-1. Hardware detection and tier classification
+**Interactive Flow (Ollama Setup - Smart Recommendations):**
+1. Hardware detection (Mac model + RAM)
 2. IDE auto-detection (VS Code, Cursor, IntelliJ IDEA)
 3. Ollama service verification
 4. API check
-5. **Smart recommendation display** - shows optimal portfolio for your hardware
-6. **Accept or Customize decision**:
-   - Accept: Proceed with recommended models
-   - Customize Level 1: Swap individual model roles (2-3 alternatives each)
-   - Customize Level 2: Add optional reasoning/vision models
+5. **Smart recommendation display** - shows optimal model for your hardware (Llama 3.1 8B or Llama 3.3 70B)
+6. **Accept recommendation** - proceed with the selected model
 7. Pre-installation validation (RAM, network, API)
 8. Model pulling with verification and automatic fallback
 9. Setup result display (success/failures with retry options)
@@ -463,20 +470,18 @@ Hardware detection and classification:
 - **calculate_os_overhead()**: Calculates OS memory overhead
 - **get_estimated_model_memory()**: Estimates available RAM for models
 
-#### `lib/model_selector.py` (Ollama Setup v4.0 - NEW)
+#### `lib/model_selector.py` (Ollama Setup)
 
 Smart model recommendation engine:
-- **ModelRole**: Enum for model roles (CHAT, EDIT, AUTOCOMPLETE, EMBED, REASONING, VISION)
-- **RecommendedModel**: Dataclass for recommended models with role, RAM, and Ollama name
-- **EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS**: Tier-aware model catalogs
-- **REASONING_MODELS, VISION_MODELS**: Optional advanced model catalogs
-- **get_tier_ram_reservation()**: Returns tier-specific RAM reservation percentage
-- **get_usable_ram()**: Calculates available RAM for models
-- **generate_best_recommendation()**: Selects optimal model portfolio for hardware
-- **display_recommendation()**: User-friendly formatting of recommendations
-- **get_alternatives_for_role()**: Finds alternative models for role swapping
-- **show_customization_menu()**: Two-level customization UI
-- **select_models_smart()**: Main entry point for smart model selection
+- **ModelRole**: Enum for model roles (CHAT, EDIT, EMBED)
+- **RecommendedModel**: Dataclass for recommended models with role, RAM, and model names
+- **MODEL_FAMILIES**: Model catalog with Llama 3.1 8B and Llama 3.3 70B variants
+- **EMBED_MODEL**: Universal embedding model (nomic-embed-text)
+- **get_apple_silicon_usable_ram()**: Calculates usable RAM for Apple Silicon Macs
+- **get_apple_silicon_performance_score()**: Calculates CPU performance score
+- **get_model_for_family()**: Selects optimal model based on Mac model + RAM
+- **explain_model_selection()**: Provides reasoning for model choice
+- **select_models_smart()**: Main entry point for smart model selection workflow
 
 #### `lib/validator.py` (Ollama Setup v4.0 - NEW)
 
@@ -570,32 +575,29 @@ Model Pulling → Configuration Generation → Global Rules Generation
 IDE Setup → Next Steps
 ```
 
-### Data Flow (Ollama Setup v4.0 Smart Recommendations)
+### Data Flow (Ollama Setup Smart Recommendations)
 
 ```text
-Hardware Detection → Tier Classification → Tier-Based RAM Reservation
+Hardware Detection → Mac Model + RAM Identification
     ↓
 IDE Auto-Detection (VS Code, Cursor, IntelliJ)
     ↓
 Ollama Service Check → API Verification
     ↓
-Smart Recommendation (model_selector.generate_best_recommendation)
+Smart Recommendation (model_selector.get_model_for_family)
+    - Selects Llama 3.1 8B or Llama 3.3 70B based on hardware
     ↓
-User Choice: Accept ─────────────────────────────────────┐
-    │                                                     │
-    ├── Customize Level 1: Role Swapping                  │
-    │       (get_alternatives_for_role)                   │
-    │                                                     │
-    └── Customize Level 2: Add Optional Models            │
-            (reasoning, vision)                           │
-                                                          ↓
+Display Hardware Info + Selected Model
+    ↓
+User Accepts Recommendation
+    ↓
 Pre-Install Validation (validator.validate_pre_install)
     ↓
 Model Pulling with Verification (validator.pull_models_with_tracking)
     │
     ├── Success → Continue
     │
-    └── Failure → Fallback (get_fallback_model) → Retry
+    └── Failure → Fallback → Retry
                                                           ↓
 Setup Result Display → Retry Option for Failures
     ↓
@@ -930,11 +932,13 @@ Safety Buffer (30%): 6.7 GB (for OS, apps, context)
 
 | Tier | Total RAM | Usable | Primary Model | Total Models |
 |------|-----------|--------|---------------|--------------|
-| **S** | >64GB | ~45GB | Codestral 22B Q5 (17GB) | ~30GB |
-| **A** | 32-64GB | ~34GB | Codestral 22B Q4 (13GB) | ~20GB |
-| **B** | 24-32GB | ~22GB | Phi-4 14B (8GB) | ~10GB |
-| **C** | 16-24GB | ~17GB | Granite 8B (5GB) | ~6GB |
+| **S** | >64GB | ~45GB | Llama 3.3 70B (39.59GB Ollama / 37.22GB Docker) | ~40GB |
+| **A** | 32-64GB | ~34GB | Llama 3.1 8B (4.58GB) | ~5GB |
+| **B** | 24-32GB | ~22GB | Llama 3.1 8B (4.58GB) | ~5GB |
+| **C** | 16-24GB | ~17GB | Llama 3.1 8B (4.58GB) | ~5GB |
 | **D** | <16GB | Unsupported | Minimum 16GB RAM required | - |
+
+**Note**: Model selection is based on Mac model + RAM configuration. See [Model Selection Matrix](#model-selection-matrix-source-of-truth) for exact mappings. Ultra models and high-end Max configurations (48GB+) use Llama 3.3 70B, while most other configurations use Llama 3.1 8B.
 
 ### Quantization Levels (Ollama)
 
@@ -948,27 +952,25 @@ Safety Buffer (30%): 6.7 GB (for OS, apps, context)
 Total RAM:          48GB
 Reserved (30%):     -14.4GB
 Usable:             33.6GB
-Model Budget:       28.5GB (85% of usable)
-Safety Buffer:      5.1GB (15% of usable)
 
 Recommended Models:
-- codestral:22b-q4_k_m     13GB (primary)
-- granite-code:8b-q4        5GB (helper)
-- granite-code:3b-q4        2GB (autocomplete)
-- nomic-embed-text         0.3GB (embeddings)
+- llama3.3:70b (Ollama) / ai/llama3.3:70B-Q4_0 (Docker)  37.22GB (primary)
+- nomic-embed-text (Ollama) / ai/nomic-embed-text-v1.5 (Docker)  0.3GB (embeddings)
 ────────────────────────────────
-Total Models:             20.3GB
-Remaining Buffer:         13.3GB ✓
+Total Models:             37.52GB
+Remaining Buffer:          -3.92GB (uses reserved buffer) ✓
 ```
+
+**Note**: M4 Pro with 48GB RAM qualifies for the Llama 3.3 70B model according to the [Model Selection Matrix](#model-selection-matrix-source-of-truth).
 
 ### RAM Budget Allocation
 
-The portfolio recommendation uses conservative RAM budgets to ensure stability:
-- **Primary model**: 40% of usable RAM (main workhorse)
-- **Specialized models**: 25% of usable RAM (coding helper)
-- **Utility models**: 5% of usable RAM (fast autocomplete)
-- **Embedding models**: 3% of usable RAM (embeddings)
-- **Reserve**: 27% free RAM (safety buffer for smooth operation)
+The model selection uses a simplified approach:
+- **Primary model**: Selected based on Mac model + RAM (see [Model Selection Matrix](#model-selection-matrix-source-of-truth))
+  - Most configurations: Llama 3.1 8B (4.58GB)
+  - Ultra/high-end Max: Llama 3.3 70B (39.59GB Ollama / 37.22GB Docker)
+- **Embedding model**: nomic-embed-text (~0.3GB) - included for all configurations
+- **Reserve**: Remaining RAM after model allocation (safety buffer for OS, apps, and context)
 
 ### Apple Silicon Optimization
 
@@ -978,22 +980,70 @@ For Apple Silicon Macs:
 - **Neural Engine**: 16-32 cores available for acceleration
 - **Optimized Models**: Quantized variants for efficient inference
 
+### Model Selection Matrix (Source of Truth)
+
+The following table shows the exact model selection based on Mac model and RAM configuration. This is the authoritative reference for model recommendations:
+
+| Mac Model | RAM | CPU Cores | GPU Cores | Model | Size | Ollama Command | Docker Model Runner Command |
+|-----------|-----|-----------|----------|-------|------|----------------|----------------------------|
+| M1 | 16GB | 8 (4P+4E) | 7-8 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M1 Pro | 16GB | 8-10 (6-8P+2E) | 14-16 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M1 Max | 32GB | 10 (8P+2E) | 24-32 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M1 Ultra | 64GB+ | 20 (16P+4E) | 48-64 | Llama 3.3:70b | 39.59GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
+| M2 | 16GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M2 | 24GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M2 Pro | 16GB | 10-12 (6-8P+4E) | 16-19 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M2 Max | 32GB | 12 (8P+4E) | 30-38 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M2 Ultra | 64GB+ | 24 (16P+8E) | 60-76 | Llama 3.3:70b | 39.59GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
+| M3 | 16GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M3 | 24GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M3 Pro | 18GB | 11-12 (5-6P+5-6E) | 14-18 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M3 Pro | 36GB | 12 (6P+6E) | 18 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M3 Max | 36GB | 14-16 (10-12P+4E) | 30-40 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M3 Max | 48GB+ | 16 (12P+4E) | 40 | Llama 3.3:70b | 37.22GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
+| M4 | 16GB | 10 (4P+6E) | 10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M4 | 24GB | 10 (4P+6E) | 10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M4 Pro | 24GB | 14 (10P+4E) | 20 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
+| M4 Pro | 48GB | 14 (10P+4E) | 20 | Llama 3.3:70b | 37.22GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
+| M4 Max | 36GB+ | 16 (12P+4E) | 40 | Llama 3.3:70b | 37.22GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
+
+**Selection Rules:**
+- **Most configurations**: Use `llama3.1:8b` (4.58GB) - best scaling across all hardware
+- **Ultra models (64GB+)**: Use `llama3.3:70b` (39.59GB Ollama / 37.22GB Docker) - top tier quality
+- **M3 Max 48GB+**: Use `llama3.3:70b` - high-end Max configuration
+- **M4 Pro 48GB**: Use `llama3.3:70b` - Pro configuration with high RAM
+- **M4 Max**: Use `llama3.3:70b` - Max configuration
+
+**Embedding Model (All Configurations):**
+- **Ollama**: `nomic-embed-text` (~0.3GB)
+- **Docker**: `ai/nomic-embed-text-v1.5` (~0.3GB)
+
 ## 🤖 Model Catalog
 
-### Model Categories
+### Available Models
 
-#### Chat/Edit Models
-- **Large** (Tier S): 34B reasoning models (Llama 3.3), 22B coding models (Granite 4.0)
-- **Medium-Large** (Tier A): 34B reasoning models (Llama 3.3), 13B coding models (Granite 4.0)
-- **Medium** (Tier B): 13B general models (Llama 3.2), 7B coding models (Phi-4)
-- **Small** (Tier C): 7B general models (Llama 3.2), 3B coding models (Granite Nano)
-- **Tier D**: Unsupported - minimum 16GB RAM required
+This setup only offers **Meta Llama models** for security and compatibility reasons:
 
-#### Autocomplete Models
-- **Ultra-fast**: 3B models (Granite Nano), 1B models (TinyLlama)
+#### Primary Models
+- **Llama 3.1 8B** (4.58GB): Used for most Mac configurations
+  - Ollama: `llama3.1:8b`
+  - Docker: `ai/llama3.1:8B-Q4_K_M`
+  - Best scaling across all hardware
+  - Recommended for: M1, M2, M3, M4 (most configurations)
+
+- **Llama 3.3 70B** (39.59GB Ollama / 37.22GB Docker): Used for high-end configurations
+  - Ollama: `llama3.3:70b`
+  - Docker: `ai/llama3.3:70B-Q4_0`
+  - Top tier quality
+  - Recommended for: Ultra models (64GB+), M3 Max 48GB+, M4 Pro 48GB, M4 Max
 
 #### Embedding Models
-- **Code Embeddings**: Specialized models for semantic code search
+- **Nomic Embed Text** (~0.3GB): Used for all configurations
+  - Ollama: `nomic-embed-text`
+  - Docker: `ai/nomic-embed-text-v1.5`
+  - Best open embedding model for code indexing (8192 tokens)
+
+See the [Model Selection Matrix](#model-selection-matrix-source-of-truth) for exact model selection based on your Mac model and RAM configuration.
 
 ### Model Variants
 
@@ -1013,14 +1063,13 @@ Valid roles per Continue.dev schema:
 - **rerank**: Reranking search results
 - **summarize**: Summarization tasks
 
-### Smart Selection Roles (Ollama Setup v4.0)
+### Model Roles
 
-The smart model selector uses functional roles for portfolio building:
-- **PRIMARY**: All-rounder for chat, edit, and apply (main workhorse)
-- **AUTOCOMPLETE**: Fast model for tab completion
-- **EMBED**: Embedding model for semantic code search
-- **REASONING**: Optional - advanced reasoning capabilities (Level 2)
-- **VISION**: Optional - multimodal image understanding (Level 2)
+The selected models support the following roles:
+- **chat**: General conversation and code assistance
+- **edit**: Code editing and refactoring
+- **apply**: Apply code changes
+- **embed**: Semantic code search embeddings (nomic-embed-text)
 
 ## 🔧 Troubleshooting
 
@@ -1414,30 +1463,19 @@ MIT License - See LICENSE file for details.
 ## 📝 Changelog
 
 ### Version 4.0.0 (Ollama Smart Recommendations)
-- **Smart Model Recommendations**: Intelligent model selection based on hardware capabilities
-  - Automatically recommends the highest quality models that safely fit into available RAM
-  - Assumes users want the best quality for coding workflows
-  - Prioritizes a balanced portfolio: all-rounder chat, fast autocomplete, embeddings
-  - Hardware-based recommendations without user questions
-  - Uses Continue.dev's recommended models, filtered for Ollama compatibility
-  - Hardcoded backup catalog for API failures
-- **Tier-Based RAM Reservation**: Variable overhead based on hardware tier
-  - 40% reserved for Tier C (16-24GB) - conservative for limited RAM
-  - 35% reserved for Tier B (24-32GB) - balanced approach
-  - 30% reserved for Tier A/S (32GB+) - more RAM for models
-- **Model Variant Selection**: Intelligent variant picker
-  - Queries Ollama API for available variants (Q4/Q5/F16, 3B/8B/70B)
-  - Selects the largest variant that fits RAM budget
-  - Falls back to hardcoded catalog if API fails
-  - Immediate verification after each pull
-- **Two-Level Customization UI**: Streamlined user experience
-  - Single "best recommendation" approach with Accept/Customize options
-  - Level 1: Role swapping (2-3 vetted alternatives per role)
-  - Level 2: Advanced options (add reasoning or vision models)
+- **Simplified Model Selection**: Hardware-based model selection with only Meta Llama models
+  - Automatically selects Llama 3.1 8B or Llama 3.3 70B based on Mac model + RAM
+  - Selection based on source of truth matrix (see Model Selection Matrix in README)
+  - Ultra models and high-end Max configurations (48GB+) get Llama 3.3 70B
+  - All other configurations get Llama 3.1 8B
+  - Includes nomic-embed-text embedding model for all configurations
+- **Hardware-Aware Selection**: Mac model + RAM determines model choice
+  - Detects Apple Silicon chip model and RAM configuration
+  - Calculates usable RAM and CPU performance score
+  - Selects optimal model variant that fits hardware capabilities
 - **Reliable Model Pulling**: Robust installation with fallbacks
   - Immediate verification after each model pull
-  - Automatic fallback to alternatives from hardcoded catalog
-  - Continues with remaining models on individual failures
+  - Automatic fallback to alternatives if primary model fails
   - Clear feedback and actionable next steps for partial setups
   - Retry mechanism for failed models
 - **Smart Uninstaller v2.0**: Manifest-based cleanup system
@@ -1481,18 +1519,14 @@ MIT License - See LICENSE file for details.
   - Clear installation instructions for both options
 
 ### Version 2.1.0
-- **Conservative model selection**: Downgraded all tier recommendations by one size tier for better stability
-  - Tier S: 70B → 34B reasoning, 34B → 22B coding, F16 → 13B Q5 multimodal
-  - Tier A: 70B → 34B reasoning, 34B → 13B coding, 13B → 7B multimodal
-  - Tier B: 34B → 13B general, 13B → 7B coding, 7B → 3B multimodal
-  - Tier C: 13B → 7B general, 7B → 3B coding, 3B → 1B utility
-  - Tier D: Unsupported - minimum 16GB RAM required
-- **Conservative RAM budgets**: Updated allocations for proper headroom
-  - Primary budget: 70% → 50% of usable RAM
-  - Specialized budget: 25% → 30% of usable RAM
-  - Utility budget: 3% (unchanged)
-  - Reserve: 2% → 17% free RAM (for OS, multiple models, browser, and other apps)
-- **Improved stability**: Models now fit comfortably in memory with proper headroom for system overhead
+- **Conservative model selection**: Simplified to Meta Llama models only
+  - Removed support for multiple model families (Mistral, CodeLlama, etc.)
+  - Focus on Llama 3.1 8B and Llama 3.3 70B for security and compatibility
+  - Model selection based on Mac model + RAM configuration
+- **Simplified RAM allocation**: Single model + embedding approach
+  - Primary model: Llama 3.1 8B (4.58GB) or Llama 3.3 70B (37-40GB)
+  - Embedding model: nomic-embed-text (~0.3GB)
+  - Remaining RAM reserved for OS, apps, and context
 
 ### Version 2.0.0
 - **Schema compliance**: Removed all fields not in the official Continue.dev schema to ensure validation passes
@@ -1523,7 +1557,8 @@ MIT License - See LICENSE file for details.
 
 - Docker for Docker Model Runner
 - Continue.dev team for the VS Code extension
-- Model providers (Meta, Mistral, IBM, Google, etc.)
+- Meta for Llama models
+- Nomic AI for nomic-embed-text
 - Open source community
 
 ---

@@ -96,13 +96,14 @@ EMBED_MODEL = RecommendedModel(
 
 # Model families with all variants, sorted from smallest to largest
 # Only Meta Llama models are offered (3.1 for small, 3.3 for large)
+# Source of truth: Mac Model + RAM determines model selection
 MODEL_FAMILIES = {
     "llama": [
-        # M1/M2 16GB (11GB usable)
+        # Llama 3.1 8B Q4 - for most configurations (all except Ultra and high-end Max)
         RecommendedModel(
             name="Llama 3.1 8B Q4",
             docker_name="ai/llama3.1:8B-Q4_K_M",
-            ram_gb=5.0,
+            ram_gb=4.58,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
             context_length=32768,
@@ -110,63 +111,21 @@ MODEL_FAMILIES = {
             fallback_name="ai/llama3.1:8B-Q4_K_M",
             min_perf_score=1.0,
             requires_fp16=False,
-            recommended_for=["M1", "M2"]
+            recommended_for=["M1", "M2", "M3", "M4"]
         ),
-        # M2/M3 24GB (17GB usable)
-        RecommendedModel(
-            name="Llama 3.1 8B F16",
-            docker_name="ai/llama3.1:8B-F16",
-            ram_gb=16.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            context_length=32768,
-            description="Meta Llama 3.1 8B FP16 - Best scaling across all hardware",
-            fallback_name="ai/llama3.1:8B-Q4_K_M",
-            min_perf_score=1.2,
-            requires_fp16=True,
-            recommended_for=["M2", "M3"]
-        ),
-        # M3 Pro 32GB (22GB usable)
-        RecommendedModel(
-            name="Llama 3.1 8B F16",
-            docker_name="ai/llama3.1:8B-F16",
-            ram_gb=16.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            context_length=32768,
-            description="Meta Llama 3.1 8B FP16 - Best scaling across all hardware",
-            fallback_name="ai/llama3.1:8B-Q4_K_M",
-            min_perf_score=1.8,
-            requires_fp16=True,
-            recommended_for=["M3 Pro"]
-        ),
-        # M3 Max 36GB (25GB usable)
-        RecommendedModel(
-            name="Llama 3.1 8B F16",
-            docker_name="ai/llama3.1:8B-F16",
-            ram_gb=16.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            context_length=32768,
-            description="Meta Llama 3.1 8B FP16 - Best scaling across all hardware",
-            fallback_name="ai/llama3.1:8B-Q4_K_M",
-            min_perf_score=2.0,
-            requires_fp16=True,
-            recommended_for=["M3 Max"]
-        ),
-        # M4 Pro 48GB (34GB usable)
+        # Llama 3.3 70B Q4 - for Ultra and high-end Max models (48GB+)
         RecommendedModel(
             name="Llama 3.3 70B Q4",
             docker_name="ai/llama3.3:70B-Q4_0",
-            ram_gb=37.0,
+            ram_gb=37.22,
             role=ModelRole.CHAT,
             roles=["chat", "edit", "autocomplete"],
             context_length=32768,
             description="Meta Llama 3.3 70B with Q4 quantization - Top tier quality",
-            fallback_name="ai/llama3.1:8B-F16",
-            min_perf_score=2.5,
+            fallback_name="ai/llama3.1:8B-Q4_K_M",
+            min_perf_score=2.0,
             requires_fp16=False,
-            recommended_for=["M4 Pro"]
+            recommended_for=["M1 Ultra", "M2 Ultra", "M3 Max 48GB+", "M4 Pro 48GB", "M4 Max"]
         ),
     ],
 }
@@ -523,14 +482,14 @@ def get_available_families(hw_info: hardware.HardwareInfo) -> List[Dict[str, str
 
 def get_model_for_family(hw_info: hardware.HardwareInfo, family: str) -> RecommendedModel:
     """
-    Get the best model variant for a given family based on hardware capabilities.
+    Get the best model variant for a given family based on Mac model + RAM.
     
-    Smart selection algorithm:
-    1. Filter variants that fit in usable RAM
-    2. Filter variants that meet CPU requirements
-    3. Filter variants that match fp16 requirements
-    4. Select largest/highest quality from filtered list
-    5. Fallback to smallest variant if no match
+    Selection rules based on source of truth matrix:
+    - Most configurations: llama3.1:8b (4.58GB)
+    - Ultra models (64GB+): llama3.3:70b (39.59GB Ollama / 37.22GB Docker)
+    - M3 Max 48GB+: llama3.3:70b
+    - M4 Pro 48GB: llama3.3:70b
+    - M4 Max: llama3.3:70b
     
     Args:
         hw_info: Hardware information
@@ -555,37 +514,38 @@ def get_model_for_family(hw_info: hardware.HardwareInfo, family: str) -> Recomme
     if not variants:
         raise ValueError(f"No variants available for family: {family}")
     
+    chip_model = hw_info.apple_chip_model or ""
+    ram_gb = hw_info.ram_gb
     usable_ram = capabilities["usable_ram_gb"]
     performance_score = capabilities["performance_score"]
-    can_handle_fp16 = capabilities["can_handle_fp16"]
     
-    # Step 1: Filter by RAM
-    ram_filtered = [v for v in variants if v.ram_gb <= usable_ram]
+    # Check for Ultra models or high-end Max models that should get 70B
+    # Based on source of truth matrix: Ultra (64GB+) and high-end Max (48GB+) get 70B
+    is_ultra = "Ultra" in chip_model
+    is_m3_max_48gb_plus = "M3 Max" in chip_model and ram_gb >= 48
+    is_m4_pro_48gb = "M4 Pro" in chip_model and ram_gb >= 48
+    is_m4_max = "M4 Max" in chip_model
     
-    # Step 2: Filter by CPU performance score
-    cpu_filtered = [v for v in ram_filtered if v.min_perf_score <= performance_score]
+    # Select 70B model for Ultra/high-end configurations
+    if is_ultra or is_m3_max_48gb_plus or is_m4_pro_48gb or is_m4_max:
+        # Find 70B variant
+        for variant in variants:
+            if "70B" in variant.docker_name:
+                # Verify it fits in RAM and meets CPU requirements
+                if variant.ram_gb <= usable_ram and variant.min_perf_score <= performance_score:
+                    return variant
+                # If it doesn't fit, fall back to 8B
+                break
     
-    # Step 3: Filter by FP16 capability
-    fp16_filtered = []
-    for v in cpu_filtered:
-        if v.requires_fp16 and not can_handle_fp16:
-            continue  # Skip variants requiring FP16 if system can't handle it
-        fp16_filtered.append(v)
+    # Default to 8B model for all other configurations
+    for variant in variants:
+        if "8B" in variant.docker_name:
+            # Verify it fits (should always fit, but check anyway)
+            if variant.ram_gb <= usable_ram:
+                return variant
     
-    # Step 4: Select largest/highest quality (last in sorted list)
-    if fp16_filtered:
-        selected = fp16_filtered[-1]
-    elif cpu_filtered:
-        # If FP16 filtered out all, use CPU filtered (may not be optimal but works)
-        selected = cpu_filtered[-1]
-    elif ram_filtered:
-        # If CPU filtered out all, use RAM filtered (may be slow but works)
-        selected = ram_filtered[-1]
-    else:
-        # Step 5: Fallback to smallest variant
-        selected = variants[0]
-    
-    return selected
+    # Fallback to smallest variant
+    return variants[0]
 
 
 def explain_model_selection(

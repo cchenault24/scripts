@@ -130,7 +130,14 @@ def main() -> int:
         ui.print_error("Docker Model Runner is required but not available.")
         return 1
     
-    # Step 4b: Record pre-existing models for manifest
+    # Step 4b: Validate Docker resource allocation
+    print()
+    resources_acceptable, should_continue = docker.validate_docker_resources(hw_info)
+    if not should_continue:
+        ui.print_info("Setup cancelled. Please adjust Docker Desktop settings and try again.")
+        return 0
+    
+    # Step 4c: Record pre-existing models for manifest
     pre_existing_models = get_pre_existing_models()
     hw_info.docker_model_runner_available = True
     
