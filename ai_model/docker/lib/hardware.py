@@ -9,7 +9,7 @@ import platform
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import ui
 from . import utils
@@ -219,6 +219,162 @@ def detect_apple_silicon_details(info: HardwareInfo) -> None:
     info.neural_engine_cores = ne_cores.get(info.apple_chip_model, 16)
 
 
+def get_apple_silicon_usable_ram(hw_info: HardwareInfo) -> Optional[float]:
+    """
+    Get usable RAM for Apple Silicon systems.
+    
+    Validates system is Apple Silicon and calculates actual usable RAM
+    using tier-based reservation (40%/35%/30% based on RAM amount).
+    
+    Args:
+        hw_info: Hardware information
+        
+    Returns:
+        Usable RAM in GB as float, or None for non-Apple Silicon systems
+    """
+    if not hw_info.has_apple_silicon:
+        return None
+    
+    return hw_info.get_estimated_model_memory()
+
+
+def get_apple_silicon_performance_score(hw_info: HardwareInfo) -> Optional[float]:
+    """
+    Calculate CPU performance score based on Apple Silicon capabilities.
+    
+    Factors considered:
+    - Chip generation: M1=1.0, M2=1.2, M3=1.4, M4=1.6 (base multiplier)
+    - Chip tier: base=1.0, Pro=1.3, Max=1.6, Ultra=2.0 (tier multiplier)
+    - Performance cores: More P-cores = better inference speed
+    - Neural Engine cores: More NE cores = better ML acceleration
+    
+    Formula: score = generation_mult * tier_mult * (1 + perf_cores/10) * (1 + ne_cores/20)
+    
+    Args:
+        hw_info: Hardware information
+        
+    Returns:
+        Performance score as float, or None for non-Apple Silicon systems
+    """
+    if not hw_info.has_apple_silicon:
+        return None
+    
+    # Extract chip generation from chip model (M1, M2, M3, M4)
+    chip_model = hw_info.apple_chip_model or ""
+    generation_match = re.search(r"M(\d+)", chip_model)
+    if not generation_match:
+        return None
+    
+    generation_num = int(generation_match.group(1))
+    generation_mult = {
+        1: 1.0,
+        2: 1.2,
+        3: 1.4,
+        4: 1.6,
+    }.get(generation_num, 1.0)
+    
+    # Determine chip tier
+    tier_mult = 1.0
+    if "Ultra" in chip_model:
+        tier_mult = 2.0
+    elif "Max" in chip_model:
+        tier_mult = 1.6
+    elif "Pro" in chip_model:
+        tier_mult = 1.3
+    # base = 1.0 (default)
+    
+    # Get performance cores (default to detected or estimate)
+    perf_cores = hw_info.cpu_perf_cores if hw_info.cpu_perf_cores > 0 else 4
+    ne_cores = hw_info.neural_engine_cores if hw_info.neural_engine_cores > 0 else 16
+    
+    # Calculate score
+    score = generation_mult * tier_mult * (1 + perf_cores / 10) * (1 + ne_cores / 20)
+    
+    return score
+
+
+def get_apple_silicon_capabilities(hw_info: HardwareInfo) -> Optional[Dict[str, Any]]:
+    """
+    Get comprehensive Apple Silicon capabilities.
+    
+    Returns dict with:
+    - usable_ram_gb: Calculated usable RAM
+    - performance_score: CPU performance score
+    - chip_generation: 1, 2, 3, or 4
+    - chip_tier: "base", "pro", "max", or "ultra"
+    - can_handle_fp16: Boolean (M3 Pro+ or M4+ can handle fp16 efficiently)
+    - can_handle_large_models: Boolean (based on RAM + performance score)
+    
+    Args:
+        hw_info: Hardware information
+        
+    Returns:
+        Dict with capabilities, or None for non-Apple Silicon systems
+    """
+    if not hw_info.has_apple_silicon:
+        return None
+    
+    usable_ram = get_apple_silicon_usable_ram(hw_info)
+    performance_score = get_apple_silicon_performance_score(hw_info)
+    
+    if usable_ram is None or performance_score is None:
+        return None
+    
+    # Extract chip generation and tier
+    chip_model = hw_info.apple_chip_model or ""
+    generation_match = re.search(r"M(\d+)", chip_model)
+    chip_generation = int(generation_match.group(1)) if generation_match else 1
+    
+    chip_tier = "base"
+    if "Ultra" in chip_model:
+        chip_tier = "ultra"
+    elif "Max" in chip_model:
+        chip_tier = "max"
+    elif "Pro" in chip_model:
+        chip_tier = "pro"
+    
+    # FP16 capability: M3 Pro+ or M4+ can handle fp16 efficiently
+    can_handle_fp16 = (chip_generation >= 4) or (chip_generation == 3 and chip_tier in ("pro", "max", "ultra"))
+    
+    # Large models: Based on RAM (>=32GB) and performance score (>=2.0)
+    can_handle_large_models = usable_ram >= 32.0 and performance_score >= 2.0
+    
+    return {
+        "usable_ram_gb": usable_ram,
+        "performance_score": performance_score,
+        "chip_generation": chip_generation,
+        "chip_tier": chip_tier,
+        "can_handle_fp16": can_handle_fp16,
+        "can_handle_large_models": can_handle_large_models,
+    }
+
+
+def validate_apple_silicon_support(hw_info: HardwareInfo) -> Tuple[bool, Optional[str]]:
+    """
+    Validate that the system is Apple Silicon.
+    
+    Args:
+        hw_info: Hardware information
+        
+    Returns:
+        Tuple of (is_supported, error_message)
+        - (True, None) if Apple Silicon is detected
+        - (False, error_message) if not Apple Silicon
+    """
+    if not hw_info.has_apple_silicon:
+        return (False, "This setup only supports Apple Silicon Macs")
+    
+    # Validate minimum requirements
+    if hw_info.ram_gb < 16:
+        return (False, f"Insufficient RAM: {hw_info.ram_gb:.1f}GB detected. Minimum 16GB required.")
+    
+    performance_score = get_apple_silicon_performance_score(hw_info)
+    if performance_score is None or performance_score < 1.0:
+        return (False, "Unable to calculate CPU performance score. Minimum performance score of 1.0 required.")
+    
+    return (True, None)
+
+
 def detect_hardware() -> HardwareInfo:
     """Detect system hardware and classify into tier."""
     ui.print_subheader("Detecting Hardware")
@@ -357,6 +513,13 @@ def detect_hardware() -> HardwareInfo:
         ui.print_error("Minimum 16GB RAM required for Docker Model Runner setup")
         ui.print_error("Please upgrade your hardware to at least 16GB RAM")
         raise SystemExit("Hardware requirements not met: Minimum 16GB RAM required")
+    
+    # Validate Apple Silicon requirement (after detection)
+    if info.has_apple_silicon:
+        is_supported, error_msg = validate_apple_silicon_support(info)
+        if not is_supported:
+            ui.print_error(error_msg or "This setup only supports Apple Silicon Macs")
+            raise SystemExit("Hardware requirements not met: Apple Silicon required")
     
     # Classify tier based on total RAM (MUST happen before usable_ram_gb calculation)
     # Tier system: S (>64GB), A (32-64GB), B (24-32GB), C (16-24GB), D (<16GB - unsupported)
