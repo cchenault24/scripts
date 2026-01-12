@@ -411,7 +411,6 @@ class TestShowNextSteps:
             hw_info.ollama_api_endpoint = "http://localhost:11434/v1"
             hw_info.ollama_available = True
         hw_info.os_name = "Darwin"
-        hw_info.get_tier_label = MagicMock(return_value="Tier C")
         
         # Create mock models
         models = [

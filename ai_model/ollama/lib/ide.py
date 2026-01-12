@@ -391,7 +391,6 @@ def show_next_steps(
     print(ui.colorize("Installation Summary:", ui.Colors.GREEN + ui.Colors.BOLD))
     print()
     print(f"  Hardware: {hw_info.apple_chip_model or hw_info.cpu_brand}")
-    print(f"  Tier: {hw_info.get_tier_label()}")
     if hw_info.has_apple_silicon:
         print(f"  GPU: Metal acceleration enabled ({hw_info.ram_gb:.0f}GB unified memory)")
     print(f"  API Endpoint: {hw_info.ollama_api_endpoint}")
