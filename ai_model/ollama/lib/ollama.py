@@ -14,7 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import hardware
 from . import ui
@@ -322,19 +322,17 @@ def start_ollama_service() -> bool:
     """
     Start Ollama service if it's not already running.
     
+    On macOS, if auto-start is configured, uses launchd to start it.
+    Otherwise, starts a temporary process and optionally offers to set up auto-start.
+    
     Returns:
         True if Ollama is now running, False otherwise
     """
     import subprocess
     
     # First check if Ollama is already running
-    try:
-        req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
-            if response.status == 200:
-                return True  # Already running
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-        pass  # Not running, continue to start it
+    if verify_ollama_running():
+        return True  # Already running
     
     # Check if ollama process is running
     try:
@@ -348,19 +346,70 @@ def start_ollama_service() -> bool:
             ui.print_info("Ollama process found, waiting for API to be ready...")
             for _ in range(10):  # Wait up to 10 seconds
                 time.sleep(1)
-                try:
-                    req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
-                    with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
-                        if response.status == 200:
-                            return True
-                except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                    continue
+                if verify_ollama_running():
+                    return True
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass  # pgrep not available or timed out, continue to start
     
-    # Start Ollama service
+    # On macOS, check if auto-start is configured and use it
+    if platform.system() == "Darwin":
+        is_configured, details = check_ollama_autostart_status_macos()
+        if is_configured:
+            plist_path = get_autostart_plist_path()
+            if plist_path and plist_path.exists():
+                ui.print_info("Using configured auto-start to start Ollama...")
+                # Load/start the launch agent
+                code, stdout, stderr = utils.run_command(
+                    ["launchctl", "load", str(plist_path)],
+                    timeout=10
+                )
+                
+                if code == 0:
+                    # Wait for service to start
+                    ui.print_info("Waiting for Ollama service to start...")
+                    for attempt in range(15):
+                        time.sleep(1)
+                        if verify_ollama_running():
+                            ui.print_success("Ollama service started via auto-start")
+                            return True
+                    
+                    # Check if it's loaded even if API not ready yet
+                    code2, stdout2, _ = utils.run_command(
+                        ["launchctl", "list", LAUNCH_AGENT_LABEL],
+                        timeout=5
+                    )
+                    if code2 == 0:
+                        ui.print_warning("Ollama auto-start loaded but API not ready yet")
+                        ui.print_info("It should be available shortly")
+                        return True
+                else:
+                    # Auto-start exists but couldn't load - fall through to temporary start
+                    ui.print_warning(f"Could not load auto-start: {stderr}")
+                    ui.print_info("Starting Ollama temporarily...")
+    
+    # Start Ollama service temporarily (will be killed when terminal/script exits)
     ui.print_info("Starting Ollama service...")
+    
+    # Check for port conflicts before starting
+    if check_port_in_use(OLLAMA_API_PORT):
+        port_info = get_port_process_info(OLLAMA_API_PORT)
+        if port_info:
+            ui.print_warning(f"Port {OLLAMA_API_PORT} is in use by process {port_info['pid']} ({port_info['command']})")
+            ui.print_info("You may need to stop that process first")
+            ui.print_info(f"  Try: kill {port_info['pid']}")
+        else:
+            ui.print_warning(f"Port {OLLAMA_API_PORT} appears to be in use")
+            ui.print_info("Another process may be using this port")
+    
     try:
+        # Check if Ollama is installed
+        if not shutil.which("ollama"):
+            ui.print_error("Ollama command not found in PATH")
+            ui.print_info("Please ensure Ollama is installed")
+            ui.print_info("  macOS: brew install ollama")
+            ui.print_info("  Or download from: https://ollama.com/download")
+            return False
+        
         # Create clean environment without SSH_AUTH_SOCK to prevent Go HTTP client issues
         clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
         
@@ -377,26 +426,43 @@ def start_ollama_service() -> bool:
         ui.print_info("Waiting for Ollama API to be ready...")
         for attempt in range(15):
             time.sleep(1)
-            try:
-                req = urllib.request.Request(f"{OLLAMA_API_BASE}/api/tags", method="GET")
-                with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
-                    if response.status == 200:
-                        ui.print_success("Ollama service started successfully")
-                        return True
-            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                continue
+            if verify_ollama_running():
+                ui.print_success("Ollama service started successfully")
+                
+                # On macOS, warn if not using auto-start
+                if platform.system() == "Darwin":
+                    is_configured, _ = check_ollama_autostart_status_macos()
+                    if not is_configured:
+                        ui.print_warning("⚠️  Ollama is running temporarily and will stop when you close this terminal")
+                        ui.print_info("To keep Ollama running permanently, set up auto-start during setup")
+                
+                return True
         
         # Check if process is still running
         if process.poll() is None:
             ui.print_warning("Ollama process started but API not responding yet")
             ui.print_info("It may take a few more seconds to be ready")
+            ui.print_info("Check logs if issues persist")
             return True  # Process is running, API might be slow to start
         else:
             ui.print_error("Failed to start Ollama service")
+            ui.print_info("The process exited unexpectedly")
+            ui.print_info("Check if Ollama is installed correctly: ollama --version")
             return False
             
     except (FileNotFoundError, OSError) as e:
         ui.print_error(f"Could not start Ollama service: {e}")
+        
+        # Provide troubleshooting info
+        if not shutil.which("ollama"):
+            ui.print_error("Ollama command not found in PATH")
+            ui.print_info("Please install Ollama first")
+        else:
+            ui.print_info("Troubleshooting steps:")
+            ui.print_info("  1. Verify Ollama is installed: ollama --version")
+            ui.print_info("  2. Try starting manually: ollama serve")
+            ui.print_info("  3. Check for port conflicts: lsof -i :11434")
+        
         return False
 
 
@@ -551,7 +617,12 @@ def setup_ollama_autostart_macos() -> bool:
     <true/>
     
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
     
     <key>StandardOutPath</key>
     <string>/tmp/ollama.log</string>
@@ -570,6 +641,12 @@ def setup_ollama_autostart_macos() -> bool:
     
     <key>Nice</key>
     <integer>0</integer>
+    
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    
+    <key>WorkingDirectory</key>
+    <string>{os.path.expanduser('~')}</string>
 </dict>
 </plist>
 """
@@ -748,6 +825,101 @@ def verify_ollama_running() -> bool:
         return False
 
 
+# =============================================================================
+# Port and Process Management Functions
+# =============================================================================
+
+def check_port_in_use(port: int) -> bool:
+    """
+    Check if a port is already in use.
+    
+    Args:
+        port: Port number to check
+        
+    Returns:
+        True if port is in use, False otherwise
+    """
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(('localhost', port))
+            return result == 0
+    except Exception:
+        return False
+
+
+def get_port_process_info(port: int) -> Optional[Dict[str, str]]:
+    """
+    Get information about the process using a port.
+    
+    Args:
+        port: Port number to check
+        
+    Returns:
+        Dict with 'pid' and 'command' keys, or None if not found
+    """
+    try:
+        # Use lsof on macOS/Linux
+        code, stdout, _ = utils.run_command(
+            ["lsof", "-i", f":{port}", "-P", "-n", "-t"],
+            timeout=5
+        )
+        if code == 0 and stdout.strip():
+            pid = stdout.strip().split('\n')[0]
+            # Get command name for this PID
+            code2, stdout2, _ = utils.run_command(
+                ["ps", "-p", pid, "-o", "comm="],
+                timeout=5
+            )
+            command = stdout2.strip() if code2 == 0 and stdout2.strip() else "unknown"
+            return {
+                "pid": pid,
+                "command": command
+            }
+    except Exception:
+        pass
+    return None
+
+
+def get_ollama_process_info() -> Dict[str, Any]:
+    """
+    Get information about running Ollama processes.
+    
+    Returns:
+        Dict with process information
+    """
+    info: Dict[str, Any] = {
+        "pids": [],
+        "count": 0,
+        "via_launchd": False
+    }
+    
+    try:
+        # Check for processes
+        code, stdout, _ = utils.run_command(
+            ["pgrep", "-f", "ollama serve"],
+            timeout=5
+        )
+        if code == 0 and stdout.strip():
+            pids = [pid.strip() for pid in stdout.strip().split('\n') if pid.strip()]
+            info["pids"] = pids
+            info["count"] = len(pids)
+        
+        # Check if running via launchd (macOS)
+        if platform.system() == "Darwin":
+            code2, stdout2, _ = utils.run_command(
+                ["launchctl", "list", LAUNCH_AGENT_LABEL],
+                timeout=5
+            )
+            if code2 == 0:
+                info["via_launchd"] = True
+    except Exception:
+        pass
+    
+    return info
+
+
 def get_autostart_plist_path() -> Optional[Path]:
     """
     Get the path to the Ollama Launch Agent plist file.
@@ -758,6 +930,123 @@ def get_autostart_plist_path() -> Optional[Path]:
     if platform.system() != "Darwin":
         return None
     return Path.home() / "Library" / "LaunchAgents" / LAUNCH_AGENT_PLIST
+
+
+# =============================================================================
+# Service Status and Management Functions
+# =============================================================================
+
+def get_ollama_service_status() -> Dict[str, Any]:
+    """
+    Get comprehensive status of Ollama service.
+    
+    Returns:
+        Dict with status information:
+        - running: bool - Is Ollama currently running?
+        - api_accessible: bool - Can we reach the API?
+        - auto_start_configured: bool - Is auto-start set up?
+        - auto_start_method: str - How is auto-start configured (launchd/systemd/etc)
+        - process_info: dict - Process details if running
+        - port_in_use: bool - Is port 11434 in use?
+        - port_process: dict - Info about process using port (if different from Ollama)
+    """
+    status: Dict[str, Any] = {
+        "running": False,
+        "api_accessible": False,
+        "auto_start_configured": False,
+        "auto_start_method": None,
+        "process_info": {},
+        "port_in_use": False,
+        "port_process": None,
+    }
+    
+    # Check if API is accessible
+    status["api_accessible"] = verify_ollama_running()
+    status["running"] = status["api_accessible"]
+    
+    # Check auto-start configuration
+    if platform.system() == "Darwin":
+        is_configured, details = check_ollama_autostart_status_macos()
+        status["auto_start_configured"] = is_configured
+        status["auto_start_method"] = details if is_configured else None
+    
+    # Check port usage
+    status["port_in_use"] = check_port_in_use(OLLAMA_API_PORT)
+    
+    # Get process info if running
+    if status["running"]:
+        status["process_info"] = get_ollama_process_info()
+    
+    # Check if port is used by something other than Ollama
+    if status["port_in_use"] and not status["running"]:
+        port_info = get_port_process_info(OLLAMA_API_PORT)
+        if port_info:
+            status["port_process"] = port_info
+    
+    return status
+
+
+def stop_ollama_service() -> bool:
+    """
+    Stop Ollama service gracefully.
+    
+    On macOS, tries to stop via launchd first, then falls back to pkill.
+    
+    Returns:
+        True if stopped successfully or not running, False on error
+    """
+    if not verify_ollama_running():
+        ui.print_info("Ollama is not running")
+        return True
+    
+    # Try to stop via launchd first (macOS)
+    if platform.system() == "Darwin":
+        plist_path = get_autostart_plist_path()
+        if plist_path and plist_path.exists():
+            ui.print_info("Stopping Ollama via Launch Agent...")
+            code, _, stderr = utils.run_command(
+                ["launchctl", "unload", str(plist_path)],
+                timeout=10
+            )
+            if code == 0:
+                # Wait a moment and verify
+                time.sleep(2)
+                if not verify_ollama_running():
+                    ui.print_success("Ollama service stopped")
+                    return True
+                else:
+                    ui.print_warning("Launch Agent unloaded but Ollama still running")
+                    # Fall through to pkill
+    
+    # Fallback: kill process
+    ui.print_info("Stopping Ollama process...")
+    try:
+        code, _, _ = utils.run_command(["pkill", "ollama"], timeout=5, clean_env=True)
+        time.sleep(2)
+        if not verify_ollama_running():
+            ui.print_success("Ollama service stopped")
+            return True
+        else:
+            ui.print_warning("Ollama may still be running")
+            return False
+    except Exception as e:
+        ui.print_error(f"Failed to stop Ollama: {e}")
+        return False
+
+
+def restart_ollama_service() -> bool:
+    """
+    Restart Ollama service.
+    
+    Stops the service if running, then starts it again.
+    
+    Returns:
+        True if restart successful, False otherwise
+    """
+    ui.print_info("Restarting Ollama service...")
+    stop_ollama_service()
+    time.sleep(2)
+    return start_ollama_service()
 
 
 def remove_ollama() -> Tuple[bool, List[str]]:
