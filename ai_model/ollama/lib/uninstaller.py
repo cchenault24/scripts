@@ -515,8 +515,9 @@ def models_overlap(model1: str, model2: str) -> bool:
 
 def get_installed_models() -> List[str]:
     """Get list of currently installed Ollama models."""
-    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=10, clean_env=True)
+    code, stdout, stderr = utils.run_command(["ollama", "list"], timeout=10, clean_env=True)
     if code != 0:
+        _logger.warning(f"Failed to list Ollama models: {stderr}")
         return []
     
     models = []
@@ -533,11 +534,9 @@ def get_installed_models() -> List[str]:
 def remove_model(model_name: str) -> bool:
     """Remove a single Ollama model."""
     code, stdout, stderr = utils.run_command(["ollama", "rm", model_name], timeout=600, clean_env=True)
-    if code == 0:
-        return True
-    else:
-        # Don't print error here - let caller handle it
-        return False
+    if code != 0:
+        _logger.warning(f"Failed to remove model {model_name}: {stderr}")
+    return code == 0
 
 
 def ensure_ollama_running_for_removal() -> bool:
@@ -617,6 +616,8 @@ def remove_models(model_names: List[str]) -> int:
     # Get actual installed models from Ollama (run ollama list)
     installed_models = get_installed_models()
     if not installed_models:
+        ui.print_warning("No models found in Ollama - cannot remove models")
+        _logger.warning("get_installed_models() returned empty list")
         return 0
     
     # Match manifest model names to actual installed model names
@@ -629,21 +630,24 @@ def remove_models(model_names: List[str]) -> int:
             models_to_remove.append(actual_name)
         else:
             not_found.append(manifest_model_name)
+            _logger.warning(f"Could not find actual model name for manifest model: {manifest_model_name}")
+            ui.print_warning(f"Model '{manifest_model_name}' not found in installed models")
     
     if not models_to_remove:
+        ui.print_warning("No matching models found to remove")
+        _logger.warning(f"None of the requested models ({model_names}) matched installed models ({installed_models})")
         return 0
     
     # Remove the matched models using their actual names from ollama list
-    # Quiet mode: only show progress, errors are returned via exceptions
     removed = 0
     for i, model in enumerate(models_to_remove, 1):
-        # Show progress: [1/3] Removing model...
-        print(f"[{i}/{len(models_to_remove)}] Removing {model}...", end="", flush=True)
+        ui.print_info(f"[{i}/{len(models_to_remove)}] Removing {model}...")
         if remove_model(model):
-            print(" ✓")
+            ui.print_success(f"Removed {model}")
             removed += 1
         else:
-            print(" ✗")
+            ui.print_error(f"Failed to remove {model}")
+            _logger.error(f"Failed to remove model: {model}")
     
     return removed
 

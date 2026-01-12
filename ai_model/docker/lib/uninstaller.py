@@ -315,8 +315,9 @@ def models_overlap(model1: str, model2: str) -> bool:
 
 def get_installed_models() -> List[str]:
     """Get list of currently installed Docker Model Runner models."""
-    code, stdout, _ = utils.run_command(["docker", "model", "list"], timeout=10, clean_env=True)
+    code, stdout, stderr = utils.run_command(["docker", "model", "list"], timeout=10, clean_env=True)
     if code != 0:
+        _logger.warning(f"Failed to list Docker models: {stderr}")
         return []
     
     models = []
@@ -332,7 +333,9 @@ def get_installed_models() -> List[str]:
 
 def remove_model(model_name: str) -> bool:
     """Remove a single Docker Model Runner model."""
-    code, _, _ = utils.run_command(["docker", "model", "rm", model_name], timeout=600, clean_env=True)
+    code, stdout, stderr = utils.run_command(["docker", "model", "rm", model_name], timeout=600, clean_env=True)
+    if code != 0:
+        _logger.warning(f"Failed to remove model {model_name}: {stderr}")
     return code == 0
 
 
@@ -359,6 +362,8 @@ def remove_models(model_names: List[str]) -> int:
     
     installed_models = get_installed_models()
     if not installed_models:
+        ui.print_warning("No models found in Docker Model Runner - cannot remove models")
+        _logger.warning("get_installed_models() returned empty list")
         return 0
     
     models_to_remove = []
@@ -367,18 +372,24 @@ def remove_models(model_names: List[str]) -> int:
         actual_name = find_actual_model_name(manifest_model_name, installed_models)
         if actual_name:
             models_to_remove.append(actual_name)
+        else:
+            _logger.warning(f"Could not find actual model name for manifest model: {manifest_model_name}")
+            ui.print_warning(f"Model '{manifest_model_name}' not found in installed models")
     
     if not models_to_remove:
+        ui.print_warning("No matching models found to remove")
+        _logger.warning(f"None of the requested models ({model_names}) matched installed models ({installed_models})")
         return 0
     
     removed = 0
     for i, model in enumerate(models_to_remove, 1):
-        print(f"[{i}/{len(models_to_remove)}] Removing {model}...", end="", flush=True)
+        ui.print_info(f"[{i}/{len(models_to_remove)}] Removing {model}...")
         if remove_model(model):
-            print(" ✓")
+            ui.print_success(f"Removed {model}")
             removed += 1
         else:
-            print(" ✗")
+            ui.print_error(f"Failed to remove {model}")
+            _logger.error(f"Failed to remove model: {model}")
     
     return removed
 

@@ -275,9 +275,12 @@ class TestRemoveModels:
         assert count == 3
         assert mock_remove.call_count == 3
     
+    @patch('lib.uninstaller.ui.print_error')
+    @patch('lib.uninstaller.ui.print_success')
+    @patch('lib.uninstaller.ui.print_info')
     @patch('lib.uninstaller.remove_model')
     @patch('lib.uninstaller.get_installed_models')
-    def test_counts_successful_removals(self, mock_get_installed, mock_remove, backend_type):
+    def test_counts_successful_removals(self, mock_get_installed, mock_remove, mock_info, mock_success, mock_error, backend_type):
         """Test counting only successful removals."""
         mock_remove.side_effect = [True, False, True]  # 2 succeed, 1 fails
         if backend_type == "docker":
@@ -290,6 +293,8 @@ class TestRemoveModels:
                 count = remove_models(["model1", "model2", "model3"])
 
         assert count == 2
+        # Should show error for failed removal
+        mock_error.assert_called()
     
     def test_empty_list_returns_zero(self):
         """Test empty model list returns 0."""
@@ -1026,10 +1031,12 @@ class TestIDEExtensions:
 class TestModelRemoval:
     """Test model removal functionality."""
     
+    @patch('lib.uninstaller.ui.print_success')
+    @patch('lib.uninstaller.ui.print_info')
     @patch('lib.uninstaller.get_installed_models')
     @patch('lib.uninstaller.find_actual_model_name')
     @patch('lib.uninstaller.remove_model')
-    def test_remove_models_success(self, mock_remove, mock_find, mock_get, backend_type):
+    def test_remove_models_success(self, mock_remove, mock_find, mock_get, mock_info, mock_success, backend_type):
         """Test successful model removal."""
         mock_find.return_value = "test:model"
         mock_remove.return_value = True
@@ -1045,19 +1052,25 @@ class TestModelRemoval:
         assert result == 1
         mock_remove.assert_called()
     
+    @patch('lib.uninstaller.ui.print_warning')
     @patch('lib.uninstaller.get_installed_models')
-    def test_remove_models_not_found(self, mock_get):
+    def test_remove_models_not_found(self, mock_get, mock_warning):
         """Test removing models that aren't installed."""
         mock_get.return_value = []
         
         result = uninstaller.remove_models(["test:model"])
         
         assert result == 0
+        # Should warn when no models found
+        mock_warning.assert_called()
     
+    @patch('lib.uninstaller.ui.print_error')
+    @patch('lib.uninstaller.ui.print_success')
+    @patch('lib.uninstaller.ui.print_info')
     @patch('lib.uninstaller.get_installed_models')
     @patch('lib.uninstaller.find_actual_model_name')
     @patch('lib.uninstaller.remove_model')
-    def test_remove_models_partial_failure(self, mock_remove, mock_find, mock_get, backend_type):
+    def test_remove_models_partial_failure(self, mock_remove, mock_find, mock_get, mock_info, mock_success, mock_error, backend_type):
         """Test partial failure when removing models."""
         mock_find.side_effect = ["test:model", "other:model"]
         mock_remove.side_effect = [True, False]  # First succeeds, second fails
@@ -1071,6 +1084,8 @@ class TestModelRemoval:
                 result = uninstaller.remove_models(["test:model", "other:model"])
         
         assert result == 1  # Only one removed
+        # Should show error for failed removal
+        mock_error.assert_called()
     
     def test_find_actual_model_name_exact_match(self):
         """Test finding model name with exact match."""
