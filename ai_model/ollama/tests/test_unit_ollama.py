@@ -690,36 +690,50 @@ class TestServiceStatus:
 class TestServiceManagement:
     """Tests for service start/stop/restart functionality."""
     
+    @patch('shutil.which')
     @patch('lib.ollama.verify_ollama_running')
     @patch('lib.ollama.check_ollama_autostart_status_macos')
     @patch('lib.ollama.get_autostart_plist_path')
+    @patch('pathlib.Path.exists')
     @patch('lib.utils.run_command')
+    @patch('subprocess.run')
     @patch('platform.system')
     @patch('time.sleep')
     def test_start_ollama_service_uses_launchd_when_configured(
-        self, mock_sleep, mock_system, mock_run, mock_plist_path, mock_autostart, mock_verify
+        self, mock_sleep, mock_system, mock_subprocess, mock_run, mock_exists, mock_plist_path, mock_autostart, mock_verify, mock_which
     ):
         """Test that start_ollama_service uses launchd when auto-start is configured."""
         mock_system.return_value = "Darwin"
+        mock_which.return_value = "/usr/local/bin/ollama"  # Ollama is installed
         mock_verify.return_value = False  # Not running initially
         mock_autostart.return_value = (True, "Launch Agent (loaded)")
-        mock_plist_path.return_value = Path("/test/com.ollama.server.plist")
-        
+        plist_path = Path("/test/com.ollama.server.plist")
+        mock_plist_path.return_value = plist_path
+        mock_exists.return_value = True  # plist exists
+    
+        # Mock subprocess.run for pgrep
+        mock_subprocess.return_value = MagicMock(returncode=1)  # pgrep finds nothing
+    
         # Mock launchctl load success
         mock_run.side_effect = [
-            (1, "", ""),  # pgrep finds nothing
             (0, "", ""),  # launchctl load succeeds
             (0, "", ""),  # launchctl list succeeds
         ]
-        
+    
         # Mock verify_ollama_running to return True after start
         mock_verify.side_effect = [False, True]
-        
+    
         result = ollama.start_ollama_service()
         
         # Should have called launchctl load
-        launchctl_calls = [c for c in mock_run.call_args_list if len(c[0]) > 0 and "launchctl" in str(c[0][0])]
-        assert len(launchctl_calls) > 0, "Should have called launchctl load"
+        # Check if any call to run_command contains "launchctl"
+        launchctl_calls = []
+        for call in mock_run.call_args_list:
+            if call[0] and len(call[0]) > 0:
+                cmd = call[0][0]
+                if isinstance(cmd, list) and "launchctl" in cmd:
+                    launchctl_calls.append(call)
+        assert len(launchctl_calls) > 0, f"Should have called launchctl load, but got calls: {mock_run.call_args_list}"
     
     @patch('lib.ollama.verify_ollama_running')
     @patch('lib.ollama.check_ollama_autostart_status_macos')
@@ -760,18 +774,20 @@ class TestServiceManagement:
     
     @patch('lib.ollama.verify_ollama_running')
     @patch('lib.ollama.get_autostart_plist_path')
+    @patch('pathlib.Path.exists')
     @patch('lib.utils.run_command')
     @patch('platform.system')
     @patch('time.sleep')
     def test_stop_ollama_service_via_launchd(
-        self, mock_sleep, mock_system, mock_run, mock_plist_path, mock_verify
+        self, mock_sleep, mock_system, mock_run, mock_exists, mock_plist_path, mock_verify
     ):
         """Test stopping Ollama via launchd."""
         mock_system.return_value = "Darwin"
         mock_verify.side_effect = [True, False]  # Running, then stopped
         mock_plist_path.return_value = Path("/test/com.ollama.server.plist")
+        mock_exists.return_value = True  # plist exists
         mock_run.return_value = (0, "", "")  # launchctl unload succeeds
-        
+    
         result = ollama.stop_ollama_service()
         
         assert result is True
@@ -781,22 +797,31 @@ class TestServiceManagement:
         assert len(launchctl_calls) > 0
     
     @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.get_autostart_plist_path')
     @patch('lib.utils.run_command')
     @patch('time.sleep')
     def test_stop_ollama_service_via_pkill(
-        self, mock_sleep, mock_verify, mock_run
+        self, mock_sleep, mock_run, mock_plist_path, mock_verify
     ):
         """Test stopping Ollama via pkill when launchd not available."""
         mock_verify.side_effect = [True, False]  # Running, then stopped
+        mock_plist_path.return_value = None  # No plist (Linux)
+        # Mock run_command to return tuple (code, stdout, stderr)
         mock_run.return_value = (0, "", "")  # pkill succeeds
-        
+    
         with patch('platform.system', return_value="Linux"):
             result = ollama.stop_ollama_service()
         
         assert result is True
         # Should have called pkill
-        pkill_calls = [c for c in mock_run.call_args_list if len(c[0]) > 0 and "pkill" in str(c[0][0])]
-        assert len(pkill_calls) > 0
+        # Check if any call to run_command contains "pkill"
+        pkill_calls = []
+        for call in mock_run.call_args_list:
+            if call[0] and len(call[0]) > 0:
+                cmd = call[0][0]
+                if isinstance(cmd, list) and "pkill" in cmd:
+                    pkill_calls.append(call)
+        assert len(pkill_calls) > 0, f"Should have called pkill, but got calls: {mock_run.call_args_list}"
     
     @patch('lib.ollama.verify_ollama_running')
     def test_stop_ollama_service_not_running(self, mock_verify):
@@ -832,37 +857,48 @@ class TestServiceManagement:
 class TestStartOllamaServiceEnhanced:
     """Tests for enhanced start_ollama_service with launchd support."""
     
+    @patch('shutil.which')
     @patch('lib.ollama.verify_ollama_running')
     @patch('lib.ollama.check_ollama_autostart_status_macos')
     @patch('lib.ollama.get_autostart_plist_path')
+    @patch('pathlib.Path.exists')
     @patch('lib.utils.run_command')
     @patch('subprocess.run')
     @patch('platform.system')
     @patch('time.sleep')
     def test_start_uses_launchd_when_available(
-        self, mock_sleep, mock_system, mock_run_subprocess, mock_run, 
-        mock_plist_path, mock_autostart, mock_verify
+        self, mock_sleep, mock_system, mock_run_subprocess, mock_run,
+        mock_exists, mock_plist_path, mock_autostart, mock_verify, mock_which
     ):
         """Test that start_ollama_service uses launchd when configured."""
         mock_system.return_value = "Darwin"
+        mock_which.return_value = "/usr/local/bin/ollama"  # Ollama is installed
         mock_verify.side_effect = [False, True]  # Not running, then running
         mock_autostart.return_value = (True, "Launch Agent (loaded)")
-        mock_plist_path.return_value = Path("/test/com.ollama.server.plist")
-        
+        plist_path = Path("/test/com.ollama.server.plist")
+        mock_plist_path.return_value = plist_path
+        mock_exists.return_value = True  # plist exists
+    
         mock_run_subprocess.return_value = MagicMock(returncode=1)  # pgrep finds nothing
         mock_run.side_effect = [
             (0, "", ""),  # launchctl load succeeds
             (0, "", ""),  # launchctl list succeeds
         ]
-        
+    
         result = ollama.start_ollama_service()
         
         # Should have tried to use launchd
         assert mock_autostart.called
         assert mock_plist_path.called
         # Should have called launchctl
-        launchctl_calls = [c for c in mock_run.call_args_list if len(c[0]) > 0 and "launchctl" in str(c[0][0])]
-        assert len(launchctl_calls) > 0
+        # Check if any call to run_command contains "launchctl"
+        launchctl_calls = []
+        for call in mock_run.call_args_list:
+            if call[0] and len(call[0]) > 0:
+                cmd = call[0][0]
+                if isinstance(cmd, list) and "launchctl" in cmd:
+                    launchctl_calls.append(call)
+        assert len(launchctl_calls) > 0, f"Should have called launchctl, but got calls: {mock_run.call_args_list}"
     
     @patch('lib.ollama.verify_ollama_running')
     @patch('lib.ollama.check_ollama_autostart_status_macos')

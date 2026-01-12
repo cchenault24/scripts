@@ -85,7 +85,23 @@ def create_empty_manifest() -> Dict[str, Any]:
 
 def is_safe_location(path: Path) -> bool:
     """Check if location is safe to scan."""
-    path_str = str(path.resolve())
+    try:
+        path_str = str(path.resolve())
+    except (OSError, RuntimeError):
+        # If we can't resolve, check the original path
+        path_str = str(path)
+
+    # Check if path starts with any unsafe prefix
+    # Also check path components to catch cases like /private/etc/passwd
+    path_parts = path_str.split('/')
+    unsafe_components = {p.rstrip('/') for p in UNSAFE_PATHS if p}
+
+    # Check if any path component matches an unsafe directory
+    for part in path_parts:
+        if part and f"/{part}/" in UNSAFE_PATHS:
+            return False
+
+    # Also check prefix match for direct unsafe paths
     return not any(path_str.startswith(unsafe) for unsafe in UNSAFE_PATHS)
 
 
@@ -236,34 +252,65 @@ def stop_ide_processes_gracefully(running: Dict[str, List[str]]) -> bool:
 
 
 def normalize_model_name(model_name: str) -> str:
-    """Normalize model name for comparison."""
+    """
+    Normalize model name for comparison.
+    
+    Extracts the base name and size tag (e.g., "7b", "13b") for comparison.
+    This allows distinguishing between codellama:7b and codellama:13b.
+    """
     if not model_name:
         return ""
     
     if ":" in model_name:
         base, tag = model_name.split(":", 1)
+        # Extract size tag (e.g., "7b", "13b", "3b") from tag
+        # Tags might be like "7b", "7b-q4", "latest", etc.
         tag_parts = tag.split("-")
         if tag_parts:
+            # First part is usually the size (7b, 13b, etc.) or "latest"
             normalized_tag = tag_parts[0]
-            return f"{base}:{normalized_tag}"
+            # Only include tag if it's a size indicator (contains digits)
+            if any(c.isdigit() for c in normalized_tag):
+                return f"{base}:{normalized_tag}"
+            # If it's "latest" or similar, return just base for comparison
+            return base
         return model_name
     return model_name
 
 
 def models_overlap(model1: str, model2: str) -> bool:
-    """Check if two model names refer to the same model."""
+    """
+    Check if two model names refer to the same model (handling tags).
+
+    Examples:
+    - codellama:7b and codellama:7b-latest -> True
+    - codellama:7b and codellama:13b -> False
+    - codellama:7b and starcoder2:3b -> False
+    - nomic-embed-text and nomic-embed-text:latest -> True (same base, tag ignored)
+    - nomic-embed-text:latest and nomic-embed-text -> True
+    """
     if not model1 or not model2:
         return False
-    
+
+    # Normalize both model names for comparison
+    normalized1 = normalize_model_name(model1)
+    normalized2 = normalize_model_name(model2)
+
+    # If normalized names are identical, they overlap
+    if normalized1 == normalized2:
+        return True
+
+    # Special case for models without explicit tags (e.g., "nomic-embed-text" vs "nomic-embed-text:latest")
+    # If one has a tag and the other doesn't, but their base names match, they overlap.
     base1 = model1.split(":")[0] if ":" in model1 else model1
     base2 = model2.split(":")[0] if ":" in model2 else model2
-    
+
     if base1 == base2:
-        return True
-    
-    norm1 = normalize_model_name(model1)
-    norm2 = normalize_model_name(model2)
-    return norm1 == norm2
+        # If one has a tag and the other doesn't, they are considered overlapping
+        if (":" in model1 and ":" not in model2) or (":" not in model1 and ":" in model2):
+            return True
+
+    return False
 
 
 def get_installed_models() -> List[str]:

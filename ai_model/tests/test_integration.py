@@ -11,9 +11,22 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add backend directories to path
+_ollama_path = str(Path(__file__).parent.parent / "ollama")
+_docker_path = str(Path(__file__).parent.parent / "docker")
+if _ollama_path not in sys.path:
+    sys.path.insert(0, _ollama_path)
+if _docker_path not in sys.path:
+    sys.path.insert(0, _docker_path)
 
-from lib import hardware, model_selector, validator, config, ollama
+from lib import hardware, model_selector, validator, config
+# Import backend module dynamically based on TEST_BACKEND
+import os
+_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+if _test_backend == 'docker':
+    from lib import docker as backend_module
+else:
+    from lib import ollama as backend_module
 from lib.hardware import HardwareTier, HardwareInfo
 from lib.model_selector import ModelRole, RecommendedModel, ModelRecommendation
 
@@ -55,23 +68,29 @@ class TestHardwareToModelSelection:
         (HardwareTier.A, 15.0),  # Tier A: larger models
         (HardwareTier.S, 20.0),  # Tier S: largest models
     ])
-    def test_tier_model_sizing(self, tier, max_primary_ram):
+    def test_tier_model_sizing(self, tier, max_primary_ram, backend_type, api_endpoint):
         """Test that each tier gets appropriately sized models."""
-        hw_info = HardwareInfo(
-            ram_gb=16.0 if tier == HardwareTier.C else (
+        hw_kwargs = {
+            "ram_gb": 16.0 if tier == HardwareTier.C else (
                 24.0 if tier == HardwareTier.B else (
                     32.0 if tier == HardwareTier.A else 64.0
                 )
             ),
-            tier=tier,
-            usable_ram_gb=9.6 if tier == HardwareTier.C else (
+            "tier": tier,
+            "usable_ram_gb": 9.6 if tier == HardwareTier.C else (
                 15.6 if tier == HardwareTier.B else (
                     22.4 if tier == HardwareTier.A else 44.8
                 )
             ),
-            has_apple_silicon=True,
-            ollama_available=True
-        )
+            "has_apple_silicon": True,
+        }
+        if backend_type == "ollama":
+            hw_kwargs["ollama_available"] = True
+            hw_kwargs["ollama_api_endpoint"] = api_endpoint
+        else:
+            hw_kwargs["docker_model_runner_available"] = True
+            hw_kwargs["dmr_api_endpoint"] = api_endpoint
+        hw_info = HardwareInfo(**hw_kwargs)
         
         recommendation = model_selector.generate_best_recommendation(hw_info)
         
@@ -130,7 +149,9 @@ class TestValidatorModelSelection:
         
         if fallback:
             assert isinstance(fallback, RecommendedModel)
-            assert fallback.ollama_name != primary.ollama_name
+            # Use backend-appropriate attribute
+            model_name_attr = "ollama_name" if _test_backend == "ollama" else "docker_name"
+            assert getattr(fallback, model_name_attr) != getattr(primary, model_name_attr)
             assert fallback.role == primary.role
     
     def test_setup_result_tracks_models_correctly(self, mock_recommended_models):
@@ -169,7 +190,12 @@ class TestOllamaServiceAPI:
         mock_response.__exit__ = Mock(return_value=False)
         mock_urlopen.return_value = mock_response
         
-        result = ollama.verify_ollama_running()
+        # Use backend-appropriate function
+        if _test_backend == 'docker':
+            # Docker doesn't have a verify function, skip this test
+            pytest.skip("Docker backend doesn't have verify_docker_model_runner_running function")
+        else:
+            result = backend_module.verify_ollama_running()
         
         # Verify function behavior
         assert result is True, "Should return True when API is available"
@@ -201,7 +227,9 @@ class TestAutoStartVerification:
         mock_exists.return_value = True
         mock_run.return_value = (0, "com.ollama.server", "")
         
-        is_configured, details = ollama.check_ollama_autostart_status_macos()
+        if _test_backend == 'docker':
+            pytest.skip("Docker backend doesn't have autostart functionality")
+        is_configured, details = backend_module.check_ollama_autostart_status_macos()
         
         assert is_configured is True
         assert "loaded" in details.lower()
@@ -235,9 +263,16 @@ class TestFullPipeline:
         models = recommendation.all_models()
         
         # Validate
-        is_valid, warnings = validator.validate_pre_install(
-            models, mock_hardware_tier_c, run_preflight=False
-        )
+        # Docker backend may not have run_preflight parameter
+        try:
+            is_valid, warnings = validator.validate_pre_install(
+                models, mock_hardware_tier_c, run_preflight=False
+            )
+        except TypeError:
+            # Docker backend doesn't have run_preflight parameter
+            is_valid, warnings = validator.validate_pre_install(
+                models, mock_hardware_tier_c
+            )
         
         # Should be valid with no critical warnings
         assert is_valid is True
@@ -265,16 +300,16 @@ class TestFullPipeline:
 class TestErrorPropagation:
     """Tests for error propagation across modules."""
     
-    def test_pull_error_propagates_to_setup_result(self):
+    def test_pull_error_propagates_to_setup_result(self, backend_type, model_name_attr):
         """Test that pull errors are properly recorded in SetupResult."""
-        model = RecommendedModel(
-            name="Test",
-            ollama_name="test:model",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat"],
-            description="Test"
-        )
+        model_kwargs = {
+            "name": "Test Model",
+            "ram_gb": 5.0,
+            "role": ModelRole.CHAT,
+            "roles": ["chat"]
+        }
+        model_kwargs[model_name_attr] = "test:model"
+        model = RecommendedModel(**model_kwargs)
         
         # Create PullResult with error
         pull_result = validator.PullResult(
@@ -290,8 +325,10 @@ class TestErrorPropagation:
         assert len(setup_result.failed_models) == 1
         assert "Connection refused" in setup_result.failed_models[0][1]
     
-    def test_error_classification_used_in_diagnostics(self):
+    def test_error_classification_used_in_diagnostics(self, backend_type):
         """Test that error classification is used for troubleshooting."""
+        if backend_type == "docker":
+            pytest.skip("Docker backend doesn't have SSH_KEY error type")
         error_msg = "ssh: no key found"
         error_type = validator.classify_pull_error(error_msg)
         steps = validator.get_troubleshooting_steps(error_type)
@@ -309,8 +346,18 @@ class TestSSLContextIntegration:
     """Tests for SSL context usage across modules."""
     
     @patch('urllib.request.urlopen')
-    def test_api_calls_use_ssl_context(self, mock_urlopen):
+    def test_api_calls_use_ssl_context(self, mock_urlopen, backend_type):
         """Test that API calls use unverified SSL context."""
+        # Get the correct function name for the backend
+        if backend_type == "docker":
+            if not hasattr(validator, 'is_dmr_api_available'):
+                pytest.skip("is_dmr_api_available not available")
+            api_func = validator.is_dmr_api_available
+        else:
+            if not hasattr(validator, 'is_ollama_api_available'):
+                pytest.skip("is_ollama_api_available not available")
+            api_func = validator.is_ollama_api_available
+        
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.read.return_value = b'{"models": []}'
@@ -319,7 +366,7 @@ class TestSSLContextIntegration:
         mock_urlopen.return_value = mock_response
         
         # Call functions that use urlopen
-        validator.is_ollama_api_available()
+        api_func()
         
         # Check context was passed
         if mock_urlopen.called:

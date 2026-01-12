@@ -22,16 +22,37 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, Mock, call, mock_open, patch
 
-from lib import ollama
+# Import backend module dynamically based on TEST_BACKEND
+import os
+_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+if _test_backend == 'docker':
+    from lib import docker as backend_module
+else:
+    from lib import ollama as backend_module
 from lib import uninstaller
 from lib.uninstaller import (
     check_intellij_plugin_installed, check_running_processes,
     check_vscode_extension_installed, create_empty_manifest,
-    get_installed_models, handle_config_removal, handle_running_processes,
+    get_installed_models,
     is_safe_location, remove_model, remove_models, scan_for_orphaned_files,
-    stop_processes_gracefully, uninstall_intellij_plugin,
+    uninstall_intellij_plugin,
     uninstall_vscode_extension
 )
+# stop_processes_gracefully may not exist in Docker backend
+try:
+    from lib.uninstaller import stop_processes_gracefully
+except ImportError:
+    stop_processes_gracefully = None
+# handle_running_processes may not exist in Docker backend
+try:
+    from lib.uninstaller import handle_running_processes
+except ImportError:
+    handle_running_processes = None
+# handle_config_removal may not exist in Docker backend
+try:
+    from lib.uninstaller import handle_config_removal
+except ImportError:
+    handle_config_removal = None
 
 
 class TestCreateEmptyManifest:
@@ -145,12 +166,16 @@ class TestHandleRunningProcesses:
     
     def test_empty_dict_returns_true(self):
         """Test empty running dict returns True (continue)."""
+        if handle_running_processes is None:
+            pytest.skip("handle_running_processes not available in this backend")
         result = handle_running_processes({})
         assert result is True
     
     @patch('lib.uninstaller.ui.prompt_choice', return_value=2)  # Cancel option
     def test_user_chooses_cancel(self, mock_prompt):
         """Test when user chooses to cancel."""
+        if handle_running_processes is None:
+            pytest.skip("handle_running_processes not available in this backend")
         running = {"ollama": ["12345"]}
         result = handle_running_processes(running)
         # When user cancels, should return False
@@ -161,8 +186,12 @@ class TestStopProcessesGracefully:
     """Tests for stop_processes_gracefully function."""
     
     @patch('lib.uninstaller.utils.run_command')
-    def test_stops_ollama(self, mock_run):
+    def test_stops_ollama(self, mock_run, backend_type):
         """Test stopping Ollama process."""
+        if backend_type == "docker":
+            pytest.skip("Ollama-specific test")
+        if stop_processes_gracefully is None:
+            pytest.skip("stop_processes_gracefully not available in this backend")
         mock_run.return_value = (0, "", "")
         
         running = {"ollama": ["12345"]}
@@ -230,22 +259,36 @@ class TestRemoveModels:
     """Tests for remove_models function."""
     
     @patch('lib.uninstaller.remove_model')
-    def test_removes_multiple_models(self, mock_remove):
+    @patch('lib.uninstaller.get_installed_models')
+    def test_removes_multiple_models(self, mock_get_installed, mock_remove, backend_type):
         """Test removing multiple models."""
         mock_remove.return_value = True
-        
-        count = remove_models(["model1", "model2", "model3"])
+        if backend_type == "docker":
+            mock_get_installed.return_value = ["model1", "model2", "model3"]
+            count = remove_models(["model1", "model2", "model3"])
+        else:
+            # Ollama backend needs ensure_ollama_running_for_removal
+            with patch('lib.uninstaller.ensure_ollama_running_for_removal', return_value=True):
+                mock_get_installed.return_value = ["model1", "model2", "model3"]
+                count = remove_models(["model1", "model2", "model3"])
         
         assert count == 3
         assert mock_remove.call_count == 3
     
     @patch('lib.uninstaller.remove_model')
-    def test_counts_successful_removals(self, mock_remove):
+    @patch('lib.uninstaller.get_installed_models')
+    def test_counts_successful_removals(self, mock_get_installed, mock_remove, backend_type):
         """Test counting only successful removals."""
         mock_remove.side_effect = [True, False, True]  # 2 succeed, 1 fails
-        
-        count = remove_models(["model1", "model2", "model3"])
-        
+        if backend_type == "docker":
+            mock_get_installed.return_value = ["model1", "model2", "model3"]
+            count = remove_models(["model1", "model2", "model3"])
+        else:
+            # Ollama backend needs ensure_ollama_running_for_removal
+            with patch('lib.uninstaller.ensure_ollama_running_for_removal', return_value=True):
+                mock_get_installed.return_value = ["model1", "model2", "model3"]
+                count = remove_models(["model1", "model2", "model3"])
+
         assert count == 2
     
     def test_empty_list_returns_zero(self):
@@ -361,8 +404,12 @@ class TestHandleConfigRemoval:
     """Tests for handle_config_removal function."""
     
     @patch('pathlib.Path.exists')
-    def test_config_not_found(self, mock_exists):
+    def test_config_not_found(self, mock_exists, backend_type):
         """Test when config file doesn't exist."""
+        if backend_type == "docker":
+            pytest.skip("handle_config_removal not available in Docker backend")
+        if handle_config_removal is None:
+            pytest.skip("handle_config_removal not available in this backend")
         mock_exists.return_value = False
         
         manifest = create_empty_manifest()
@@ -374,8 +421,10 @@ class TestHandleConfigRemoval:
     @patch('builtins.open', mock_open(read_data="# Generated by ollama-llm-setup.py"))
     @patch('lib.uninstaller.ui.prompt_yes_no', return_value=True)
     @patch('pathlib.Path.unlink')
-    def test_removes_our_config(self, mock_unlink, mock_prompt, mock_exists):
+    def test_removes_our_config(self, mock_unlink, mock_prompt, mock_exists, backend_type):
         """Test removing config we generated."""
+        if handle_config_removal is None:
+            pytest.skip("handle_config_removal not available in Docker backend")
         mock_exists.return_value = True
         
         manifest = create_empty_manifest()
@@ -418,20 +467,30 @@ class TestModelNameComparison:
 class TestExecutionOrder:
     """Test that models are removed before service is stopped."""
     
-    @patch('lib.uninstaller.ollama.verify_ollama_running')
-    @patch('lib.uninstaller.ollama.start_ollama_service')
+    @pytest.mark.skipif(
+        lambda: os.environ.get('TEST_BACKEND', 'ollama').lower() == 'docker',
+        reason="Ollama-specific test"
+    )
+    @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.start_ollama_service')
     @patch('lib.uninstaller.remove_model')
+    @patch('lib.uninstaller.get_installed_models')
+    @patch('lib.uninstaller.ensure_ollama_running_for_removal')
     @patch('lib.uninstaller.utils.run_command')
     def test_models_removed_before_service_stop(
-        self,
+        self, backend_type,
         mock_run_command,
+        mock_ensure_running,
+        mock_get_installed,
         mock_remove_model,
-        mock_start_ollama,
-        mock_verify_running
+        mock_start_ollama_service,
+        mock_verify_ollama_running
     ):
         """Verify execution order: remove models before stopping service."""
         # Setup: Ollama is running
-        mock_verify_running.return_value = True
+        mock_verify_ollama_running.return_value = True
+        mock_ensure_running.return_value = True
+        mock_get_installed.return_value = ["codellama:7b", "starcoder2:3b"]
         mock_remove_model.return_value = True
         
         # Remove models
@@ -448,19 +507,26 @@ class TestExecutionOrder:
                       if len(c[0]) > 0 and c[0][0] and "pkill" in c[0][0]]
         assert len(pkill_calls) == 0, "Ollama should not be stopped during model removal"
     
-    @patch('lib.uninstaller.ollama.verify_ollama_running')
-    @patch('lib.uninstaller.ollama.start_ollama_service')
+    @pytest.mark.skipif(
+        lambda: os.environ.get('TEST_BACKEND', 'ollama').lower() == 'docker',
+        reason="Ollama-specific test"
+    )
+    @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.start_ollama_service')
     @patch('lib.uninstaller.remove_model')
+    @patch('lib.uninstaller.get_installed_models')
     def test_starts_ollama_if_stopped_for_model_removal(
         self,
+        mock_get_installed,
         mock_remove_model,
-        mock_start_ollama,
-        mock_verify_running
+        mock_start_ollama_service,
+        mock_verify_ollama_running
     ):
         """Auto-start Ollama if stopped when removing models."""
-        # Setup: Ollama is NOT running
-        mock_verify_running.return_value = False
-        mock_start_ollama.return_value = True
+        # Setup: Ollama is NOT running initially, then started
+        mock_verify_ollama_running.side_effect = [False, True]  # Not running, then running after start
+        mock_start_ollama_service.return_value = True
+        mock_get_installed.return_value = ["codellama:7b"]
         mock_remove_model.return_value = True
         
         # Remove models
@@ -468,21 +534,31 @@ class TestExecutionOrder:
         result = uninstaller.remove_models(model_names)
         
         # Verify Ollama was started
-        assert mock_start_ollama.called, "Ollama should be started if not running"
-        assert mock_verify_running.called
+        assert mock_start_ollama_service.called, "Ollama should be started if not running"
+        assert mock_verify_ollama_running.called
         assert result == 1
     
-    @patch('lib.uninstaller.ollama.verify_ollama_running')
-    @patch('lib.uninstaller.ollama.start_ollama_service')
+    @pytest.mark.skipif(
+        _test_backend == 'docker',
+        reason="Ollama-specific test"
+    )
+    @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.start_ollama_service')
+    @patch('lib.uninstaller.remove_model')
+    @patch('lib.uninstaller.get_installed_models')
     def test_returns_zero_if_cannot_start_ollama(
         self,
-        mock_start_ollama,
-        mock_verify_running
+        mock_get_installed_models,
+        mock_remove_model,
+        mock_start_ollama_service,
+        mock_verify_ollama_running
     ):
         """Return 0 removed models if Ollama cannot be started."""
         # Setup: Ollama is NOT running and cannot be started
-        mock_verify_running.return_value = False
-        mock_start_ollama.return_value = False
+        mock_verify_ollama_running.return_value = False
+        mock_start_ollama_service.return_value = False
+        # Don't mock ensure_ollama_running_for_removal - let it call the real function
+        # which will call start_ollama_service internally
         
         # Try to remove models
         model_names = ["codellama:7b"]
@@ -490,7 +566,8 @@ class TestExecutionOrder:
         
         # Verify no models were removed
         assert result == 0
-        assert mock_start_ollama.called
+        # Verify that start_ollama_service was called (via ensure_ollama_running_for_removal)
+        assert mock_start_ollama_service.called
 
 
 class TestNoOverlapInstalledAndPreexisting:
@@ -596,11 +673,15 @@ class TestManifestCreation:
         mock_hash.return_value = "test_hash"
         mock_classify.return_value = "config"
         
-        # Create mock models
+        # Create mock models with backend-appropriate attribute
+        import os
+        backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+        model_name_attr = "docker_name" if backend == "docker" else "ollama_name"
+        
         class MockModel:
-            def __init__(self, name, ollama_name, ram_gb, roles):
+            def __init__(self, name, model_name, ram_gb, roles):
                 self.name = name
-                self.ollama_name = ollama_name
+                setattr(self, model_name_attr, model_name)
                 self.ram_gb = ram_gb
                 self.roles = roles
         
@@ -642,53 +723,65 @@ class TestManifestCreation:
 class TestOllamaServiceManagement:
     """Test Ollama service management functions."""
     
-    @patch('lib.uninstaller.ollama.verify_ollama_running')
-    @patch('lib.uninstaller.ollama.start_ollama_service')
+    @pytest.mark.skipif(
+        _test_backend == 'docker',
+        reason="Ollama-specific test"
+    )
+    @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.start_ollama_service')
     def test_ensure_ollama_running_when_already_running(
         self,
-        mock_start,
-        mock_verify
+        mock_start_ollama_service,
+        mock_verify_ollama_running
     ):
         """Test ensure_ollama_running when Ollama is already running."""
-        mock_verify.return_value = True
+        mock_verify_ollama_running.return_value = True
         
         result = uninstaller.ensure_ollama_running_for_removal()
         
         assert result is True
-        assert mock_verify.called
-        assert not mock_start.called  # Should not start if already running
+        assert mock_verify_ollama_running.called
+        assert not mock_start_ollama_service.called  # Should not start if already running
     
-    @patch('lib.uninstaller.ollama.verify_ollama_running')
-    @patch('lib.uninstaller.ollama.start_ollama_service')
+    @pytest.mark.skipif(
+        _test_backend == 'docker',
+        reason="Ollama-specific test"
+    )
+    @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.start_ollama_service')
     def test_ensure_ollama_running_starts_if_stopped(
         self,
-        mock_start,
-        mock_verify
+        mock_start_ollama_service,
+        mock_verify_ollama_running
     ):
         """Test ensure_ollama_running starts Ollama if stopped."""
-        mock_verify.return_value = False
-        mock_start.return_value = True
+        mock_verify_ollama_running.return_value = False
+        mock_start_ollama_service.return_value = True
         
         result = uninstaller.ensure_ollama_running_for_removal()
         
         assert result is True
-        assert mock_start.called
+        assert mock_start_ollama_service.called
     
-    @patch('lib.uninstaller.ollama.verify_ollama_running')
-    @patch('lib.uninstaller.ollama.start_ollama_service')
+    @pytest.mark.skipif(
+        _test_backend == 'docker',
+        reason="Ollama-specific test"
+    )
+    @patch('lib.ollama.verify_ollama_running')
+    @patch('lib.ollama.start_ollama_service')
     def test_ensure_ollama_running_fails_if_cannot_start(
         self,
-        mock_start,
-        mock_verify
+        mock_start_ollama_service,
+        mock_verify_ollama_running
     ):
         """Test ensure_ollama_running returns False if cannot start."""
-        mock_verify.return_value = False
-        mock_start.return_value = False
+        mock_verify_ollama_running.return_value = False
+        mock_start_ollama_service.return_value = False
         
         result = uninstaller.ensure_ollama_running_for_removal()
         
         assert result is False
-        assert mock_start.called
+        assert mock_start_ollama_service.called
 
 
 class TestIDEProcessHandling:
@@ -755,8 +848,10 @@ class TestRunningProcesses:
     """Test running process detection."""
     
     @patch('lib.uninstaller.utils.run_command')
-    def test_check_running_processes_ollama(self, mock_run):
+    def test_check_running_processes_ollama(self, mock_run, backend_type):
         """Test detecting running Ollama service."""
+        if backend_type == "docker":
+            pytest.skip("Ollama-specific test")
         mock_run.return_value = (0, "12345", "")  # pgrep found process
         
         manifest = {}
@@ -779,8 +874,10 @@ class TestRunningProcesses:
     
     @patch('lib.uninstaller.utils.run_command')
     @patch('urllib.request.urlopen')
-    def test_check_running_processes_active_models(self, mock_urlopen, mock_run):
-        """Test detecting active models via Ollama API."""
+    def test_check_running_processes_active_models(self, mock_urlopen, mock_run, backend_type):
+        """Test detecting active models via API."""
+        if backend_type == "docker":
+            pytest.skip("Docker backend uses different API endpoint and structure")
         mock_run.return_value = (1, "", "")  # No processes found
         mock_response = MagicMock()
         mock_response.status = 200
@@ -788,10 +885,10 @@ class TestRunningProcesses:
         mock_response.__enter__ = Mock(return_value=mock_response)
         mock_response.__exit__ = Mock(return_value=False)
         mock_urlopen.return_value = mock_response
-        
+    
         manifest = {}
         running = uninstaller.check_running_processes(manifest)
-        
+    
         assert len(running["model_servers"]) > 0
 
 
@@ -809,12 +906,18 @@ class TestOrphanedFiles:
     
     @patch('pathlib.Path.exists')
     @patch('pathlib.Path.rglob')
+    @patch('pathlib.Path.is_file')
+    @patch('pathlib.Path.resolve')
     @patch('lib.uninstaller.config_module.is_our_file')
-    def test_scan_for_orphaned_files_finds_ours(self, mock_is_our, mock_rglob, mock_exists):
+    def test_scan_for_orphaned_files_finds_ours(self, mock_is_our, mock_resolve, mock_is_file, mock_rglob, mock_exists):
         """Test finding files that are ours but not in manifest."""
         manifest = uninstaller.create_empty_manifest()
+        test_file = Path("~/.continue/file.yaml")
         mock_exists.return_value = True
-        mock_rglob.return_value = [Path("/test/file.yaml")]
+        mock_rglob.return_value = [test_file]
+        mock_is_file.return_value = True
+        # Mock resolve to return a safe path
+        mock_resolve.return_value = Path("/Users/test/.continue/file.yaml")
         mock_is_our.return_value = True  # File is ours
         
         orphaned = uninstaller.scan_for_orphaned_files(manifest)
@@ -884,10 +987,13 @@ class TestIDEExtensions:
     
     @patch('platform.system')
     @patch('pathlib.Path.exists')
-    def test_check_intellij_plugin_installed_macos(self, mock_exists, mock_system):
+    @patch('pathlib.Path.iterdir')
+    def test_check_intellij_plugin_installed_macos(self, mock_iterdir, mock_exists, mock_system):
         """Test checking IntelliJ plugin on macOS."""
         mock_system.return_value = "Darwin"
         mock_exists.return_value = True
+        # Mock iterdir to return empty list (no product directories)
+        mock_iterdir.return_value = []
         
         is_installed, paths = uninstaller.check_intellij_plugin_installed()
         
@@ -897,19 +1003,23 @@ class TestIDEExtensions:
     
     @patch('lib.uninstaller.check_intellij_plugin_installed')
     @patch('shutil.rmtree')
+    @patch('pathlib.Path.exists')
     @patch('lib.uninstaller.ui.print_info')
     @patch('lib.uninstaller.ui.print_success')
     @patch('lib.uninstaller.ui.print_error')
     def test_uninstall_intellij_plugin_success(
-        self, mock_error, mock_success, mock_info, mock_rmtree, mock_check
+        self, mock_error, mock_success, mock_info, mock_exists, mock_rmtree, mock_check
     ):
         """Test successful IntelliJ plugin uninstallation."""
         from pathlib import Path
-        mock_check.return_value = (True, [Path("/test/plugin")])
+        plugin_path = Path("/test/plugin")
+        mock_check.return_value = (True, [plugin_path])
+        mock_exists.return_value = True  # Plugin path exists
         
         result = uninstaller.uninstall_intellij_plugin()
         
         assert result is True
+        mock_rmtree.assert_called_once_with(plugin_path)
         mock_rmtree.assert_called()
 
 
@@ -919,13 +1029,18 @@ class TestModelRemoval:
     @patch('lib.uninstaller.get_installed_models')
     @patch('lib.uninstaller.find_actual_model_name')
     @patch('lib.uninstaller.remove_model')
-    def test_remove_models_success(self, mock_remove, mock_find, mock_get):
+    def test_remove_models_success(self, mock_remove, mock_find, mock_get, backend_type):
         """Test successful model removal."""
-        mock_get.return_value = ["test:model", "other:model"]
         mock_find.return_value = "test:model"
         mock_remove.return_value = True
-        
-        result = uninstaller.remove_models(["test:model"])
+        if backend_type == "docker":
+            mock_get.return_value = ["test:model", "other:model"]
+            result = uninstaller.remove_models(["test:model"])
+        else:
+            # Ollama backend needs ensure_ollama_running_for_removal
+            with patch('lib.uninstaller.ensure_ollama_running_for_removal', return_value=True):
+                mock_get.return_value = ["test:model", "other:model"]
+                result = uninstaller.remove_models(["test:model"])
         
         assert result == 1
         mock_remove.assert_called()
@@ -942,13 +1057,18 @@ class TestModelRemoval:
     @patch('lib.uninstaller.get_installed_models')
     @patch('lib.uninstaller.find_actual_model_name')
     @patch('lib.uninstaller.remove_model')
-    def test_remove_models_partial_failure(self, mock_remove, mock_find, mock_get):
+    def test_remove_models_partial_failure(self, mock_remove, mock_find, mock_get, backend_type):
         """Test partial failure when removing models."""
-        mock_get.return_value = ["test:model", "other:model"]
         mock_find.side_effect = ["test:model", "other:model"]
         mock_remove.side_effect = [True, False]  # First succeeds, second fails
-        
-        result = uninstaller.remove_models(["test:model", "other:model"])
+        if backend_type == "docker":
+            mock_get.return_value = ["test:model", "other:model"]
+            result = uninstaller.remove_models(["test:model", "other:model"])
+        else:
+            # Ollama backend needs ensure_ollama_running_for_removal
+            with patch('lib.uninstaller.ensure_ollama_running_for_removal', return_value=True):
+                mock_get.return_value = ["test:model", "other:model"]
+                result = uninstaller.remove_models(["test:model", "other:model"])
         
         assert result == 1  # Only one removed
     

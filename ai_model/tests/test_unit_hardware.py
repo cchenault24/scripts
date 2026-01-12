@@ -2,6 +2,7 @@
 Unit tests for lib/hardware.py.
 
 Tests hardware detection, tier classification, and RAM calculations.
+Runs against both ollama and docker backends.
 """
 
 import platform
@@ -11,7 +12,13 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add backend directories to path
+_ollama_path = str(Path(__file__).parent.parent / "ollama")
+_docker_path = str(Path(__file__).parent.parent / "docker")
+if _ollama_path not in sys.path:
+    sys.path.insert(0, _ollama_path)
+if _docker_path not in sys.path:
+    sys.path.insert(0, _docker_path)
 
 from lib import hardware
 from lib.hardware import HardwareTier, HardwareInfo
@@ -256,13 +263,17 @@ class TestAppleSiliconDetection:
 class TestHardwareInfoDataclass:
     """Tests for HardwareInfo dataclass functionality."""
     
-    def test_default_values(self):
+    def test_default_values(self, backend_type):
         """Test that HardwareInfo has sensible defaults."""
         hw_info = HardwareInfo()
         assert hw_info.ram_gb == 0.0
         assert hw_info.cpu_cores == 0
         assert hw_info.tier == HardwareTier.C
-        assert hw_info.ollama_available is False
+        # Check backend-specific default
+        if backend_type == "ollama":
+            assert hw_info.ollama_available is False
+        else:
+            assert hw_info.docker_model_runner_available is False
     
     def test_tier_label_tier_c(self, mock_hardware_tier_c):
         """Test tier label for Tier C."""

@@ -2,6 +2,7 @@
 Unit tests for lib/utils.py.
 
 Tests utility functions including command execution and SSL context.
+Runs against both ollama and docker backends.
 """
 
 import ssl
@@ -12,7 +13,13 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add backend directories to path
+_ollama_path = str(Path(__file__).parent.parent / "ollama")
+_docker_path = str(Path(__file__).parent.parent / "docker")
+if _ollama_path not in sys.path:
+    sys.path.insert(0, _ollama_path)
+if _docker_path not in sys.path:
+    sys.path.insert(0, _docker_path)
 
 from lib import utils
 
@@ -235,66 +242,83 @@ class TestEdgeCases:
 
 
 # =============================================================================
-# Integration-like Tests
+# Integration-like Tests (Backend-Aware)
 # =============================================================================
 
 class TestCommandPatterns:
     """Tests for common command patterns."""
     
     @patch('subprocess.run')
-    def test_ollama_list_command(self, mock_run):
-        """Test ollama list command pattern."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout="NAME\nqwen2.5-coder:7b\nnomic-embed-text\n",
-            stderr=""
-        )
-        
-        code, stdout, stderr = utils.run_command(["ollama", "list"])
-        
-        assert code == 0
-        assert "qwen2.5-coder:7b" in stdout
-    
-    @patch('subprocess.run')
-    def test_ollama_version_command(self, mock_run):
-        """Test ollama version command pattern."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout="ollama version 0.13.5",
-            stderr=""
-        )
-        
-        code, stdout, stderr = utils.run_command(["ollama", "--version"])
-        
-        assert code == 0
-        assert "0.13.5" in stdout
-    
-    @patch('subprocess.run')
-    def test_launchctl_load_command(self, mock_run):
-        """Test launchctl load command pattern."""
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout="",
-            stderr=""
-        )
-        
-        code, stdout, stderr = utils.run_command(
-            ["launchctl", "load", "/path/to/plist"],
-            timeout=10
-        )
-        
+    def test_list_command(self, mock_run, backend_type):
+        """Test list command pattern for both backends."""
+        if backend_type == "ollama":
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout="NAME\nqwen2.5-coder:7b\nnomic-embed-text\n",
+                stderr=""
+            )
+            code, stdout, stderr = utils.run_command(["ollama", "list"])
+            assert "qwen2.5-coder:7b" in stdout
+        else:  # docker
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout="NAME\nai/qwen2.5-coder:7b\nai/nomic-embed-text-v1.5\n",
+                stderr=""
+            )
+            code, stdout, stderr = utils.run_command(["docker", "model", "list"])
+            assert "ai/qwen2.5-coder:7b" in stdout
         assert code == 0
     
     @patch('subprocess.run')
-    def test_pgrep_command(self, mock_run):
+    def test_version_command(self, mock_run, backend_type):
+        """Test version command pattern for both backends."""
+        if backend_type == "ollama":
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout="ollama version 0.13.5",
+                stderr=""
+            )
+            code, stdout, stderr = utils.run_command(["ollama", "--version"])
+            assert "0.13.5" in stdout
+        else:  # docker
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout="Docker version 27.0.3, build abc123",
+                stderr=""
+            )
+            code, stdout, stderr = utils.run_command(["docker", "--version"])
+            assert "27.0.3" in stdout
+        assert code == 0
+    
+    @patch('subprocess.run')
+    def test_launchctl_load_command(self, mock_run, backend_type):
+        """Test launchctl load command pattern (ollama-specific)."""
+        if backend_type == "ollama":
+            mock_run.return_value = Mock(
+                returncode=0,
+                stdout="",
+                stderr=""
+            )
+            code, stdout, stderr = utils.run_command(
+                ["launchctl", "load", "/path/to/plist"],
+                timeout=10
+            )
+            assert code == 0
+        else:
+            # Docker doesn't use launchctl
+            pytest.skip("launchctl is ollama-specific")
+    
+    @patch('subprocess.run')
+    def test_pgrep_command(self, mock_run, backend_type):
         """Test pgrep command pattern."""
         mock_run.return_value = Mock(
             returncode=0,
             stdout="12345",
             stderr=""
         )
-        
-        code, stdout, stderr = utils.run_command(["pgrep", "-f", "ollama serve"])
-        
+        if backend_type == "ollama":
+            code, stdout, stderr = utils.run_command(["pgrep", "-f", "ollama serve"])
+        else:  # docker
+            code, stdout, stderr = utils.run_command(["pgrep", "-f", "docker"])
         assert code == 0
         assert "12345" in stdout

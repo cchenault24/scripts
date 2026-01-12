@@ -86,29 +86,38 @@ class TestHardwareInfoFromDataclass:
 class TestHardwareDataclassFields:
     """Tests for HardwareInfo dataclass fields."""
     
-    def test_all_fields_accessible(self):
+    def test_all_fields_accessible(self, backend_type, api_endpoint):
         """Test all fields are accessible."""
-        hw = HardwareInfo(
-            os_name="Linux",
-            os_version="5.15.0",
-            ram_gb=32,
-            cpu_brand="Intel i9",
-            cpu_cores=16,
-            cpu_perf_cores=8,
-            cpu_eff_cores=8,
-            gpu_name="NVIDIA RTX 4090",
-            gpu_cores=128,
-            gpu_vram_gb=24,
-            has_apple_silicon=False,
-            apple_chip_model="",
-            has_nvidia=True,
-            tier=HardwareTier.A,
-            ollama_available=True,
-            ollama_version="0.1.23",
-            ollama_api_endpoint="http://localhost:11434"
-        )
+        hw_kwargs = {
+            "os_name": "Linux",
+            "os_version": "5.15.0",
+            "ram_gb": 32,
+            "cpu_brand": "Intel i9",
+            "cpu_cores": 16,
+            "cpu_perf_cores": 8,
+            "cpu_eff_cores": 8,
+            "gpu_name": "NVIDIA RTX 4090",
+            "gpu_cores": 128,
+            "gpu_vram_gb": 24,
+            "has_apple_silicon": False,
+            "apple_chip_model": "",
+            "has_nvidia": True,
+            "tier": HardwareTier.A,
+        }
+        if backend_type == "ollama":
+            hw_kwargs["ollama_available"] = True
+            hw_kwargs["ollama_version"] = "0.1.23"
+            hw_kwargs["ollama_api_endpoint"] = api_endpoint
+        else:
+            hw_kwargs["docker_model_runner_available"] = True
+            hw_kwargs["docker_version"] = "0.1.23"
+            hw_kwargs["dmr_api_endpoint"] = api_endpoint
+        hw = HardwareInfo(**hw_kwargs)
         
         assert hw.os_name == "Linux"
         assert hw.cpu_cores == 16
         assert hw.has_nvidia is True
-        assert hw.ollama_available is True
+        if backend_type == "ollama":
+            assert hw.ollama_available is True
+        else:
+            assert hw.docker_model_runner_available is True

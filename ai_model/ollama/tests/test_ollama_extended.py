@@ -9,7 +9,7 @@ import os
 from lib import ollama
 from lib.ollama import (
     check_ollama, verify_ollama_running, get_installation_instructions,
-    check_ssh_environment_pollution, get_autostart_plist_path
+    get_autostart_plist_path
 )
 from lib.hardware import HardwareInfo
 
@@ -28,7 +28,8 @@ class TestCheckOllama:
         assert found is True
         assert "0.1.25" in version or version != ""
     
-    def test_check_ollama_returns_tuple(self):
+    @patch('lib.ollama.ui.prompt_yes_no', return_value=False)
+    def test_check_ollama_returns_tuple(self, mock_prompt):
         """Test check_ollama returns tuple."""
         found, version = check_ollama()
         
@@ -69,33 +70,8 @@ class TestGetInstallationInstructions:
         assert isinstance(instructions, str)
 
 
-class TestCheckSSHEnvironmentPollution:
-    """Tests for check_ssh_environment_pollution function."""
-    
-    def test_with_ssh_auth_sock_set(self):
-        """Test detection when SSH_AUTH_SOCK is set."""
-        original = os.environ.get('SSH_AUTH_SOCK')
-        try:
-            os.environ['SSH_AUTH_SOCK'] = '/tmp/test-ssh-agent'
-            result = check_ssh_environment_pollution()
-            assert result is True
-        finally:
-            if original:
-                os.environ['SSH_AUTH_SOCK'] = original
-            elif 'SSH_AUTH_SOCK' in os.environ:
-                del os.environ['SSH_AUTH_SOCK']
-    
-    def test_without_ssh_auth_sock(self):
-        """Test when SSH_AUTH_SOCK is not set."""
-        original = os.environ.get('SSH_AUTH_SOCK')
-        try:
-            if 'SSH_AUTH_SOCK' in os.environ:
-                del os.environ['SSH_AUTH_SOCK']
-            result = check_ssh_environment_pollution()
-            assert result is False
-        finally:
-            if original:
-                os.environ['SSH_AUTH_SOCK'] = original
+# Note: check_ssh_environment_pollution function was removed from lib.ollama
+# Tests for this function have been removed
 
 
 class TestGetAutostartPlistPath:

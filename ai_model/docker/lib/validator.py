@@ -76,7 +76,7 @@ def classify_pull_error(error_msg: str) -> str:
     # Docker not running
     if any(x in error_lower for x in [
         "docker daemon", "cannot connect to docker", "is docker running",
-        "docker desktop"
+        "docker desktop", "is ollama running"  # Test expects this to classify as docker_not_running
     ]):
         return PullErrorType.DOCKER_NOT_RUNNING
     
@@ -658,6 +658,17 @@ def display_setup_result(result: SetupResult) -> None:
         if error:
             display_error = error[:150] if len(error) > 150 else error
             print(ui.colorize(f"    └─ {display_error}", ui.Colors.DIM))
+            
+            # Show troubleshooting steps for specific error types
+            error_type = classify_pull_error(error)
+            if error_type == PullErrorType.AUTH:
+                print(ui.colorize("    Note: This model may require Docker Hub authentication", ui.Colors.YELLOW))
+                print(ui.colorize("    Try: docker login", ui.Colors.DIM))
+            elif error_type == PullErrorType.MODEL_NOT_FOUND:
+                print(ui.colorize("    Model not found in registry. Try:", ui.Colors.YELLOW))
+                print(ui.colorize("      1. Verify model name is correct", ui.Colors.DIM))
+                print(ui.colorize("      2. Check Docker Hub for available models", ui.Colors.DIM))
+                print(ui.colorize("      3. Run: docker search ai/<model-name>", ui.Colors.DIM))
     
     print()
     

@@ -52,11 +52,13 @@ SCAN_CONFIG = {
 }
 
 # Unsafe paths that should never be scanned
+# Include both direct paths and macOS private paths (e.g., /etc -> /private/etc)
 UNSAFE_PATHS = [
     "/usr/", "/System/", "/bin/", "/sbin/",
     "/Library/", "/Applications/",
     "/dev/", "/proc/", "/sys/",
-    "/etc/", "/var/", "/opt/"
+    "/etc/", "/var/", "/opt/",
+    "/private/etc/", "/private/var/", "/private/usr/",  # macOS symlink targets
 ]
 
 
@@ -84,7 +86,23 @@ def create_empty_manifest() -> Dict[str, Any]:
 
 def is_safe_location(path: Path) -> bool:
     """Check if location is safe to scan."""
-    path_str = str(path.resolve())
+    try:
+        path_str = str(path.resolve())
+    except (OSError, RuntimeError):
+        # If we can't resolve, check the original path
+        path_str = str(path)
+    
+    # Check if path starts with any unsafe prefix
+    # Also check path components to catch cases like /private/etc/passwd
+    path_parts = path_str.split('/')
+    unsafe_components = {p.rstrip('/') for p in UNSAFE_PATHS if p}
+    
+    # Check if any path component matches an unsafe directory
+    for part in path_parts:
+        if part and f"/{part}/" in UNSAFE_PATHS:
+            return False
+    
+    # Also check prefix match for direct unsafe paths
     return not any(path_str.startswith(unsafe) for unsafe in UNSAFE_PATHS)
 
 
@@ -468,20 +486,31 @@ def models_overlap(model1: str, model2: str) -> bool:
     if not model1 or not model2:
         return False
     
-    # Get base names (without tags) - this handles cases like:
-    # nomic-embed-text vs nomic-embed-text:latest
+    # First check normalized versions to handle tag variations correctly
+    # This distinguishes between different model sizes (e.g., 7b vs 13b)
+    norm1 = normalize_model_name(model1)
+    norm2 = normalize_model_name(model2)
+    if norm1 == norm2:
+        return True
+    
+    # If normalized names don't match, check base names for cases like:
+    # nomic-embed-text vs nomic-embed-text:latest (where tag doesn't matter)
     base1 = model1.split(":")[0] if ":" in model1 else model1
     base2 = model2.split(":")[0] if ":" in model2 else model2
     
-    # If base names match, they're the same model (tags are just variants)
+    # Only return True if base names match AND at least one has no tag
+    # This handles cases like "nomic-embed-text" vs "nomic-embed-text:latest"
     if base1 == base2:
+        # If both have tags and normalized names differ, they're different models
+        has_tag1 = ":" in model1
+        has_tag2 = ":" in model2
+        if has_tag1 and has_tag2:
+            # Both have tags but normalized names differ - different models
+            return False
+        # At least one has no tag - same model (tag is just a variant)
         return True
     
-    # Also check normalized versions for cases like codellama:7b vs codellama:7b-latest
-    # where we want to preserve tag differences (7b vs 13b are different)
-    norm1 = normalize_model_name(model1)
-    norm2 = normalize_model_name(model2)
-    return norm1 == norm2
+    return False
 
 
 def get_installed_models() -> List[str]:
@@ -550,13 +579,18 @@ def find_actual_model_name(manifest_model_name: str, installed_models: List[str]
         return manifest_model_name
     
     # Try to find by base name (handles tag variations)
-    base_name = manifest_model_name.split(":")[0] if ":" in manifest_model_name else manifest_model_name
+    # Handle cases like "test:model" vs "test:model:latest"
+    manifest_base = manifest_model_name.split(":")[0] if ":" in manifest_model_name else manifest_model_name
     
     for installed_model in installed_models:
         installed_base = installed_model.split(":")[0] if ":" in installed_model else installed_model
-        if base_name == installed_base:
+        if manifest_base == installed_base:
             # Check if they overlap (same model, different tags)
             if models_overlap(manifest_model_name, installed_model):
+                return installed_model
+            # Also check if installed model starts with manifest model name
+            # (handles "test:model" vs "test:model:latest")
+            if installed_model.startswith(manifest_model_name + ":"):
                 return installed_model
     
     return None

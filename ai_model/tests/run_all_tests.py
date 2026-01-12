@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Comprehensive test runner for Ollama setup script.
+Comprehensive test runner for shared ai_model tests.
 
 Runs all unit, integration, and E2E tests with coverage reporting.
+Supports both ollama and docker backends via parametrization.
 
 Usage:
-    python tests/run_all_tests.py           # Run all tests
+    python tests/run_all_tests.py           # Run all tests for both backends
     python tests/run_all_tests.py -v        # Verbose mode
     python tests/run_all_tests.py --cov     # With coverage
+    python tests/run_all_tests.py --backend ollama  # Run only ollama tests
+    python tests/run_all_tests.py --backend docker  # Run only docker tests
     python tests/run_all_tests.py --quick   # Quick mode (skip slow tests)
 """
 
@@ -22,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def main():
     """Run the test suite."""
     parser = argparse.ArgumentParser(
-        description="Run Ollama setup test suite"
+        description="Run shared ai_model test suite"
     )
     parser.add_argument(
         '-v', '--verbose',
@@ -55,9 +58,9 @@ def main():
         help='Run only integration tests'
     )
     parser.add_argument(
-        '--e2e',
-        action='store_true',
-        help='Run only E2E tests'
+        '--backend',
+        choices=['ollama', 'docker'],
+        help='Run tests for specific backend only'
     )
     parser.add_argument(
         '-k', '--filter',
@@ -83,39 +86,23 @@ def main():
     # Build pytest arguments
     pytest_args = []
     
-    # Test directories
+    # Test directory
     test_dir = Path(__file__).parent
-    shared_test_dir = Path(__file__).parent.parent.parent / "tests"
     
     # Determine which tests to run
-    test_paths = []
-    
-    # Always include shared tests with backend=ollama filter
-    if shared_test_dir.exists():
-        if args.unit:
-            test_paths.append(str(shared_test_dir / "test_unit_*.py"))
-        elif args.integration:
-            test_paths.append(str(shared_test_dir / "test_integration.py"))
-        else:
-            test_paths.append(str(shared_test_dir))
-    
-    # Add ollama-specific tests
     if args.unit:
-        test_paths.append(str(test_dir / "test_unit_ollama.py"))
-    elif args.e2e:
-        test_paths.append(str(test_dir / "test_e2e_flows.py"))
-        test_paths.append(str(test_dir / "test_ollama_extended.py"))
+        pytest_args.append(str(test_dir / "test_unit_*.py"))
+    elif args.integration:
+        pytest_args.append(str(test_dir / "test_integration.py"))
     else:
-        # Include all ollama-specific tests
-        test_paths.append(str(test_dir / "test_unit_ollama.py"))
-        test_paths.append(str(test_dir / "test_ollama_extended.py"))
-        test_paths.append(str(test_dir / "test_e2e_flows.py"))
+        pytest_args.append(str(test_dir))
     
-    pytest_args.extend(test_paths)
-    
-    # Set environment variable to filter backend for shared tests
-    import os
-    os.environ['TEST_BACKEND'] = 'ollama'
+    # Backend filtering
+    if args.backend:
+        pytest_args.extend(['-k', f'backend_type == "{args.backend}" or not backend_type'])
+    else:
+        # Run both backends (default behavior with parametrization)
+        pass
     
     # Verbosity
     if args.verbose:
@@ -125,8 +112,10 @@ def main():
     
     # Coverage
     if args.cov:
+        # Coverage for both backends
         pytest_args.extend([
-            '--cov=lib',
+            '--cov=../ollama/lib',
+            '--cov=../docker/lib',
             '--cov-report=term-missing',
         ])
         if args.html:
@@ -149,18 +138,21 @@ def main():
     
     # Print header
     print("=" * 60)
-    print("Ollama LLM Setup - Test Suite")
+    print("Shared ai_model Test Suite")
     print("=" * 60)
     print()
     
     if args.unit:
-        print("Running: Unit tests only (shared + ollama-specific)")
+        print("Running: Unit tests only")
     elif args.integration:
-        print("Running: Integration tests only (shared)")
-    elif args.e2e:
-        print("Running: E2E tests only (ollama-specific)")
+        print("Running: Integration tests only")
     else:
-        print("Running: All tests (shared + ollama-specific)")
+        print("Running: All tests")
+    
+    if args.backend:
+        print(f"Backend: {args.backend} only")
+    else:
+        print("Backend: Both (ollama and docker)")
     
     if args.cov:
         print("Coverage: Enabled")

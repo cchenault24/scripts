@@ -52,6 +52,23 @@ def main():
     if args.verbose:
         cmd.append("-v")
     
+    # Test directories
+    shared_test_dir = Path(__file__).parent.parent.parent / "tests"
+    
+    # Add shared tests with docker backend filter
+    test_paths = []
+    if shared_test_dir.exists():
+        test_paths.append(str(shared_test_dir))
+    
+    # Add docker-specific tests
+    test_paths.append(str(tests_dir / "test_unit_docker.py"))
+    test_paths.append(str(tests_dir / "test_docker_extended.py"))
+    test_paths.append(str(tests_dir / "test_e2e_flows.py"))
+    
+    # Set backend environment variable
+    import os
+    os.environ['TEST_BACKEND'] = 'docker'
+    
     if args.coverage:
         cmd.extend([
             "--cov=../lib",
@@ -66,10 +83,15 @@ def main():
     if args.test_pattern:
         cmd.append(f"-k {args.test_pattern}")
     
-    # Add tests directory
-    cmd.append(str(tests_dir))
+    # Add test paths
+    cmd.extend(test_paths)
     
-    print(f"Running: {' '.join(cmd)}")
+    print("=" * 60)
+    print("Docker Model Runner LLM Setup - Test Suite")
+    print("=" * 60)
+    print()
+    print("Running: Shared tests (docker backend) + Docker-specific tests")
+    print(f"Command: {' '.join(cmd)}")
     print("=" * 60)
     
     # Run tests

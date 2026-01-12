@@ -18,11 +18,49 @@ import json
 from lib import validator
 from lib.validator import (
     PullErrorType, classify_pull_error, get_troubleshooting_steps,
-    PullResult, SetupResult, is_ollama_api_available,
+    PullResult, SetupResult,
     get_installed_models, verify_model_exists, get_fallback_model,
-    run_preflight_check, pull_models_with_tracking, display_setup_result,
-    test_ollama_connectivity, validate_pre_install, run_diagnostics
+    pull_models_with_tracking, display_setup_result, validate_pre_install
 )
+# test_ollama_connectivity may not exist in Docker backend
+try:
+    from lib.validator import test_ollama_connectivity as check_ollama_connectivity
+except ImportError:
+    try:
+        from lib.validator import test_dmr_connectivity as check_ollama_connectivity
+    except ImportError:
+        check_ollama_connectivity = None
+
+# Determine backend from environment for model name attribute
+import os
+_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+model_name_attr = "docker_name" if _test_backend == "docker" else "ollama_name"
+# run_preflight_check may not exist in Docker backend
+try:
+    from lib.validator import run_preflight_check
+except ImportError:
+    run_preflight_check = None
+# Backend-specific imports
+import os
+_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+if _test_backend == 'docker':
+    try:
+        from lib.validator import is_dmr_api_available as is_api_available
+    except ImportError:
+        is_api_available = None
+    try:
+        from lib.validator import run_diagnostics
+    except ImportError:
+        run_diagnostics = None
+else:
+    try:
+        from lib.validator import is_ollama_api_available as is_api_available
+    except ImportError:
+        is_api_available = None
+    try:
+        from lib.validator import run_diagnostics
+    except ImportError:
+        run_diagnostics = None
 from lib.model_selector import RecommendedModel, ModelRole
 from lib.hardware import HardwareTier, HardwareInfo
 
@@ -35,7 +73,9 @@ class TestPullErrorType:
         assert hasattr(PullErrorType, 'NETWORK')
         assert hasattr(PullErrorType, 'DISK')
         assert hasattr(PullErrorType, 'MODEL_NOT_FOUND')
-        assert hasattr(PullErrorType, 'SSH_KEY')
+        # SSH_KEY is only available in Ollama backend
+        if _test_backend != "docker":
+            assert hasattr(PullErrorType, 'SSH_KEY')
     
     def test_error_type_values(self):
         """Test error type values are strings."""
@@ -54,7 +94,6 @@ class TestClassifyPullError:
         ("disk full", PullErrorType.DISK),
         ("model not found", PullErrorType.MODEL_NOT_FOUND),
         ("does not exist", PullErrorType.MODEL_NOT_FOUND),
-        ("ssh: no key found", PullErrorType.SSH_KEY),
         ("unauthorized", PullErrorType.AUTH),
         ("authentication failed", PullErrorType.AUTH),
         ("some unknown error", PullErrorType.UNKNOWN),
@@ -63,6 +102,13 @@ class TestClassifyPullError:
         """Test various error messages are classified correctly."""
         result = classify_pull_error(error_msg)
         assert result == expected_type
+    
+    def test_classify_ssh_key_error(self):
+        """Test SSH key error classification (if available)."""
+        if not hasattr(PullErrorType, 'SSH_KEY'):
+            pytest.skip("SSH_KEY not available in this backend")
+        result = classify_pull_error("ssh: no key found")
+        assert result == PullErrorType.SSH_KEY
     
     def test_empty_error(self):
         """Test empty error message."""
@@ -94,6 +140,8 @@ class TestGetTroubleshootingSteps:
     
     def test_ssh_steps(self):
         """Test SSH error troubleshooting."""
+        if _test_backend == "docker" or not hasattr(PullErrorType, 'SSH_KEY'):
+            pytest.skip("SSH_KEY not available in Docker backend")
         steps = get_troubleshooting_steps(PullErrorType.SSH_KEY)
         
         assert isinstance(steps, list)
@@ -177,11 +225,13 @@ class TestSetupResult:
 class TestIsOllamaAPIAvailable:
     """Tests for is_ollama_api_available function."""
     
-    def test_returns_bool(self):
-        """Test that is_ollama_api_available returns a boolean."""
+    def test_returns_bool(self, backend_type):
+        """Test that is_ollama_api_available/is_dmr_api_available returns a boolean."""
+        if is_api_available is None:
+            pytest.skip("API availability function not available in this backend")
         # Just verify the function returns a boolean
         # Actual API call may succeed or fail depending on environment
-        result = is_ollama_api_available()
+        result = is_api_available()
         assert isinstance(result, bool)
 
 
@@ -243,29 +293,31 @@ class TestGetFallbackModel:
     
     def test_model_with_fallback(self):
         """Test model with fallback_name defined."""
-        model = RecommendedModel(
-            name="Primary",
-            ollama_name="primary:v",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat"],
-            fallback_name="fallback:v"
-        )
+        model_kwargs = {
+            "name": "Primary",
+            "ram_gb": 5.0,
+            "role": ModelRole.CHAT,
+            "roles": ["chat"],
+            "fallback_name": "fallback:v"
+        }
+        model_kwargs[model_name_attr] = "primary:v"
+        model = RecommendedModel(**model_kwargs)
         
         result = get_fallback_model(model, HardwareTier.C)
         
         if result is not None:
-            assert result.ollama_name == "fallback:v"
+            assert getattr(result, model_name_attr) == "fallback:v"
     
     def test_model_without_fallback(self):
         """Test model without fallback_name."""
-        model = RecommendedModel(
-            name="Primary",
-            ollama_name="primary:v",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat"]
-        )
+        model_kwargs = {
+            "name": "Primary",
+            "ram_gb": 5.0,
+            "role": ModelRole.CHAT,
+            "roles": ["chat"]
+        }
+        model_kwargs[model_name_attr] = "primary:v"
+        model = RecommendedModel(**model_kwargs)
         
         result = get_fallback_model(model, HardwareTier.C)
         
@@ -276,8 +328,10 @@ class TestGetFallbackModel:
 class TestRunPreflightCheck:
     """Tests for run_preflight_check function."""
     
-    def test_preflight_returns_tuple(self):
+    def test_preflight_returns_tuple(self, backend_type):
         """Test that run_preflight_check returns a tuple."""
+        if run_preflight_check is None:
+            pytest.skip("run_preflight_check not available in Docker backend")
         result = run_preflight_check(show_progress=False)
         
         assert isinstance(result, tuple)
@@ -326,7 +380,9 @@ class TestTestOllamaConnectivity:
     
     def test_connectivity_returns_tuple(self):
         """Test that test_ollama_connectivity returns a tuple."""
-        result = test_ollama_connectivity()
+        if check_ollama_connectivity is None:
+            pytest.skip("connectivity function not available in this backend")
+        result = check_ollama_connectivity()
         
         assert isinstance(result, tuple)
         assert len(result) == 3
@@ -339,26 +395,33 @@ class TestTestOllamaConnectivity:
 class TestValidatePreInstall:
     """Tests for validate_pre_install function."""
     
-    @patch('lib.validator.run_preflight_check')
-    def test_validation_success(self, mock_preflight):
+    def test_validation_success(self, backend_type):
         """Test successful pre-install validation."""
-        mock_preflight.return_value = (True, "OK", "0.1.23")
-        
-        models = [
-            RecommendedModel("Test", "test:v", 5.0, ModelRole.CHAT, ["chat"])
-        ]
-        hw_info = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
-        
-        success, messages = validate_pre_install(models, hw_info)
-        
-        assert isinstance(success, bool)
+        if backend_type == "docker" or not hasattr(validator, 'run_preflight_check'):
+            pytest.skip("run_preflight_check not available in Docker backend")
+        with patch('lib.validator.run_preflight_check') as mock_preflight:
+            mock_preflight.return_value = (True, "OK", "0.1.23")
+            
+            model_kwargs = {
+                "name": "Test",
+                "ram_gb": 5.0,
+                "role": ModelRole.CHAT,
+                "roles": ["chat"]
+            }
+            model_kwargs[model_name_attr] = "test:v"
+            models = [RecommendedModel(**model_kwargs)]
+            hw_info = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
+            
+            success, messages = validate_pre_install(models, hw_info)
+            
+            assert isinstance(success, bool)
         assert isinstance(messages, list)
 
 
 class TestRunDiagnostics:
     """Tests for run_diagnostics function."""
     
-    @patch('lib.validator.is_ollama_api_available', return_value=True)
+    @patch('lib.validator.is_dmr_api_available' if _test_backend == 'docker' else 'lib.validator.is_ollama_api_available', return_value=True)
     @patch('lib.validator.get_installed_models', return_value=["llama3:latest"])
     @patch('lib.validator.utils.run_command')
     @patch('shutil.which', return_value='/usr/bin/ollama')
@@ -366,6 +429,8 @@ class TestRunDiagnostics:
         """Test diagnostics produces output."""
         mock_run.return_value = (0, "0.1.23", "")
         
+        if run_diagnostics is None:
+            pytest.skip("run_diagnostics not available in this backend")
         result = run_diagnostics(verbose=False)
         
         assert isinstance(result, dict)

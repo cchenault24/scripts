@@ -17,10 +17,25 @@ import subprocess
 from lib import ide
 from lib.ide import (
     detect_installed_ides, is_vscode_installed, is_cursor_installed,
-    is_intellij_installed, get_ide_info, display_detected_ides,
+    is_intellij_installed,
     install_vscode_extension, detect_intellij_cli, install_intellij_plugin,
-    restart_vscode, restart_intellij, start_model_server, _get_model_attr
+    restart_vscode, restart_intellij, start_model_server
 )
+# _get_model_attr may not exist in Docker backend
+try:
+    from lib.ide import _get_model_attr
+except ImportError:
+    _get_model_attr = None
+# display_detected_ides may not exist in Docker backend
+try:
+    from lib.ide import display_detected_ides
+except ImportError:
+    display_detected_ides = None
+# get_ide_info may not exist in Docker backend
+try:
+    from lib.ide import get_ide_info
+except ImportError:
+    get_ide_info = None
 from lib import hardware
 
 
@@ -141,8 +156,10 @@ class TestGetIDEInfo:
     @patch('lib.ide.is_vscode_installed', return_value=True)
     @patch('lib.ide.is_cursor_installed', return_value=False)
     @patch('lib.ide.is_intellij_installed', return_value=True)
-    def test_returns_dict(self, mock_ij, mock_cursor, mock_vscode):
+    def test_returns_dict(self, mock_ij, mock_cursor, mock_vscode, backend_type):
         """Test returns dictionary with IDE status."""
+        if get_ide_info is None:
+            pytest.skip("get_ide_info not available in Docker backend")
         info = get_ide_info()
         
         assert isinstance(info, dict)
@@ -159,6 +176,8 @@ class TestDisplayDetectedIDEs:
     
     @patch('lib.ide.detect_installed_ides')
     def test_displays_ides(self, mock_detect, capsys):
+        if display_detected_ides is None:
+            pytest.skip("display_detected_ides not available in this backend")
         """Test display function outputs to console."""
         mock_detect.return_value = ["VS Code", "IntelliJ IDEA"]
         
@@ -167,8 +186,10 @@ class TestDisplayDetectedIDEs:
         assert result == ["VS Code", "IntelliJ IDEA"]
     
     @patch('lib.ide.detect_installed_ides')
-    def test_displays_warning_when_none(self, mock_detect, capsys):
+    def test_displays_warning_when_none(self, mock_detect, capsys, backend_type):
         """Test warning displayed when no IDEs found."""
+        if display_detected_ides is None:
+            pytest.skip("display_detected_ides not available in Docker backend")
         mock_detect.return_value = []
         
         result = display_detected_ides()
@@ -327,6 +348,8 @@ class TestGetModelAttr:
     
     def test_get_attr_from_object(self):
         """Test getting attribute from object."""
+        if _get_model_attr is None:
+            pytest.skip("_get_model_attr not available in this backend")
         class MockModel:
             name = "Test Model"
             ram_gb = 5.0
@@ -337,6 +360,8 @@ class TestGetModelAttr:
     
     def test_get_attr_from_dict(self):
         """Test getting attribute from dictionary."""
+        if _get_model_attr is None:
+            pytest.skip("_get_model_attr not available in this backend")
         model = {"name": "Dict Model", "ram_gb": 3.0}
         
         assert _get_model_attr(model, 'name') == "Dict Model"
@@ -344,6 +369,8 @@ class TestGetModelAttr:
     
     def test_get_attr_default(self):
         """Test default value when attribute missing."""
+        if _get_model_attr is None:
+            pytest.skip("_get_model_attr not available in this backend")
         model = {"name": "Test"}
         
         assert _get_model_attr(model, 'missing', "default") == "default"
@@ -351,6 +378,8 @@ class TestGetModelAttr:
     
     def test_get_attr_missing_no_default(self):
         """Test missing attribute with no default."""
+        if _get_model_attr is None:
+            pytest.skip("_get_model_attr not available in this backend")
         model = {"name": "Test"}
         
         assert _get_model_attr(model, 'missing') is None
@@ -372,9 +401,16 @@ class TestShowNextSteps:
         hw_info.cpu_brand = "Apple M1"
         hw_info.has_apple_silicon = True
         hw_info.ram_gb = 16
-        hw_info.ollama_api_endpoint = "http://localhost:11434/v1"
+        # Set backend-appropriate attributes
+        import os
+        backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+        if backend == "docker":
+            hw_info.dmr_api_endpoint = "http://localhost:12434/v1"
+            hw_info.docker_model_runner_available = True
+        else:
+            hw_info.ollama_api_endpoint = "http://localhost:11434/v1"
+            hw_info.ollama_available = True
         hw_info.os_name = "Darwin"
-        hw_info.ollama_available = True
         hw_info.get_tier_label = MagicMock(return_value="Tier C")
         
         # Create mock models

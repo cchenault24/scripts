@@ -1,5 +1,5 @@
 """
-End-to-end tests for Ollama LLM setup.
+End-to-end tests for Docker Model Runner LLM setup.
 
 Simulates complete user flows through the setup process,
 testing all branching paths and user interaction scenarios.
@@ -14,10 +14,8 @@ from unittest.mock import MagicMock, Mock, patch, call
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-# Add parent directory to path to access shared conftest fixtures
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from lib import hardware, model_selector, validator, config, ollama, ui
+from lib import hardware, model_selector, validator, config, docker, ui
 from lib.hardware import HardwareTier, HardwareInfo
 from lib.model_selector import ModelRole, RecommendedModel, ModelRecommendation
 
@@ -37,22 +35,18 @@ def mock_complete_environment(tmp_path):
         gpu_vram_gb=0,
         tier=hardware.HardwareTier.C,
         usable_ram_gb=9.6,
-        ollama_version="1.0.0",
-        ollama_available=True,
-        ollama_api_endpoint="http://localhost:11434/v1",
+        docker_version="1.0.0",
+        docker_model_runner_available=True,
+        dmr_api_endpoint="http://localhost:12434/v1",
     )
     # Create directory structure
     continue_dir = tmp_path / ".continue"
     continue_dir.mkdir()
     (continue_dir / "rules").mkdir()
     
-    launch_agents = tmp_path / "Library" / "LaunchAgents"
-    launch_agents.mkdir(parents=True)
-    
     return {
         "home": tmp_path,
         "continue_dir": continue_dir,
-        "launch_agents": launch_agents,
         "hardware": hw_info
     }
 
@@ -81,9 +75,9 @@ class TestHappyPathAcceptAll:
     
     @patch('lib.hardware.detect_hardware')
     @patch('lib.ide.detect_installed_ides')
-    @patch('lib.ollama.check_ollama')
-    @patch('lib.ollama.check_ollama_api')
-    @patch('lib.validator.is_ollama_api_available')
+    @patch('lib.docker.check_docker')
+    @patch('lib.docker.check_docker_model_runner')
+    @patch('lib.validator.is_dmr_api_available')
     @patch('lib.validator._pull_model')
     @patch('lib.validator.verify_model_exists')
     @patch('lib.ui.prompt_yes_no')
@@ -100,16 +94,16 @@ class TestHappyPathAcceptAll:
         self, mock_clear, mock_step, mock_subheader, mock_error,
         mock_warning, mock_success, mock_info, mock_header,
         mock_choice, mock_yes_no, mock_verify, mock_pull,
-        mock_api_available, mock_ollama_api, mock_ollama_check,
+        mock_api_available, mock_docker_mr, mock_docker_check,
         mock_ides, mock_detect_hw, mock_complete_environment
     ):
         """Test complete flow with user accepting all options."""
-        mock_hardware_tier_c = mock_complete_environment["hardware"]
         # Setup mocks
-        mock_detect_hw.return_value = mock_hardware_tier_c
+        hw_info = mock_complete_environment["hardware"]
+        mock_detect_hw.return_value = hw_info
         mock_ides.return_value = ["vscode"]
-        mock_ollama_check.return_value = (True, "0.13.5")
-        mock_ollama_api.return_value = True
+        mock_docker_check.return_value = (True, "27.0.3")
+        mock_docker_mr.return_value = True
         mock_api_available.return_value = True
         mock_pull.return_value = (True, "")
         mock_verify.return_value = True
@@ -117,7 +111,7 @@ class TestHappyPathAcceptAll:
         mock_choice.return_value = 0  # Accept recommendation
         
         # Get recommendation
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        recommendation = model_selector.generate_best_recommendation(hw_info)
         models = recommendation.all_models()
         
         # Simulate pulling
@@ -132,65 +126,49 @@ class TestHappyPathAcceptAll:
 
 
 # =============================================================================
-# E2E Scenario 2: Decline Autostart
+# E2E Scenario 2: Docker Not Running
 # =============================================================================
 
-class TestDeclineAutostart:
-    """E2E test: User declines auto-start setup."""
+class TestDockerNotRunning:
+    """E2E test: Docker daemon not running."""
     
-    @patch('platform.system')
-    @patch('lib.ollama.check_ollama_autostart_status_macos')
+    @patch('lib.docker.check_docker')
+    @patch('lib.ui.print_error')
+    @patch('lib.ui.print_info')
+    def test_docker_not_running(
+        self, mock_info, mock_error, mock_check
+    ):
+        """Test flow when Docker daemon is not running."""
+        mock_check.return_value = (False, "27.0.3")
+        
+        # Check Docker
+        docker_ok, version = mock_check()
+        
+        assert docker_ok is False
+
+
+# =============================================================================
+# E2E Scenario 3: Docker Model Runner Not Enabled
+# =============================================================================
+
+class TestDockerModelRunnerNotEnabled:
+    """E2E test: Docker Model Runner not enabled."""
+    
+    @patch('lib.docker.check_docker_model_runner')
+    @patch('lib.ui.print_warning')
+    @patch('lib.ui.print_info')
     @patch('lib.ui.prompt_yes_no')
-    @patch('lib.ui.print_info')
-    @patch('lib.ui.print_subheader')
-    def test_autostart_declined(
-        self, mock_subheader, mock_info, mock_yes_no,
-        mock_status, mock_system
+    def test_dmr_not_enabled(
+        self, mock_yes_no, mock_info, mock_warning, mock_check
     ):
-        """Test flow when user declines auto-start."""
-        mock_system.return_value = "Darwin"
-        mock_status.return_value = (False, "Not configured")
-        mock_yes_no.return_value = False  # Decline autostart
+        """Test flow when Docker Model Runner is not enabled."""
+        mock_check.return_value = False
+        mock_yes_no.return_value = False  # Don't continue
         
-        # Check auto-start status
-        is_configured, details = mock_status()
+        # Check DMR
+        dmr_ok = mock_check(Mock())
         
-        # User declines
-        setup_autostart = mock_yes_no("Would you like to set up auto-start?")
-        
-        assert is_configured is False
-        assert setup_autostart is False
-
-
-# =============================================================================
-# E2E Scenario 3: Autostart Already Configured
-# =============================================================================
-
-class TestAutostartAlreadyConfigured:
-    """E2E test: Auto-start already configured."""
-    
-    @patch('platform.system')
-    @patch('lib.ollama.check_ollama_autostart_status_macos')
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ui.print_success')
-    @patch('lib.ui.print_info')
-    @patch('lib.ui.print_subheader')
-    def test_autostart_exists(
-        self, mock_subheader, mock_info, mock_success,
-        mock_running, mock_status, mock_system
-    ):
-        """Test flow when auto-start is already configured."""
-        mock_system.return_value = "Darwin"
-        mock_status.return_value = (True, "Launch Agent (loaded)")
-        mock_running.return_value = True
-        
-        # Check status
-        is_configured, details = mock_status()
-        is_running = mock_running()
-        
-        assert is_configured is True
-        assert "loaded" in details.lower()
-        assert is_running is True
+        assert dmr_ok is False
 
 
 # =============================================================================
@@ -222,12 +200,12 @@ class TestModelPullFailureWithFallback:
         
         model = RecommendedModel(
             name="Primary",
-            ollama_name="granite-code:7b",  # Use non-restricted model name
+            docker_name="ai/granite-code:7b",  # Use non-restricted model name
             ram_gb=5.0,
             role=ModelRole.CHAT,
             roles=["chat"],
             description="Test",
-            fallback_name="codellama:7b"
+            fallback_name="ai/codellama:7b"
         )
         
         result = validator.pull_model_with_verification(
@@ -247,8 +225,8 @@ class TestAllModelsFail:
     
     def test_complete_failure_result(self, mock_complete_environment):
         """Test SetupResult when all models fail."""
-        mock_hardware_tier_c = mock_complete_environment["hardware"]
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        hw_info = mock_complete_environment["hardware"]
+        recommendation = model_selector.generate_best_recommendation(hw_info)
         models = recommendation.all_models()
         
         result = validator.SetupResult()
@@ -283,7 +261,7 @@ class TestDifferentRamTiers:
                 0.65 if tier == HardwareTier.B else 0.7
             )),
             has_apple_silicon=True,
-            ollama_available=True
+            docker_model_runner_available=True
         )
         
         recommendation = model_selector.generate_best_recommendation(hw_info)
@@ -294,38 +272,7 @@ class TestDifferentRamTiers:
 
 
 # =============================================================================
-# E2E Scenario 7: Overwrite Existing Autostart
-# =============================================================================
-
-class TestOverwriteAutostart:
-    """E2E test: Overwrite existing auto-start configuration."""
-    
-    @patch('platform.system')
-    @patch('pathlib.Path.exists')
-    @patch('lib.ui.prompt_yes_no')
-    @patch('lib.utils.run_command')
-    @patch('lib.ui.print_warning')
-    @patch('lib.ui.print_info')
-    def test_overwrite_flow(
-        self, mock_info, mock_warning, mock_run,
-        mock_yes_no, mock_exists, mock_system
-    ):
-        """Test overwriting existing auto-start configuration."""
-        mock_system.return_value = "Darwin"
-        mock_exists.return_value = True  # Plist exists
-        mock_yes_no.return_value = True  # Confirm overwrite
-        mock_run.return_value = (0, "", "")
-        
-        # Simulate the check
-        plist_exists = mock_exists()
-        overwrite = mock_yes_no("Overwrite existing configuration?")
-        
-        assert plist_exists is True
-        assert overwrite is True
-
-
-# =============================================================================
-# E2E Scenario 8: Permission Errors
+# E2E Scenario 7: Permission Errors
 # =============================================================================
 
 class TestPermissionErrors:
@@ -350,27 +297,27 @@ class TestPermissionErrors:
 
 
 # =============================================================================
-# E2E Scenario 9: SSH Key Error Flow
+# E2E Scenario 8: Network Error Flow
 # =============================================================================
 
-class TestSSHKeyErrorFlow:
-    """E2E test: Handle SSH key errors with proper troubleshooting."""
+class TestNetworkErrorFlow:
+    """E2E test: Handle network errors with proper troubleshooting."""
     
-    def test_ssh_error_provides_troubleshooting(self):
-        """Test that SSH errors provide helpful troubleshooting."""
-        error_msg = "ssh: no key found"
+    def test_network_error_provides_troubleshooting(self):
+        """Test that network errors provide helpful troubleshooting."""
+        error_msg = "connection refused"
         error_type = validator.classify_pull_error(error_msg)
         steps = validator.get_troubleshooting_steps(error_type)
         
-        assert error_type == validator.PullErrorType.SSH_KEY
+        assert error_type == validator.PullErrorType.NETWORK
         
-        # Should provide SSH-related troubleshooting steps
+        # Should provide network-related troubleshooting steps
         steps_text = " ".join(steps)
-        assert "SSH" in steps_text.upper() or "OLLAMA" in steps_text.upper()
+        assert "network" in steps_text.lower() or "connection" in steps_text.lower()
 
 
 # =============================================================================
-# E2E Scenario 10: Retry Failed Models
+# E2E Scenario 9: Retry Failed Models
 # =============================================================================
 
 class TestRetryFailedModels:
@@ -378,10 +325,9 @@ class TestRetryFailedModels:
     
     def test_retry_reduces_failures(self, mock_complete_environment):
         """Test that retrying can reduce number of failures."""
-        mock_hardware_tier_c = mock_complete_environment["hardware"]
         model1 = RecommendedModel(
             name="Model1",
-            ollama_name="model1:latest",
+            docker_name="ai/model1:latest",
             ram_gb=3.0,
             role=ModelRole.CHAT,
             roles=["chat"],
@@ -389,7 +335,7 @@ class TestRetryFailedModels:
         )
         model2 = RecommendedModel(
             name="Model2",
-            ollama_name="model2:latest",
+            docker_name="ai/model2:latest",
             ram_gb=2.0,
             role=ModelRole.EMBED,
             roles=["embed"],
@@ -413,7 +359,7 @@ class TestRetryFailedModels:
 
 
 # =============================================================================
-# E2E Scenario 11: Uninstaller Flow
+# E2E Scenario 10: Uninstaller Flow
 # =============================================================================
 
 class TestUninstallerFlow:
@@ -429,9 +375,10 @@ class TestUninstallerFlow:
             "version": "2.0",
             "timestamp": "2024-01-01T00:00:00Z",
             "installer_version": "2.0.0",
+            "installer_type": "docker",
             "installed": {
                 "models": [
-                    {"name": "qwen2.5-coder:7b", "size_gb": 5.0}
+                    {"name": "ai/qwen2.5-coder:7b", "size_gb": 5.0}
                 ],
                 "files": [
                     {"path": str(continue_dir / "config.yaml")}
@@ -447,11 +394,12 @@ class TestUninstallerFlow:
         loaded = json.loads(manifest_path.read_text())
         
         assert loaded["version"] == "2.0"
+        assert loaded["installer_type"] == "docker"
         assert len(loaded["installed"]["models"]) == 1
 
 
 # =============================================================================
-# E2E Scenario 12: Config Customization Detection
+# E2E Scenario 11: Config Customization Detection
 # =============================================================================
 
 class TestConfigCustomizationDetection:
@@ -482,7 +430,7 @@ class TestConfigCustomizationDetection:
 
 
 # =============================================================================
-# E2E Scenario 13: Full Diagnostic Flow
+# E2E Scenario 12: Full Diagnostic Flow
 # =============================================================================
 
 class TestFullDiagnosticFlow:
@@ -493,18 +441,20 @@ class TestFullDiagnosticFlow:
     @patch('lib.validator._pull_model_single_attempt')
     def test_diagnostics_identify_issues(self, mock_pull, mock_urlopen, mock_run):
         """Test that diagnostics correctly identify issues."""
-        # Mock ollama not installed
-        mock_run.return_value = (-1, "", "command not found: ollama")
+        if not hasattr(validator, 'run_diagnostics'):
+            pytest.skip("run_diagnostics not available in Docker backend")
+        # Mock docker not installed
+        mock_run.return_value = (-1, "", "command not found: docker")
         
         results = validator.run_diagnostics(verbose=False)
         
-        assert results["ollama_installed"] is False
+        assert results["docker_installed"] is False
         assert len(results["issues_found"]) > 0
         assert len(results["recommendations"]) > 0
 
 
 # =============================================================================
-# E2E Scenario 14: Model Selection Customization
+# E2E Scenario 13: Model Selection Customization
 # =============================================================================
 
 class TestModelSelectionCustomization:
@@ -512,11 +462,11 @@ class TestModelSelectionCustomization:
     
     def test_get_alternatives_for_role(self, mock_complete_environment):
         """Test getting alternatives for a role."""
-        mock_hardware_tier_c = mock_complete_environment["hardware"]
         # Test that PRIMARY_MODELS contains alternatives for the tier
         from lib.model_selector import PRIMARY_MODELS
         
-        alternatives = PRIMARY_MODELS.get(mock_hardware_tier_c.tier, [])
+        hw_info = mock_complete_environment["hardware"]
+        alternatives = PRIMARY_MODELS.get(hw_info.tier, [])
         
         assert len(alternatives) > 0, "Should have alternatives for the tier"
         for alt in alternatives:
@@ -526,7 +476,7 @@ class TestModelSelectionCustomization:
 
 
 # =============================================================================
-# E2E Scenario 15: Graceful Degradation
+# E2E Scenario 14: Graceful Degradation
 # =============================================================================
 
 class TestGracefulDegradation:
@@ -534,8 +484,8 @@ class TestGracefulDegradation:
     
     def test_partial_setup_still_useful(self, mock_complete_environment):
         """Test that partial setup is still usable."""
-        mock_hardware_tier_c = mock_complete_environment["hardware"]
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        hw_info = mock_complete_environment["hardware"]
+        recommendation = model_selector.generate_best_recommendation(hw_info)
         models = recommendation.all_models()
         
         # Simulate: primary succeeds, embed fails

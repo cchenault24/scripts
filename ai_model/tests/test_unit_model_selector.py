@@ -9,19 +9,44 @@ Tests cover:
 - Model recommendation generation
 - Alternative model selection
 - Customization functions
+
+Runs against both ollama and docker backends.
 """
 
+import sys
+from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
+
+# Add backend directories to path
+_ollama_path = str(Path(__file__).parent.parent / "ollama")
+_docker_path = str(Path(__file__).parent.parent / "docker")
+if _ollama_path not in sys.path:
+    sys.path.insert(0, _ollama_path)
+if _docker_path not in sys.path:
+    sys.path.insert(0, _docker_path)
+
 from lib import model_selector
 from lib.model_selector import (
     ModelRole, RecommendedModel, ModelRecommendation,
     get_usable_ram, generate_best_recommendation,
-    generate_multi_model_recommendation, generate_conservative_recommendation,
+    generate_conservative_recommendation,
+)
+# generate_multi_model_recommendation may not exist in Docker backend
+try:
+    from lib.model_selector import generate_multi_model_recommendation
+except ImportError:
+    generate_multi_model_recommendation = None
+from lib.model_selector import (
     get_alternatives_for_role, EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
 )
 from lib import hardware
 from lib.hardware import HardwareTier, HardwareInfo
+
+# Determine backend from environment for model name attribute
+import os
+_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
+model_name_attr = "docker_name" if _test_backend == "docker" else "ollama_name"
 
 
 def create_hw_info(ram_gb: float, tier: HardwareTier) -> HardwareInfo:
@@ -51,30 +76,32 @@ class TestRecommendedModel:
     
     def test_create_model(self):
         """Test creating a RecommendedModel instance."""
-        model = RecommendedModel(
-            name="Test Model",
-            ollama_name="test:latest",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit"]
-        )
+        model_kwargs = {
+            "name": "Test Model",
+            "ram_gb": 5.0,
+            "role": ModelRole.CHAT,
+            "roles": ["chat", "edit"]
+        }
+        model_kwargs[model_name_attr] = "test:latest"
+        model = RecommendedModel(**model_kwargs)
         
         assert model.name == "Test Model"
-        assert model.ollama_name == "test:latest"
+        assert getattr(model, model_name_attr) == "test:latest"
         assert model.ram_gb == 5.0
         assert model.role == ModelRole.CHAT
         assert "chat" in model.roles
     
     def test_model_with_fallback(self):
         """Test model with fallback_name."""
-        model = RecommendedModel(
-            name="Primary Model",
-            ollama_name="primary:latest",
-            ram_gb=8.0,
-            role=ModelRole.CHAT,
-            roles=["chat"],
-            fallback_name="fallback:latest"
-        )
+        model_kwargs = {
+            "name": "Primary Model",
+            "ram_gb": 8.0,
+            "role": ModelRole.CHAT,
+            "roles": ["chat"],
+            "fallback_name": "fallback:latest"
+        }
+        model_kwargs[model_name_attr] = "primary:latest"
+        model = RecommendedModel(**model_kwargs)
         
         assert model.fallback_name == "fallback:latest"
 
@@ -257,8 +284,10 @@ class TestGenerateBestRecommendation:
 class TestGenerateMultiModelRecommendation:
     """Tests for generate_multi_model_recommendation function."""
     
-    def test_returns_recommendation_or_none(self):
+    def test_returns_recommendation_or_none(self, backend_type):
         """Test returns ModelRecommendation or None."""
+        if generate_multi_model_recommendation is None:
+            pytest.skip("generate_multi_model_recommendation not available in Docker backend")
         hw_info = create_hw_info(24, HardwareTier.B)
         
         result = generate_multi_model_recommendation(hw_info)

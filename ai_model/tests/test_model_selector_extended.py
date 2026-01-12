@@ -116,31 +116,33 @@ class TestModelCatalogs:
 class TestRecommendedModelDataclass:
     """Tests for RecommendedModel dataclass."""
     
-    def test_model_with_all_fields(self):
+    def test_model_with_all_fields(self, backend_type, model_name_attr):
         """Test creating model with all fields."""
-        model = RecommendedModel(
-            name="Test Model",
-            ollama_name="test:v1",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit"],
-            description="A test model",
-            fallback_name="fallback:v1"
-        )
+        model_kwargs = {
+            "name": "Test Model",
+            "ram_gb": 5.0,
+            "role": ModelRole.CHAT,
+            "roles": ["chat", "edit"],
+            "description": "A test model",
+            "fallback_name": "fallback:v1"
+        }
+        model_kwargs[model_name_attr] = "test:v1"
+        model = RecommendedModel(**model_kwargs)
         
         assert model.name == "Test Model"
         assert model.description == "A test model"
         assert model.fallback_name == "fallback:v1"
     
-    def test_model_without_optional_fields(self):
+    def test_model_without_optional_fields(self, backend_type, model_name_attr):
         """Test creating model without optional fields."""
-        model = RecommendedModel(
-            name="Minimal",
-            ollama_name="minimal:v1",
-            ram_gb=3.0,
-            role=ModelRole.AUTOCOMPLETE,
-            roles=["autocomplete"]
-        )
+        model_kwargs = {
+            "name": "Minimal",
+            "ram_gb": 3.0,
+            "role": ModelRole.AUTOCOMPLETE,
+            "roles": ["autocomplete"]
+        }
+        model_kwargs[model_name_attr] = "minimal:v1"
+        model = RecommendedModel(**model_kwargs)
         
         assert model.description == ""
         assert model.fallback_name is None

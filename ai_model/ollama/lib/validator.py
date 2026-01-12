@@ -123,7 +123,12 @@ def classify_pull_error(error_msg: str) -> str:
     ]):
         return PullErrorType.AUTH
     
-    # Service not running
+    # Service not running (Ollama or Docker)
+    if any(x in error_lower for x in [
+        "is ollama running", "ollama not running", "ollama service",
+        "is docker running", "docker not running", "docker daemon"
+    ]):
+        return PullErrorType.SERVICE
     if any(x in error_lower for x in [
         "is ollama running", "service unavailable", "connection refused localhost"
     ]):
