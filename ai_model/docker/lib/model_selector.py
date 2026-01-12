@@ -452,12 +452,12 @@ REASONING_MODELS = {
 
 def get_usable_ram(hw_info: hardware.HardwareInfo) -> float:
     """
-    Get usable RAM for models based on tier-based reservation.
+    Get usable RAM for models in Docker setups.
     
-    Uses tier-specific reservation from HardwareInfo.get_tier_ram_reservation().
+    Docker Desktop manually reserves 8GB, so we use: total_ram - 8GB
+    This replaces the percentage-based reservation system.
     """
-    reservation = hw_info.get_tier_ram_reservation()
-    return hw_info.ram_gb * (1 - reservation)
+    return max(0, hw_info.ram_gb - 8.0)
 
 
 def get_available_families(hw_info: hardware.HardwareInfo) -> List[Dict[str, str]]:
@@ -516,7 +516,9 @@ def get_model_for_family(hw_info: hardware.HardwareInfo, family: str) -> Recomme
     
     chip_model = hw_info.apple_chip_model or ""
     ram_gb = hw_info.ram_gb
-    usable_ram = capabilities["usable_ram_gb"]
+    # For Docker setups, Docker Desktop manually reserves 8GB
+    # So we use: total_ram - 8GB instead of percentage-based reservation
+    docker_usable_ram = ram_gb - 8.0
     performance_score = capabilities["performance_score"]
     
     # Check for Ultra models or high-end Max models that should get 70B
@@ -531,8 +533,8 @@ def get_model_for_family(hw_info: hardware.HardwareInfo, family: str) -> Recomme
         # Find 70B variant
         for variant in variants:
             if "70B" in variant.docker_name:
-                # Verify it fits in RAM and meets CPU requirements
-                if variant.ram_gb <= usable_ram and variant.min_perf_score <= performance_score:
+                # Check if it fits with Docker-aware calculation and meets CPU requirements
+                if variant.ram_gb <= docker_usable_ram and variant.min_perf_score <= performance_score:
                     return variant
                 # If it doesn't fit, fall back to 8B
                 break
@@ -541,7 +543,7 @@ def get_model_for_family(hw_info: hardware.HardwareInfo, family: str) -> Recomme
     for variant in variants:
         if "8B" in variant.docker_name:
             # Verify it fits (should always fit, but check anyway)
-            if variant.ram_gb <= usable_ram:
+            if variant.ram_gb <= docker_usable_ram:
                 return variant
     
     # Fallback to smallest variant
@@ -568,12 +570,13 @@ def explain_model_selection(
     if capabilities is None:
         return f"Selected {model.name} ({model.ram_gb:.1f}GB)"
     
-    usable_ram = capabilities["usable_ram_gb"]
+    # For Docker setups, Docker Desktop manually reserves 8GB
+    docker_usable_ram = hw_info.ram_gb - 8.0
     performance_score = capabilities["performance_score"]
     chip_model = hw_info.apple_chip_model or "Apple Silicon"
     
     reasons = []
-    reasons.append(f"Fits in {usable_ram:.1f}GB usable RAM ✓")
+    reasons.append(f"Fits in {docker_usable_ram:.1f}GB usable RAM (Docker Desktop reserves 8GB) ✓")
     
     if performance_score >= model.min_perf_score:
         reasons.append(f"Your {chip_model} (score {performance_score:.1f}) exceeds minimum ({model.min_perf_score:.1f}) ✓")
@@ -588,106 +591,6 @@ def explain_model_selection(
         reasons.append("FP16 provides highest quality")
     
     return " • ".join(reasons)
-
-
-# =============================================================================
-# DEPRECATED FUNCTIONS - Kept for backward compatibility with tests
-# These functions are no longer used by the new family-based selection workflow
-# =============================================================================
-
-def generate_best_recommendation(hw_info: hardware.HardwareInfo) -> ModelRecommendation:
-    """
-    DEPRECATED: Use get_model_for_family() instead.
-    
-    Generate the single best recommendation for the hardware.
-    Kept for backward compatibility with tests.
-    """
-    tier = hw_info.tier
-    usable_ram = get_usable_ram(hw_info)
-    
-    # Target usage: 70% of usable RAM for safety buffer
-    target_ram = usable_ram * 0.70
-    
-    # Get embeddings (always included, ~0.3GB)
-    embeddings = EMBED_MODEL
-    remaining_ram = target_ram - embeddings.ram_gb
-    
-    # Get autocomplete (always included)
-    autocomplete = AUTOCOMPLETE_MODELS.get(tier, AUTOCOMPLETE_MODELS[hardware.HardwareTier.C])
-    remaining_ram -= autocomplete.ram_gb
-    
-    # Select best primary model that fits in remaining RAM
-    primary = None
-    primary_options = PRIMARY_MODELS.get(tier, PRIMARY_MODELS[hardware.HardwareTier.C])
-    
-    for model in primary_options:
-        if model.ram_gb <= remaining_ram:
-            primary = model
-            break
-    
-    # Fallback: use the smallest primary model available
-    if primary is None:
-        primary = primary_options[-1] if primary_options else autocomplete
-    
-    # Don't include autocomplete if it's the same model as primary
-    include_autocomplete = autocomplete.docker_name != primary.docker_name
-    
-    return ModelRecommendation(
-        primary=primary,
-        autocomplete=autocomplete if include_autocomplete else None,
-        embeddings=embeddings
-    )
-
-
-def display_recommendation(
-    recommendation: ModelRecommendation,
-    hw_info: hardware.HardwareInfo,
-    title: str = "Recommended setup"
-) -> None:
-    """
-    DEPRECATED: Display logic is now integrated into select_models_smart().
-    
-    Display a model recommendation in user-friendly format.
-    Kept for backward compatibility with tests.
-    """
-    usable_ram = get_usable_ram(hw_info)
-    total_ram = recommendation.total_ram()
-    buffer = usable_ram - total_ram
-    buffer_percent = (buffer / usable_ram * 100) if usable_ram > 0 else 0
-    usage_percent = (total_ram / usable_ram * 100) if usable_ram > 0 else 0
-    
-    print()
-    print(ui.colorize(f"{title}:", ui.Colors.GREEN + ui.Colors.BOLD))
-    
-    # Primary model
-    print(f"  • {ui.colorize(recommendation.primary.docker_name, ui.Colors.CYAN)} (primary coding) - {recommendation.primary.ram_gb:.1f}GB")
-    
-    # Autocomplete (if separate from primary)
-    if recommendation.autocomplete:
-        print(f"  • {ui.colorize(recommendation.autocomplete.docker_name, ui.Colors.CYAN)} (autocomplete) - {recommendation.autocomplete.ram_gb:.1f}GB")
-    
-    # Embeddings
-    if recommendation.embeddings:
-        print(f"  • {ui.colorize(recommendation.embeddings.docker_name, ui.Colors.CYAN)} (codebase search) - {recommendation.embeddings.ram_gb:.1f}GB")
-    
-    # Reasoning (if included)
-    if recommendation.reasoning:
-        print(f"  • {ui.colorize(recommendation.reasoning.docker_name, ui.Colors.CYAN)} (reasoning) - {recommendation.reasoning.ram_gb:.1f}GB")
-    
-    print()
-    
-    # Color code the usage
-    if usage_percent < 70:
-        color = ui.Colors.GREEN
-    elif usage_percent < 85:
-        color = ui.Colors.YELLOW
-    else:
-        color = ui.Colors.RED
-    
-    print(ui.colorize(
-        f"Total: {total_ram:.1f}GB / {usable_ram:.1f}GB usable ({buffer_percent:.0f}% buffer remaining)",
-        color
-    ))
 
 
 def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: Optional[List[str]] = None) -> List[RecommendedModel]:
@@ -732,11 +635,10 @@ def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: Optional
     
     print()
     print(f"  System RAM:           {hw_info.ram_gb:.0f}GB")
-    usable_ram = capabilities["usable_ram_gb"]
-    reservation = hw_info.get_tier_ram_reservation()
-    reserved_ram = hw_info.ram_gb * reservation
-    print(f"  Reserved ({reservation:.0%}):     {reserved_ram:.1f}GB (for OS, IDE, browser)")
-    print(f"  Usable RAM:          {usable_ram:.1f}GB (for models)")
+    # For Docker setups, Docker Desktop manually reserves 8GB
+    docker_usable_ram = hw_info.ram_gb - 8.0
+    print(f"  Reserved:            8.0GB (Docker Desktop manual reservation)")
+    print(f"  Usable RAM:          {docker_usable_ram:.1f}GB (for models)")
     print(f"  CPU Performance:    {capabilities['performance_score']:.1f} ({chip_model} with {hw_info.cpu_perf_cores}P cores)")
     print(f"  Can handle FP16:     {'Yes' if capabilities['can_handle_fp16'] else 'No'}")
     
@@ -771,7 +673,9 @@ def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: Optional
         print(f"  • {ui.colorize(model.docker_name, ui.Colors.CYAN)} - {model.ram_gb:.1f}GB")
     
     total_ram = sum(m.ram_gb for m in models_to_install)
-    usage_percent = (total_ram / usable_ram * 100) if usable_ram > 0 else 0
+    # For Docker setups, Docker Desktop manually reserves 8GB
+    docker_usable_ram = hw_info.ram_gb - 8.0
+    usage_percent = (total_ram / docker_usable_ram * 100) if docker_usable_ram > 0 else 0
     
     print()
     if usage_percent < 70:
@@ -782,7 +686,7 @@ def select_models_smart(hw_info: hardware.HardwareInfo, installed_ides: Optional
         color = ui.Colors.RED
     
     print(ui.colorize(
-        f"Total: {total_ram:.1f}GB / {usable_ram:.1f}GB usable ({usage_percent:.0f}% used)",
+        f"Total: {total_ram:.1f}GB / {docker_usable_ram:.1f}GB usable ({usage_percent:.0f}% used)",
         color
     ))
     

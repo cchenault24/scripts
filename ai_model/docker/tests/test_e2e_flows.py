@@ -111,7 +111,8 @@ class TestHappyPathAcceptAll:
         mock_choice.return_value = 0  # Accept recommendation
         
         # Get recommendation
-        recommendation = model_selector.generate_best_recommendation(hw_info)
+        from tests.conftest import _generate_best_recommendation
+        recommendation = _generate_best_recommendation(hw_info, "docker")
         models = recommendation.all_models()
         
         # Simulate pulling
@@ -226,7 +227,8 @@ class TestAllModelsFail:
     def test_complete_failure_result(self, mock_complete_environment):
         """Test SetupResult when all models fail."""
         hw_info = mock_complete_environment["hardware"]
-        recommendation = model_selector.generate_best_recommendation(hw_info)
+        from tests.conftest import _generate_best_recommendation
+        recommendation = _generate_best_recommendation(hw_info, "docker")
         models = recommendation.all_models()
         
         result = validator.SetupResult()
@@ -264,7 +266,8 @@ class TestDifferentRamTiers:
             docker_model_runner_available=True
         )
         
-        recommendation = model_selector.generate_best_recommendation(hw_info)
+        from tests.conftest import _generate_best_recommendation
+        recommendation = _generate_best_recommendation(hw_info, "docker")
         total_ram = recommendation.total_ram()
         
         assert total_ram >= expected_min_ram, f"Tier {tier}: Models too small"
@@ -518,15 +521,15 @@ class TestFullDiagnosticFlow:
 class TestModelSelectionCustomization:
     """E2E test: User customizes model selection."""
     
-    def test_get_alternatives_for_role(self, mock_complete_environment):
-        """Test getting alternatives for a role."""
-        # Test that PRIMARY_MODELS contains alternatives for the tier
+    def test_primary_models_for_tier(self, mock_complete_environment):
+        """Test that PRIMARY_MODELS contains models for the tier."""
+        # Test that PRIMARY_MODELS contains models for the tier
         from lib.model_selector import PRIMARY_MODELS
         
         hw_info = mock_complete_environment["hardware"]
         alternatives = PRIMARY_MODELS.get(hw_info.tier, [])
         
-        assert len(alternatives) > 0, "Should have alternatives for the tier"
+        assert len(alternatives) > 0, "Should have models for the tier"
         for alt in alternatives:
             assert isinstance(alt, RecommendedModel)
             # Primary models should have chat role
@@ -543,7 +546,8 @@ class TestGracefulDegradation:
     def test_partial_setup_still_useful(self, mock_complete_environment):
         """Test that partial setup is still usable."""
         hw_info = mock_complete_environment["hardware"]
-        recommendation = model_selector.generate_best_recommendation(hw_info)
+        from tests.conftest import _generate_best_recommendation
+        recommendation = _generate_best_recommendation(hw_info, "docker")
         models = recommendation.all_models()
         
         # Simulate: primary succeeds, embed fails

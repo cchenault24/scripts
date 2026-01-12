@@ -22,13 +22,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, Mock, call, mock_open, patch
 
-# Import backend module dynamically based on TEST_BACKEND
-import os
-_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
-if _test_backend == 'docker':
-    from lib import docker as backend_module
-else:
-    from lib import ollama as backend_module
+# Backend module will be imported via fixture
+# Don't import at module level to avoid conflicts when running both backends
 from lib import uninstaller
 from lib.uninstaller import (
     check_intellij_plugin_installed, check_running_processes,
@@ -472,107 +467,94 @@ class TestModelNameComparison:
 class TestExecutionOrder:
     """Test that models are removed before service is stopped."""
     
-    @pytest.mark.skipif(
-        lambda: os.environ.get('TEST_BACKEND', 'ollama').lower() == 'docker',
-        reason="Ollama-specific test"
-    )
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ollama.start_ollama_service')
-    @patch('lib.uninstaller.remove_model')
-    @patch('lib.uninstaller.get_installed_models')
-    @patch('lib.uninstaller.ensure_ollama_running_for_removal')
-    @patch('lib.uninstaller.utils.run_command')
     def test_models_removed_before_service_stop(
-        self, backend_type,
-        mock_run_command,
-        mock_ensure_running,
-        mock_get_installed,
-        mock_remove_model,
-        mock_start_ollama_service,
-        mock_verify_ollama_running
+        self, backend_type, backend_module
     ):
         """Verify execution order: remove models before stopping service."""
-        # Setup: Ollama is running
-        mock_verify_ollama_running.return_value = True
-        mock_ensure_running.return_value = True
-        mock_get_installed.return_value = ["codellama:7b", "starcoder2:3b"]
-        mock_remove_model.return_value = True
+        if backend_type == 'docker':
+            pytest.skip("Ollama-specific test")
         
-        # Remove models
-        model_names = ["codellama:7b", "starcoder2:3b"]
-        result = uninstaller.remove_models(model_names)
-        
-        # Verify models were removed
-        assert result == 2
-        assert mock_remove_model.call_count == 2
-        
-        # Verify Ollama was NOT stopped during model removal
-        # (pkill should not be called)
-        pkill_calls = [c for c in mock_run_command.call_args_list 
-                      if len(c[0]) > 0 and c[0][0] and "pkill" in c[0][0]]
-        assert len(pkill_calls) == 0, "Ollama should not be stopped during model removal"
+        # Import here to avoid import errors for docker backend
+        from unittest.mock import patch
+        with patch('lib.ollama.verify_ollama_running') as mock_verify_ollama_running, \
+             patch('lib.ollama.start_ollama_service') as mock_start_ollama_service, \
+             patch('lib.uninstaller.remove_model') as mock_remove_model, \
+             patch('lib.uninstaller.get_installed_models') as mock_get_installed, \
+             patch('lib.uninstaller.ensure_ollama_running_for_removal') as mock_ensure_running, \
+             patch('lib.uninstaller.utils.run_command') as mock_run_command:
+            # Setup: Ollama is running
+            mock_verify_ollama_running.return_value = True
+            mock_ensure_running.return_value = True
+            mock_get_installed.return_value = ["codellama:7b", "starcoder2:3b"]
+            mock_remove_model.return_value = True
+            
+            # Remove models
+            model_names = ["codellama:7b", "starcoder2:3b"]
+            result = uninstaller.remove_models(model_names)
+            
+            # Verify models were removed
+            assert result == 2
+            assert mock_remove_model.call_count == 2
+            
+            # Verify Ollama was NOT stopped during model removal
+            # (pkill should not be called)
+            pkill_calls = [c for c in mock_run_command.call_args_list 
+                          if len(c[0]) > 0 and c[0][0] and "pkill" in c[0][0]]
+            assert len(pkill_calls) == 0, "Ollama should not be stopped during model removal"
     
-    @pytest.mark.skipif(
-        lambda: os.environ.get('TEST_BACKEND', 'ollama').lower() == 'docker',
-        reason="Ollama-specific test"
-    )
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ollama.start_ollama_service')
-    @patch('lib.uninstaller.remove_model')
-    @patch('lib.uninstaller.get_installed_models')
     def test_starts_ollama_if_stopped_for_model_removal(
-        self,
-        mock_get_installed,
-        mock_remove_model,
-        mock_start_ollama_service,
-        mock_verify_ollama_running
+        self, backend_type, backend_module
     ):
         """Auto-start Ollama if stopped when removing models."""
-        # Setup: Ollama is NOT running initially, then started
-        mock_verify_ollama_running.side_effect = [False, True]  # Not running, then running after start
-        mock_start_ollama_service.return_value = True
-        mock_get_installed.return_value = ["codellama:7b"]
-        mock_remove_model.return_value = True
+        if backend_type == 'docker':
+            pytest.skip("Ollama-specific test")
         
-        # Remove models
-        model_names = ["codellama:7b"]
-        result = uninstaller.remove_models(model_names)
-        
-        # Verify Ollama was started
-        assert mock_start_ollama_service.called, "Ollama should be started if not running"
-        assert mock_verify_ollama_running.called
-        assert result == 1
+        from unittest.mock import patch
+        with patch('lib.ollama.verify_ollama_running') as mock_verify_ollama_running, \
+             patch('lib.ollama.start_ollama_service') as mock_start_ollama_service, \
+             patch('lib.uninstaller.remove_model') as mock_remove_model, \
+             patch('lib.uninstaller.get_installed_models') as mock_get_installed:
+            # Setup: Ollama is NOT running initially, then started
+            mock_verify_ollama_running.side_effect = [False, True]  # Not running, then running after start
+            mock_start_ollama_service.return_value = True
+            mock_get_installed.return_value = ["codellama:7b"]
+            mock_remove_model.return_value = True
+            
+            # Remove models
+            model_names = ["codellama:7b"]
+            result = uninstaller.remove_models(model_names)
+            
+            # Verify Ollama was started
+            assert mock_start_ollama_service.called, "Ollama should be started if not running"
+            assert mock_verify_ollama_running.called
+            assert result == 1
     
-    @pytest.mark.skipif(
-        _test_backend == 'docker',
-        reason="Ollama-specific test"
-    )
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ollama.start_ollama_service')
-    @patch('lib.uninstaller.remove_model')
-    @patch('lib.uninstaller.get_installed_models')
     def test_returns_zero_if_cannot_start_ollama(
-        self,
-        mock_get_installed_models,
-        mock_remove_model,
-        mock_start_ollama_service,
-        mock_verify_ollama_running
+        self, backend_type, backend_module
     ):
         """Return 0 removed models if Ollama cannot be started."""
-        # Setup: Ollama is NOT running and cannot be started
-        mock_verify_ollama_running.return_value = False
-        mock_start_ollama_service.return_value = False
-        # Don't mock ensure_ollama_running_for_removal - let it call the real function
-        # which will call start_ollama_service internally
+        if backend_type == 'docker':
+            pytest.skip("Ollama-specific test")
         
-        # Try to remove models
-        model_names = ["codellama:7b"]
-        result = uninstaller.remove_models(model_names)
-        
-        # Verify no models were removed
-        assert result == 0
-        # Verify that start_ollama_service was called (via ensure_ollama_running_for_removal)
-        assert mock_start_ollama_service.called
+        from unittest.mock import patch
+        with patch('lib.ollama.verify_ollama_running') as mock_verify_ollama_running, \
+             patch('lib.ollama.start_ollama_service') as mock_start_ollama_service, \
+             patch('lib.uninstaller.remove_model') as mock_remove_model, \
+             patch('lib.uninstaller.get_installed_models') as mock_get_installed_models:
+            # Setup: Ollama is NOT running and cannot be started
+            mock_verify_ollama_running.return_value = False
+            mock_start_ollama_service.return_value = False
+            # Don't mock ensure_ollama_running_for_removal - let it call the real function
+            # which will call start_ollama_service internally
+            
+            # Try to remove models
+            model_names = ["codellama:7b"]
+            result = uninstaller.remove_models(model_names)
+            
+            # Verify no models were removed
+            assert result == 0
+            # Verify that start_ollama_service was called (via ensure_ollama_running_for_removal)
+            assert mock_start_ollama_service.called
 
 
 class TestNoOverlapInstalledAndPreexisting:
@@ -728,65 +710,59 @@ class TestManifestCreation:
 class TestOllamaServiceManagement:
     """Test Ollama service management functions."""
     
-    @pytest.mark.skipif(
-        _test_backend == 'docker',
-        reason="Ollama-specific test"
-    )
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ollama.start_ollama_service')
     def test_ensure_ollama_running_when_already_running(
-        self,
-        mock_start_ollama_service,
-        mock_verify_ollama_running
+        self, backend_type, backend_module
     ):
         """Test ensure_ollama_running when Ollama is already running."""
-        mock_verify_ollama_running.return_value = True
+        if backend_type == 'docker':
+            pytest.skip("Ollama-specific test")
         
-        result = uninstaller.ensure_ollama_running_for_removal()
-        
-        assert result is True
-        assert mock_verify_ollama_running.called
-        assert not mock_start_ollama_service.called  # Should not start if already running
+        from unittest.mock import patch
+        with patch('lib.ollama.verify_ollama_running') as mock_verify_ollama_running, \
+             patch('lib.ollama.start_ollama_service') as mock_start_ollama_service:
+            mock_verify_ollama_running.return_value = True
+            
+            result = uninstaller.ensure_ollama_running_for_removal()
+            
+            assert result is True
+            assert mock_verify_ollama_running.called
+            assert not mock_start_ollama_service.called  # Should not start if already running
     
-    @pytest.mark.skipif(
-        _test_backend == 'docker',
-        reason="Ollama-specific test"
-    )
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ollama.start_ollama_service')
     def test_ensure_ollama_running_starts_if_stopped(
-        self,
-        mock_start_ollama_service,
-        mock_verify_ollama_running
+        self, backend_type, backend_module
     ):
         """Test ensure_ollama_running starts Ollama if stopped."""
-        mock_verify_ollama_running.return_value = False
-        mock_start_ollama_service.return_value = True
+        if backend_type == 'docker':
+            pytest.skip("Ollama-specific test")
         
-        result = uninstaller.ensure_ollama_running_for_removal()
-        
-        assert result is True
-        assert mock_start_ollama_service.called
+        from unittest.mock import patch
+        with patch('lib.ollama.verify_ollama_running') as mock_verify_ollama_running, \
+             patch('lib.ollama.start_ollama_service') as mock_start_ollama_service:
+            mock_verify_ollama_running.return_value = False
+            mock_start_ollama_service.return_value = True
+            
+            result = uninstaller.ensure_ollama_running_for_removal()
+            
+            assert result is True
+            assert mock_start_ollama_service.called
     
-    @pytest.mark.skipif(
-        _test_backend == 'docker',
-        reason="Ollama-specific test"
-    )
-    @patch('lib.ollama.verify_ollama_running')
-    @patch('lib.ollama.start_ollama_service')
     def test_ensure_ollama_running_fails_if_cannot_start(
-        self,
-        mock_start_ollama_service,
-        mock_verify_ollama_running
+        self, backend_type, backend_module
     ):
         """Test ensure_ollama_running returns False if cannot start."""
-        mock_verify_ollama_running.return_value = False
-        mock_start_ollama_service.return_value = False
+        if backend_type == 'docker':
+            pytest.skip("Ollama-specific test")
         
-        result = uninstaller.ensure_ollama_running_for_removal()
-        
-        assert result is False
-        assert mock_start_ollama_service.called
+        from unittest.mock import patch
+        with patch('lib.ollama.verify_ollama_running') as mock_verify_ollama_running, \
+             patch('lib.ollama.start_ollama_service') as mock_start_ollama_service:
+            mock_verify_ollama_running.return_value = False
+            mock_start_ollama_service.return_value = False
+            
+            result = uninstaller.ensure_ollama_running_for_removal()
+            
+            assert result is False
+            assert mock_start_ollama_service.called
 
 
 class TestIDEProcessHandling:

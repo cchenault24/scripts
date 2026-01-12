@@ -248,8 +248,12 @@ class TestGetInstalledModels:
         assert isinstance(result, list)
     
     @patch('lib.validator.utils.run_command')
-    def test_empty_list(self, mock_run):
+    @patch('urllib.request.urlopen')
+    def test_empty_list(self, mock_urlopen, mock_run):
         """Test empty model list."""
+        # Mock API call to fail so it falls back to command
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         mock_run.return_value = (0, "NAME\tSIZE\n", "")
         
         result = get_installed_models()
@@ -257,8 +261,12 @@ class TestGetInstalledModels:
         assert result == []
     
     @patch('lib.validator.utils.run_command')
-    def test_command_error(self, mock_run):
+    @patch('urllib.request.urlopen')
+    def test_command_error(self, mock_urlopen, mock_run):
         """Test command error handling."""
+        # Mock API call to fail so it falls back to command
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         mock_run.return_value = (1, "", "Error")
         
         result = get_installed_models()

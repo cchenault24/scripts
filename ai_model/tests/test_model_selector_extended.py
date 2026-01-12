@@ -7,31 +7,28 @@ from unittest.mock import patch, MagicMock
 
 from lib.model_selector import (
     ModelRole, RecommendedModel, ModelRecommendation,
-    get_usable_ram, generate_best_recommendation, 
-    generate_conservative_recommendation, get_alternatives_for_role,
-    EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS, display_recommendation
+    get_usable_ram,
+    EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
 )
 from lib.hardware import HardwareTier, HardwareInfo
 
 
-class TestDisplayRecommendation:
-    """Tests for display_recommendation function."""
+class TestModelRecommendationDisplay:
+    """Tests for model recommendation display."""
     
-    def test_display_produces_output(self, capsys):
-        """Test display_recommendation produces output."""
+    def test_recommendation_has_all_models(self, generate_best_recommendation):
+        """Test recommendation has all required models."""
         hw = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
         rec = generate_best_recommendation(hw)
         
-        display_recommendation(rec, hw)
-        
-        captured = capsys.readouterr()
-        assert len(captured.out) > 0
+        assert rec.primary is not None
+        assert rec.embeddings is not None
 
 
 class TestModelRecommendationGeneration:
     """Tests for model recommendation generation."""
     
-    def test_best_recommendation_tier_s(self):
+    def test_best_recommendation_tier_s(self, generate_best_recommendation):
         """Test best recommendation for Tier S."""
         hw = HardwareInfo(ram_gb=64, tier=HardwareTier.S)
         rec = generate_best_recommendation(hw)
@@ -39,7 +36,7 @@ class TestModelRecommendationGeneration:
         assert rec.primary is not None
         assert rec.embeddings is not None
     
-    def test_best_recommendation_tier_c(self):
+    def test_best_recommendation_tier_c(self, generate_best_recommendation):
         """Test best recommendation for Tier C."""
         hw = HardwareInfo(ram_gb=16, tier=HardwareTier.C)
         rec = generate_best_recommendation(hw)
@@ -48,12 +45,12 @@ class TestModelRecommendationGeneration:
         # Embeddings should still be included (very small)
         assert rec.embeddings is not None
     
-    def test_conservative_recommendation_all_tiers(self):
-        """Test conservative recommendation for all tiers."""
+    def test_best_recommendation_all_tiers(self, generate_best_recommendation):
+        """Test best recommendation for all tiers."""
         for tier, ram in [(HardwareTier.S, 64), (HardwareTier.A, 32),
                           (HardwareTier.B, 24), (HardwareTier.C, 16)]:
             hw = HardwareInfo(ram_gb=ram, tier=tier)
-            rec = generate_conservative_recommendation(hw)
+            rec = generate_best_recommendation(hw)
             
             assert rec.primary is not None
             # Should fit within available RAM
@@ -61,30 +58,28 @@ class TestModelRecommendationGeneration:
             assert rec.total_ram() <= usable
 
 
-class TestGetAlternativesForRole:
-    """Tests for get_alternatives_for_role function."""
+class TestModelAlternatives:
+    """Tests for model alternatives."""
     
-    def test_chat_alternatives(self):
-        """Test getting alternatives for chat role."""
+    def test_primary_models_have_alternatives(self, backend_type, model_name_attr):
+        """Test that primary models have alternatives in the catalog."""
         hw = HardwareInfo(ram_gb=32, tier=HardwareTier.A)
         current = PRIMARY_MODELS[HardwareTier.A][0]
         
-        alternatives = get_alternatives_for_role(current, hw)
-        
-        assert isinstance(alternatives, list)
-        # Should have some alternatives
-        # But current model should not be included
-        for alt in alternatives:
-            assert alt.ollama_name != current.ollama_name
+        # Check that there are other models in the same tier
+        all_models = PRIMARY_MODELS[HardwareTier.A]
+        assert len(all_models) > 0
+        # Current model should be in the list
+        assert current in all_models
     
-    def test_embed_alternatives(self):
-        """Test getting alternatives for embed role."""
+    def test_embed_model_is_unique(self):
+        """Test that embed model is the same across tiers."""
         hw = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
         current = EMBED_MODEL
         
-        alternatives = get_alternatives_for_role(current, hw)
-        
-        assert isinstance(alternatives, list)
+        # EMBED_MODEL should be the same for all tiers
+        assert current is not None
+        assert current.role == ModelRole.EMBED
 
 
 class TestModelCatalogs:

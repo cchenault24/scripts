@@ -20,13 +20,8 @@ if _docker_path not in sys.path:
     sys.path.insert(0, _docker_path)
 
 from lib import hardware, model_selector, validator, config
-# Import backend module dynamically based on TEST_BACKEND
-import os
-_test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
-if _test_backend == 'docker':
-    from lib import docker as backend_module
-else:
-    from lib import ollama as backend_module
+# Backend module will be imported via fixture or at test time
+# Don't import at module level to avoid conflicts when running both backends
 from lib.hardware import HardwareTier, HardwareInfo
 from lib.model_selector import ModelRole, RecommendedModel, ModelRecommendation
 
@@ -38,9 +33,9 @@ from lib.model_selector import ModelRole, RecommendedModel, ModelRecommendation
 class TestHardwareToModelSelection:
     """Tests for hardware detection → model recommendation flow."""
     
-    def test_tier_c_gets_appropriate_models(self, mock_hardware_tier_c):
+    def test_tier_c_gets_appropriate_models(self, mock_hardware_tier_c, generate_best_recommendation):
         """Test that Tier C hardware gets small models."""
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        recommendation = generate_best_recommendation(mock_hardware_tier_c)
         
         # Total RAM should fit in usable RAM
         total_ram = recommendation.total_ram()
@@ -50,9 +45,9 @@ class TestHardwareToModelSelection:
         assert recommendation.primary is not None
         assert recommendation.embeddings is not None
     
-    def test_tier_s_gets_larger_models(self, mock_hardware_tier_s):
+    def test_tier_s_gets_larger_models(self, mock_hardware_tier_s, generate_best_recommendation):
         """Test that Tier S hardware gets larger models."""
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_s)
+        recommendation = generate_best_recommendation(mock_hardware_tier_s)
         
         # Should still fit in usable RAM
         total_ram = recommendation.total_ram()
@@ -68,7 +63,7 @@ class TestHardwareToModelSelection:
         (HardwareTier.A, 15.0),  # Tier A: larger models
         (HardwareTier.S, 20.0),  # Tier S: largest models
     ])
-    def test_tier_model_sizing(self, tier, max_primary_ram, backend_type, api_endpoint):
+    def test_tier_model_sizing(self, tier, max_primary_ram, backend_type, api_endpoint, generate_best_recommendation):
         """Test that each tier gets appropriately sized models."""
         hw_kwargs = {
             "ram_gb": 16.0 if tier == HardwareTier.C else (
@@ -92,7 +87,7 @@ class TestHardwareToModelSelection:
             hw_kwargs["dmr_api_endpoint"] = api_endpoint
         hw_info = HardwareInfo(**hw_kwargs)
         
-        recommendation = model_selector.generate_best_recommendation(hw_info)
+        recommendation = generate_best_recommendation(hw_info)
         
         # Primary model should be within size limits
         assert recommendation.primary.ram_gb <= max_primary_ram
@@ -138,10 +133,10 @@ class TestModelSelectionToConfig:
 class TestValidatorModelSelection:
     """Tests for validator → model selection integration."""
     
-    def test_fallback_models_are_valid(self, mock_hardware_tier_c):
+    def test_fallback_models_are_valid(self, mock_hardware_tier_c, backend_type, model_name_attr, generate_best_recommendation):
         """Test that fallback models are valid RecommendedModel objects."""
         # Get a recommended model
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        recommendation = generate_best_recommendation(mock_hardware_tier_c)
         primary = recommendation.primary
         
         # Get fallback
@@ -150,7 +145,6 @@ class TestValidatorModelSelection:
         if fallback:
             assert isinstance(fallback, RecommendedModel)
             # Use backend-appropriate attribute
-            model_name_attr = "ollama_name" if _test_backend == "ollama" else "docker_name"
             assert getattr(fallback, model_name_attr) != getattr(primary, model_name_attr)
             assert fallback.role == primary.role
     
@@ -176,7 +170,7 @@ class TestOllamaServiceAPI:
     """Tests for Ollama service management → API interaction."""
     
     @patch('urllib.request.urlopen')
-    def test_verify_running_uses_api(self, mock_urlopen):
+    def test_verify_running_uses_api(self, mock_urlopen, backend_type, backend_module):
         """
         Test that verify_ollama_running uses the API with SSL context.
         
@@ -191,7 +185,7 @@ class TestOllamaServiceAPI:
         mock_urlopen.return_value = mock_response
         
         # Use backend-appropriate function
-        if _test_backend == 'docker':
+        if backend_type == 'docker':
             # Docker doesn't have a verify function, skip this test
             pytest.skip("Docker backend doesn't have verify_docker_model_runner_running function")
         else:
@@ -220,14 +214,14 @@ class TestAutoStartVerification:
     @patch('pathlib.Path.exists')
     @patch('lib.utils.run_command')
     def test_autostart_status_checks_launchctl(
-        self, mock_run, mock_exists, mock_system
+        self, mock_run, mock_exists, mock_system, backend_type, backend_module
     ):
         """Test that auto-start status checks launchctl."""
         mock_system.return_value = "Darwin"
         mock_exists.return_value = True
         mock_run.return_value = (0, "com.ollama.server", "")
         
-        if _test_backend == 'docker':
+        if backend_type == 'docker':
             pytest.skip("Docker backend doesn't have autostart functionality")
         is_configured, details = backend_module.check_ollama_autostart_status_macos()
         
@@ -245,7 +239,7 @@ class TestFullPipeline:
     @patch('urllib.request.urlopen')
     @patch('lib.utils.run_command')
     def test_pre_install_validation_with_hardware(
-        self, mock_run, mock_urlopen, mock_hardware_tier_c
+        self, mock_run, mock_urlopen, mock_hardware_tier_c, generate_best_recommendation
     ):
         """Test pre-install validation with hardware info."""
         # Mock API available
@@ -259,7 +253,7 @@ class TestFullPipeline:
         mock_run.return_value = (0, "", "")
         
         # Get recommendations
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        recommendation = generate_best_recommendation(mock_hardware_tier_c)
         models = recommendation.all_models()
         
         # Validate
@@ -278,9 +272,9 @@ class TestFullPipeline:
         assert is_valid is True
         # May have RAM warnings but shouldn't block
     
-    def test_model_recommendation_matches_tier_reservation(self, mock_hardware_tier_c):
+    def test_model_recommendation_matches_tier_reservation(self, mock_hardware_tier_c, generate_best_recommendation):
         """Test that model recommendations respect tier RAM reservation."""
-        recommendation = model_selector.generate_best_recommendation(mock_hardware_tier_c)
+        recommendation = generate_best_recommendation(mock_hardware_tier_c)
         
         # Calculate expected usable RAM for Tier C (60% of total)
         expected_usable = mock_hardware_tier_c.ram_gb * 0.6

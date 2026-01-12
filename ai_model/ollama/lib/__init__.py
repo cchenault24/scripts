@@ -37,7 +37,6 @@ __all__ = [
     "ModelRole",
     "RecommendedModel",
     "ModelRecommendation",
-    "generate_best_recommendation",
     "select_models_smart",
     "get_usable_ram",
     "SetupResult",
@@ -61,7 +60,6 @@ _EXPORTS = {
     "ModelRole": "model_selector",
     "RecommendedModel": "model_selector",
     "ModelRecommendation": "model_selector",
-    "generate_best_recommendation": "model_selector",
     "select_models_smart": "model_selector",
     "get_usable_ram": "model_selector",
     # validator exports

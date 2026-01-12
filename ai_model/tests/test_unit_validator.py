@@ -585,13 +585,15 @@ class TestPreflightCheck:
         
         # Only test run_preflight_check if it exists
         if hasattr(validator, 'run_preflight_check'):
-            success, message, error_type = validator.run_preflight_check(show_progress=False)
-            assert success is False
-            # Docker uses DOCKER_NOT_RUNNING, Ollama uses SERVICE
-            if backend_type == "docker":
-                assert error_type in (validator.PullErrorType.DOCKER_NOT_RUNNING, validator.PullErrorType.DMR_NOT_ENABLED)
-            else:
-                assert error_type == validator.PullErrorType.SERVICE
+            # Patch is_ollama_api_available for the run_preflight_check call
+            with patch('lib.validator.is_ollama_api_available', return_value=False):
+                success, message, error_type = validator.run_preflight_check(show_progress=False)
+                assert success is False
+                # Docker uses DOCKER_NOT_RUNNING, Ollama uses SERVICE
+                if backend_type == "docker":
+                    assert error_type in (validator.PullErrorType.DOCKER_NOT_RUNNING, validator.PullErrorType.DMR_NOT_ENABLED)
+                else:
+                    assert error_type == validator.PullErrorType.SERVICE
 
 
 # =============================================================================

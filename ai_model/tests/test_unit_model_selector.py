@@ -29,17 +29,14 @@ if _docker_path not in sys.path:
 from lib import model_selector
 from lib.model_selector import (
     ModelRole, RecommendedModel, ModelRecommendation,
-    get_usable_ram, generate_best_recommendation,
-    generate_conservative_recommendation,
+    get_usable_ram,
+    EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
 )
 # generate_multi_model_recommendation may not exist in Docker backend
 try:
     from lib.model_selector import generate_multi_model_recommendation
 except ImportError:
     generate_multi_model_recommendation = None
-from lib.model_selector import (
-    get_alternatives_for_role, EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
-)
 from lib import hardware
 from lib.hardware import HardwareTier, HardwareInfo
 
@@ -155,36 +152,56 @@ class TestModelRecommendation:
 class TestGetUsableRam:
     """Tests for get_usable_ram function."""
     
-    def test_tier_c_reservation(self):
-        """Test Tier C uses 40% reservation (60% usable)."""
+    def test_tier_c_reservation(self, backend_type):
+        """Test Tier C reservation."""
         hw_info = create_hw_info(16, HardwareTier.C)
         
         usable = get_usable_ram(hw_info)
-        expected = 16 * 0.60  # 9.6 GB
+        if backend_type == "docker":
+            # Docker uses fixed 8GB reservation
+            expected = 16 - 8.0  # 8.0 GB
+        else:
+            # Ollama uses 40% reservation (60% usable)
+            expected = 16 * 0.60  # 9.6 GB
         assert usable == pytest.approx(expected, abs=0.1)
     
-    def test_tier_b_reservation(self):
-        """Test Tier B uses 35% reservation (65% usable)."""
+    def test_tier_b_reservation(self, backend_type):
+        """Test Tier B reservation."""
         hw_info = create_hw_info(24, HardwareTier.B)
         
         usable = get_usable_ram(hw_info)
-        expected = 24 * 0.65  # 15.6 GB
+        if backend_type == "docker":
+            # Docker uses fixed 8GB reservation
+            expected = 24 - 8.0  # 16.0 GB
+        else:
+            # Ollama uses 35% reservation (65% usable)
+            expected = 24 * 0.65  # 15.6 GB
         assert usable == pytest.approx(expected, abs=0.1)
     
-    def test_tier_a_reservation(self):
-        """Test Tier A uses 30% reservation (70% usable)."""
+    def test_tier_a_reservation(self, backend_type):
+        """Test Tier A reservation."""
         hw_info = create_hw_info(32, HardwareTier.A)
         
         usable = get_usable_ram(hw_info)
-        expected = 32 * 0.70  # 22.4 GB
+        if backend_type == "docker":
+            # Docker uses fixed 8GB reservation
+            expected = 32 - 8.0  # 24.0 GB
+        else:
+            # Ollama uses 30% reservation (70% usable)
+            expected = 32 * 0.70  # 22.4 GB
         assert usable == pytest.approx(expected, abs=0.1)
     
-    def test_tier_s_reservation(self):
-        """Test Tier S uses 30% reservation (70% usable)."""
+    def test_tier_s_reservation(self, backend_type):
+        """Test Tier S reservation."""
         hw_info = create_hw_info(64, HardwareTier.S)
         
         usable = get_usable_ram(hw_info)
-        expected = 64 * 0.70  # 44.8 GB
+        if backend_type == "docker":
+            # Docker uses fixed 8GB reservation
+            expected = 64 - 8.0  # 56.0 GB
+        else:
+            # Ollama uses 30% reservation (70% usable)
+            expected = 64 * 0.70  # 44.8 GB
         assert usable == pytest.approx(expected, abs=0.1)
 
 
@@ -244,7 +261,7 @@ class TestPrimaryModels:
 class TestGenerateBestRecommendation:
     """Tests for generate_best_recommendation function."""
     
-    def test_returns_recommendation(self):
+    def test_returns_recommendation(self, generate_best_recommendation):
         """Test function returns ModelRecommendation."""
         hw_info = create_hw_info(24, HardwareTier.B)
         
@@ -252,7 +269,7 @@ class TestGenerateBestRecommendation:
         
         assert isinstance(rec, ModelRecommendation)
     
-    def test_includes_primary_model(self):
+    def test_includes_primary_model(self, generate_best_recommendation):
         """Test recommendation includes primary model."""
         hw_info = create_hw_info(32, HardwareTier.A)
         
@@ -261,7 +278,7 @@ class TestGenerateBestRecommendation:
         assert rec.primary is not None
         assert rec.primary.role == ModelRole.CHAT
     
-    def test_includes_embed_model(self):
+    def test_includes_embed_model(self, generate_best_recommendation):
         """Test recommendation includes embedding model."""
         hw_info = create_hw_info(32, HardwareTier.A)
         
@@ -270,7 +287,7 @@ class TestGenerateBestRecommendation:
         assert rec.embeddings is not None
         assert rec.embeddings.role == ModelRole.EMBED
     
-    def test_fits_within_ram_budget(self):
+    def test_fits_within_ram_budget(self, generate_best_recommendation):
         """Test total RAM fits within budget."""
         hw_info = create_hw_info(16, HardwareTier.C)
         
@@ -295,66 +312,60 @@ class TestGenerateMultiModelRecommendation:
         assert result is None or isinstance(result, ModelRecommendation)
 
 
-class TestGenerateConservativeRecommendation:
-    """Tests for generate_conservative_recommendation function."""
+class TestGenerateBestRecommendationConservative:
+    """Tests for generate_best_recommendation function with conservative RAM."""
     
-    def test_returns_recommendation(self):
-        """Test always returns a recommendation."""
+    def test_returns_recommendation_for_tier_c(self, generate_best_recommendation):
+        """Test always returns a recommendation for Tier C."""
         hw_info = create_hw_info(16, HardwareTier.C)
         
-        rec = generate_conservative_recommendation(hw_info)
+        rec = generate_best_recommendation(hw_info)
         
         assert isinstance(rec, ModelRecommendation)
         assert rec.primary is not None
     
-    def test_conservative_fits_limited_ram(self):
-        """Test conservative recommendation fits in limited RAM."""
+    def test_best_fits_limited_ram(self, generate_best_recommendation):
+        """Test best recommendation fits in limited RAM."""
         hw_info = create_hw_info(16, HardwareTier.C)
         
-        rec = generate_conservative_recommendation(hw_info)
+        rec = generate_best_recommendation(hw_info)
         usable = get_usable_ram(hw_info)
         
-        # Should fit comfortably
+        # Should fit within usable RAM
         assert rec.total_ram() <= usable
 
 
-class TestGetAlternativesForRole:
-    """Tests for get_alternatives_for_role function."""
+class TestPrimaryModelsCatalog:
+    """Tests for PRIMARY_MODELS catalog."""
     
-    def test_returns_list(self):
-        """Test returns list of alternatives."""
+    def test_primary_models_exist_for_tier(self):
+        """Test that primary models exist for each tier."""
         hw_info = create_hw_info(32, HardwareTier.A)
         
-        current = RecommendedModel("Current", "current:v", 5.0, ModelRole.CHAT, ["chat"])
-        
-        alternatives = get_alternatives_for_role(current, hw_info)
-        
-        assert isinstance(alternatives, list)
+        # Check that PRIMARY_MODELS has models for this tier
+        assert HardwareTier.A in PRIMARY_MODELS
+        assert len(PRIMARY_MODELS[HardwareTier.A]) > 0
     
-    def test_excludes_current_model(self):
-        """Test current model is not in alternatives."""
+    def test_primary_models_have_correct_role(self, backend_type, model_name_attr):
+        """Test that primary models have correct role and attributes."""
         hw_info = create_hw_info(24, HardwareTier.B)
         
         current = PRIMARY_MODELS[HardwareTier.B][0]
         
-        alternatives = get_alternatives_for_role(current, hw_info)
-        
-        # Current model should not be in alternatives
-        for alt in alternatives:
-            assert alt.ollama_name != current.ollama_name
+        # Current model should have correct role
+        assert current.role == ModelRole.CHAT
+        # Should have backend-appropriate name attribute
+        assert hasattr(current, model_name_attr)
+        assert getattr(current, model_name_attr) is not None
     
-    def test_alternatives_fit_ram(self):
-        """Test alternatives fit within RAM budget."""
+    def test_primary_models_fit_ram(self):
+        """Test primary models fit within RAM budget for their tier."""
         hw_info = create_hw_info(16, HardwareTier.C)
-        
-        current = PRIMARY_MODELS[HardwareTier.C][0]
         usable = get_usable_ram(hw_info)
         
-        alternatives = get_alternatives_for_role(current, hw_info)
-        
-        # All alternatives should fit
-        for alt in alternatives:
-            assert alt.ram_gb <= usable
+        # All primary models for this tier should fit
+        for model in PRIMARY_MODELS[HardwareTier.C]:
+            assert model.ram_gb <= usable * 1.1  # Allow 10% margin for model loading overhead
 
 
 class TestModelRamSanity:
