@@ -57,6 +57,38 @@ def check_docker() -> Tuple[bool, str]:
     return True, version
 
 
+def check_docker_model_runner_status() -> Tuple[bool, str]:
+    """
+    Simple check if Docker Model Runner is available (no side effects).
+    
+    This is a quiet check suitable for the uninstaller that doesn't print
+    anything or require hardware info.
+    
+    Returns:
+        Tuple of (is_available, message)
+    """
+    # Check if docker command exists
+    if not shutil.which("docker"):
+        return False, "Docker not found"
+    
+    # Check if Docker daemon is running
+    code, _, _ = utils.run_command(["docker", "info"], timeout=5)
+    if code != 0:
+        return False, "Docker daemon not running"
+    
+    # Check Docker Model Runner
+    code, stdout, stderr = utils.run_command(["docker", "model", "list"], timeout=5)
+    
+    if code == 0:
+        return True, "Docker Model Runner is available"
+    
+    error_lower = stderr.lower()
+    if "unknown command" in error_lower or "not found" in error_lower:
+        return False, "Docker Model Runner is not enabled"
+    
+    return False, f"Docker Model Runner check failed: {stderr[:100] if stderr else 'Unknown error'}"
+
+
 def fetch_available_models_from_api(endpoint: str) -> List[str]:
     """
     Fetch list of available models from Docker Model Runner API.

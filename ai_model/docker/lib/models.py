@@ -3612,7 +3612,7 @@ def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInf
     This function converts to the actual API model ID format.
     Preserves variant tags if selected.
     """
-    # Input validation - accept either ModelInfo or string for backward compatibility
+    # Input validation - accept ModelInfo, RecommendedModel, or string
     if isinstance(model, str):
         docker_name = model
         selected_variant = None
@@ -3620,9 +3620,25 @@ def get_model_id_for_continue(model: Any, hw_info: Optional[hardware.HardwareInf
     elif isinstance(model, ModelInfo):
         docker_name = model.docker_name
         selected_variant = model.selected_variant
-        base_model_name = model.base_model_name
+        base_model_name = getattr(model, 'base_model_name', None)
     else:
-        raise ValueError("model must be ModelInfo or string")
+        # Try RecommendedModel (from model_selector)
+        try:
+            from .model_selector import RecommendedModel
+            if isinstance(model, RecommendedModel):
+                docker_name = model.docker_name
+                selected_variant = None
+                base_model_name = None
+            else:
+                raise ValueError("model must be ModelInfo, RecommendedModel, or string")
+        except ImportError:
+            # Check if it has docker_name attribute (duck typing)
+            if hasattr(model, 'docker_name'):
+                docker_name = model.docker_name
+                selected_variant = getattr(model, 'selected_variant', None)
+                base_model_name = getattr(model, 'base_model_name', None)
+            else:
+                raise ValueError("model must be ModelInfo, RecommendedModel, or string")
     
     # If we have a selected variant, use it
     if selected_variant and base_model_name:

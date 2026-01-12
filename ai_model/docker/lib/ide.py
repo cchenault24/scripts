@@ -1,10 +1,14 @@
 """
-IDE integration functionality for VS Code and IntelliJ IDEA.
+IDE integration functionality for VS Code, Cursor, and IntelliJ IDEA.
 
-Provides functions to install extensions/plugins, restart IDEs, and display next steps
-for both VS Code (Continue.dev extension) and IntelliJ IDEA (Continue plugin).
+Provides functions to:
+- Auto-detect installed IDEs (VS Code, Cursor, IntelliJ IDEA)
+- Install extensions/plugins
+- Restart IDEs
+- Display next steps
 """
 
+import os
 import platform
 import shutil
 import subprocess
@@ -19,6 +23,146 @@ from . import models
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
+
+
+# =============================================================================
+# IDE AUTO-DETECTION
+# =============================================================================
+
+def detect_installed_ides() -> List[str]:
+    """
+    Auto-detect installed IDEs that support Continue.dev.
+    
+    Scans for:
+    - VS Code (Visual Studio Code)
+    - Cursor
+    - IntelliJ IDEA (Community and Ultimate)
+    
+    Returns:
+        List of installed IDE names
+    """
+    installed = []
+    
+    # Check VS Code
+    if is_vscode_installed():
+        installed.append("VS Code")
+    
+    # Check Cursor
+    if is_cursor_installed():
+        installed.append("Cursor")
+    
+    # Check IntelliJ IDEA
+    if is_intellij_installed():
+        installed.append("IntelliJ IDEA")
+    
+    return installed
+
+
+def is_vscode_installed() -> bool:
+    """Check if VS Code is installed."""
+    # Check CLI in PATH
+    if shutil.which("code"):
+        return True
+    
+    # Check common installation paths
+    if platform.system() == "Darwin":
+        app_paths = [
+            Path("/Applications/Visual Studio Code.app"),
+            Path.home() / "Applications/Visual Studio Code.app",
+        ]
+        for path in app_paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Linux":
+        paths = [
+            Path("/usr/bin/code"),
+            Path("/usr/share/code"),
+            Path.home() / ".local/share/applications/code.desktop",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Windows":
+        paths = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Microsoft VS Code/Code.exe",
+            Path("C:/Program Files/Microsoft VS Code/Code.exe"),
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    
+    return False
+
+
+def is_cursor_installed() -> bool:
+    """Check if Cursor IDE is installed."""
+    # Check CLI in PATH
+    if shutil.which("cursor"):
+        return True
+    
+    # Check common installation paths
+    if platform.system() == "Darwin":
+        app_paths = [
+            Path("/Applications/Cursor.app"),
+            Path.home() / "Applications/Cursor.app",
+        ]
+        for path in app_paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Linux":
+        paths = [
+            Path("/usr/bin/cursor"),
+            Path.home() / ".local/share/applications/cursor.desktop",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Windows":
+        paths = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Cursor/Cursor.exe",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    
+    return False
+
+
+def is_intellij_installed() -> bool:
+    """Check if IntelliJ IDEA is installed."""
+    # Check CLI in PATH
+    if shutil.which("idea"):
+        return True
+    
+    # Check common installation paths
+    if platform.system() == "Darwin":
+        app_paths = [
+            Path("/Applications/IntelliJ IDEA.app"),
+            Path("/Applications/IntelliJ IDEA Ultimate.app"),
+            Path("/Applications/IntelliJ IDEA Community Edition.app"),
+        ]
+        for path in app_paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Linux":
+        paths = [
+            Path("/usr/local/bin/idea"),
+            Path("/opt/idea"),
+            Path.home() / ".local/share/JetBrains/Toolbox/scripts/idea",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    elif platform.system() == "Windows":
+        paths = [
+            Path("C:/Program Files/JetBrains/IntelliJ IDEA/bin/idea64.exe"),
+            Path(os.environ.get("LOCALAPPDATA", "")) / "JetBrains/Toolbox/scripts/idea.bat",
+        ]
+        for path in paths:
+            if path.exists():
+                return True
+    
+    return False
 
 
 def install_vscode_extension(extension_id: str) -> bool:
