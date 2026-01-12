@@ -27,7 +27,7 @@ model_name_attr = "docker_name" if _test_backend == "docker" else "ollama_name"
 
 from lib import validator
 from lib.model_selector import RecommendedModel, ModelRole
-from lib.hardware import HardwareTier
+# HardwareTier removed - no longer used
 
 
 # =============================================================================
@@ -504,11 +504,10 @@ class TestPreflightCheck:
             if not hasattr(validator, 'is_dmr_api_available'):
                 pytest.skip("is_dmr_api_available not available")
             # Create mock models and hw_info for validate_pre_install
-            from lib.hardware import HardwareInfo, HardwareTier
+            from lib.hardware import HardwareInfo
             mock_models = []
             mock_hw_info = HardwareInfo(
                 ram_gb=16.0,
-                tier=HardwareTier.C,
                 usable_ram_gb=9.6
             )
             with patch('lib.validator.is_dmr_api_available', return_value=False):

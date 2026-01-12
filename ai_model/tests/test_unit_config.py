@@ -22,7 +22,7 @@ if _docker_path not in sys.path:
 
 # Import will be from the correct backend based on conftest
 from lib import config
-from lib.hardware import HardwareInfo, HardwareTier
+from lib.hardware import HardwareInfo
 from lib.model_selector import RecommendedModel, ModelRole
 
 

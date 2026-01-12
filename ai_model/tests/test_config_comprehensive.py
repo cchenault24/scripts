@@ -26,7 +26,7 @@ from lib.config import (
     load_installation_manifest, check_config_customization
 )
 from lib import hardware
-from lib.hardware import HardwareTier, HardwareInfo
+from lib.hardware import HardwareInfo
 from lib.model_selector import RecommendedModel, ModelRole
 
 
@@ -177,7 +177,6 @@ class TestGenerateSetupSummary:
         """Test summary generation."""
         hw_info = HardwareInfo(
             ram_gb=24,
-            tier=HardwareTier.B,
             cpu_brand="Apple M2",
             has_apple_silicon=True,
             apple_chip_model="M2"
@@ -198,7 +197,6 @@ class TestGenerateSetupSummary:
         """Test hardware info in summary."""
         hw_info = HardwareInfo(
             ram_gb=32,
-            tier=HardwareTier.A,
             has_apple_silicon=True,
             apple_chip_model="M3 Max"
         )
@@ -210,11 +208,10 @@ class TestGenerateSetupSummary:
         result = generate_setup_summary(models, hw_info)
         
         assert result["hardware"]["ram_gb"] == 32
-        assert result["hardware"]["tier"] == "A"
     
     def test_ram_usage_calculated(self):
         """Test RAM usage calculation."""
-        hw_info = HardwareInfo(ram_gb=16, tier=HardwareTier.C)
+        hw_info = HardwareInfo(ram_gb=16)
         
         models = [
             RecommendedModel("M1", "m1:v", 3.0, ModelRole.CHAT, ["chat"]),
@@ -378,7 +375,6 @@ class TestGenerateContinueConfig:
         
         hw_kwargs = {
             "ram_gb": 24,
-            "tier": HardwareTier.B,
             "has_apple_silicon": True,
         }
         if backend_type == "ollama":

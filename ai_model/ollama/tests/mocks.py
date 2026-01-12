@@ -47,16 +47,15 @@ class MockHardwareInfo:
     
     @property
     def tier_enum(self):
-        """Get HardwareTier enum value."""
-        from lib.hardware import HardwareTier
+        """Get tier string value (HardwareTier removed)."""
         if self.ram_gb >= 64:
-            return HardwareTier.S
+            return "S"
         elif self.ram_gb >= 32:
-            return HardwareTier.A
+            return "A"
         elif self.ram_gb >= 24:
-            return HardwareTier.B
+            return "B"
         else:
-            return HardwareTier.C
+            return "C"
     
     @property
     def usable_ram_gb(self) -> float:

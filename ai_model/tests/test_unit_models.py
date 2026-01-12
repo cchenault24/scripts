@@ -6,17 +6,25 @@ Tests cover:
 - MODEL_CATALOG validation
 """
 
+import os
+import sys
+from pathlib import Path
 import pytest
 from lib import hardware
 from lib.models import ModelInfo, MODEL_CATALOG
 
 # Determine backend type
-import os
 _test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
 if _test_backend == 'docker':
     model_name_attr = "docker_name"
+    _docker_path = str(Path(__file__).parent.parent / "docker")
+    if _docker_path not in sys.path:
+        sys.path.insert(0, _docker_path)
 else:
     model_name_attr = "ollama_name"
+    _ollama_path = str(Path(__file__).parent.parent / "ollama")
+    if _ollama_path not in sys.path:
+        sys.path.insert(0, _ollama_path)
 
 
 class TestModelInfo:
@@ -30,7 +38,6 @@ class TestModelInfo:
             "ram_gb": 5.0,
             "context_length": 32768,
             "roles": ["chat", "edit"],
-            "tiers": [hardware.HardwareTier.A, hardware.HardwareTier.B],
             "recommended_for": ["Testing"],
             "base_model_name": "test"
         }

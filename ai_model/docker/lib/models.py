@@ -147,7 +147,7 @@ MODEL_CATALOG: List[ModelInfo] = [
         description="OpenAI GPT-OSS 20B - Matches o3-mini performance, 1200 tokens/sec, Apache 2.0 license, US-based",
         ram_gb=16.0,
         context_length=131072,
-        roles=["chat", "edit", "agent"],
+        roles=["chat", "edit", "agent", "autocomplete"],
         recommended_for=["Primary reasoning/chat model", "All configurations 16GB+ RAM"],
         base_model_name="gpt-oss"
     ),

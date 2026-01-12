@@ -66,7 +66,6 @@ tests/
 ├── test_config_comprehensive.py   # Extended config tests
 ├── test_validator_comprehensive.py# Extended validator tests
 ├── test_model_selector_extended.py# Extended model selector tests
-├── test_hardware_extended.py      # Extended hardware tests
 ├── test_ollama_extended.py        # Extended ollama tests
 ├── test_integration.py            # Integration tests
 ├── test_e2e_flows.py              # End-to-end workflow tests

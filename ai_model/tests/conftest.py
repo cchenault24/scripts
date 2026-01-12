@@ -503,46 +503,10 @@ def mock_recommended_models(backend_type):
     else:
         if _docker_path not in sys.path:
             sys.path.insert(0, _docker_path)
-    from lib.model_selector import RecommendedModel, ModelRole, PRIMARY_MODEL, EMBED_MODEL
-    from lib.hardware import HardwareInfo
+    from lib.model_selector import PRIMARY_MODEL, EMBED_MODEL
     
     # Return fixed models (same as select_models would return)
     return [PRIMARY_MODEL, EMBED_MODEL]
-            description="Embedding model"
-        )
-    else:  # docker
-        primary = RecommendedModel(
-            name="Qwen2.5 Coder 7B",
-            docker_name="ai/qwen2.5-coder:7b",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="Primary coding model"
-        )
-        
-        autocomplete = RecommendedModel(
-            name="StarCoder2 3B",
-            docker_name="ai/starcoder2:3b",
-            ram_gb=2.0,
-            role=ModelRole.AUTOCOMPLETE,
-            roles=["autocomplete"],
-            description="Fast autocomplete"
-        )
-        
-        embed = RecommendedModel(
-            name="Nomic Embed Text",
-            docker_name="ai/nomic-embed-text-v1.5",
-            ram_gb=0.3,
-            role=ModelRole.EMBED,
-            roles=["embed"],
-            description="Embedding model"
-        )
-    
-    return ModelRecommendation(
-        primary=primary,
-        autocomplete=autocomplete,
-        embeddings=embed
-    )
 
 
 # =============================================================================

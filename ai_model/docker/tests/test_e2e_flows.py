@@ -16,8 +16,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib import hardware, model_selector, validator, config, docker, ui
-from lib.hardware import HardwareTier, HardwareInfo
-from lib.model_selector import ModelRole, RecommendedModel, ModelRecommendation
+from lib.hardware import HardwareInfo
+from lib.model_selector import ModelRole, RecommendedModel
 
 
 # =============================================================================
@@ -30,11 +30,22 @@ def mock_complete_environment(tmp_path):
     # Create hardware info directly since fixture may not be available
     from lib import hardware
     hw_info = hardware.HardwareInfo(
+        os_name="Darwin",
+        os_version="14.0",
+        macos_version="14.0",
         ram_gb=16.0,
-        cpu_cores=4,
+        cpu_cores=10,
+        cpu_perf_cores=4,
+        cpu_eff_cores=6,
         gpu_vram_gb=0,
-        tier=hardware.HardwareTier.C,
-        usable_ram_gb=9.6,
+        gpu_cores=10,
+        neural_engine_cores=16,
+        has_apple_silicon=True,
+        apple_chip_model="M4",
+        cpu_brand="Apple M4",
+        cpu_arch="arm64",
+        gpu_name="Apple M4",
+        usable_ram_gb=16.0,
         docker_version="1.0.0",
         docker_model_runner_available=True,
         dmr_api_endpoint="http://localhost:12434/v1",
@@ -110,10 +121,9 @@ class TestHappyPathAcceptAll:
         mock_yes_no.return_value = True
         mock_choice.return_value = 0  # Accept recommendation
         
-        # Get recommendation
-        from tests.conftest import _generate_best_recommendation
-        recommendation = _generate_best_recommendation(hw_info, "docker")
-        models = recommendation.all_models()
+        # Get models to install
+        from lib.model_selector import select_models
+        models = select_models(hw_info)
         
         # Simulate pulling
         result = validator.SetupResult()
@@ -182,9 +192,8 @@ class TestAllModelsFail:
     def test_complete_failure_result(self, mock_complete_environment):
         """Test SetupResult when all models fail."""
         hw_info = mock_complete_environment["hardware"]
-        from tests.conftest import _generate_best_recommendation
-        recommendation = _generate_best_recommendation(hw_info, "docker")
-        models = recommendation.all_models()
+        from lib.model_selector import select_models
+        models = select_models(hw_info)
         
         result = validator.SetupResult()
         for model in models:
@@ -203,30 +212,28 @@ class TestAllModelsFail:
 class TestDifferentRamTiers:
     """E2E test: Different recommendations for different RAM tiers."""
     
+    @pytest.mark.skip(reason="HardwareTier removed - using fixed models for all users")
     @pytest.mark.parametrize("ram_gb,tier,expected_min_ram,expected_max_ram", [
-        (16, HardwareTier.C, 0, 10),    # Tier C: small models
-        (24, HardwareTier.B, 0, 16),    # Tier B: medium models
-        (32, HardwareTier.A, 0, 23),    # Tier A: larger models
-        (64, HardwareTier.S, 0, 45),    # Tier S: largest models
+        (16, None, 0, 10),    # Tier C: small models
+        (24, None, 0, 16),    # Tier B: medium models
+        (32, None, 0, 23),    # Tier A: larger models
+        (64, None, 0, 45),    # Tier S: largest models
     ])
     def test_tier_recommendations(self, ram_gb, tier, expected_min_ram, expected_max_ram):
         """Test model recommendations for each tier."""
         hw_info = HardwareInfo(
             ram_gb=ram_gb,
-            tier=tier,
-            usable_ram_gb=ram_gb * (0.6 if tier == HardwareTier.C else (
-                0.65 if tier == HardwareTier.B else 0.7
-            )),
+            usable_ram_gb=ram_gb * 0.6,
             has_apple_silicon=True,
             docker_model_runner_available=True
         )
         
-        from tests.conftest import _generate_best_recommendation
-        recommendation = _generate_best_recommendation(hw_info, "docker")
-        total_ram = recommendation.total_ram()
+        from lib.model_selector import select_models
+        models = select_models(hw_info)
+        total_ram = sum(m.ram_gb for m in models)
         
-        assert total_ram >= expected_min_ram, f"Tier {tier}: Models too small"
-        assert total_ram <= expected_max_ram, f"Tier {tier}: Models too large"
+        assert total_ram >= expected_min_ram, f"RAM {ram_gb}GB: Models too small"
+        assert total_ram <= expected_max_ram, f"RAM {ram_gb}GB: Models too large"
 
 
 # =============================================================================
@@ -477,18 +484,29 @@ class TestModelSelectionCustomization:
     """E2E test: User customizes model selection."""
     
     def test_primary_models_for_tier(self, mock_complete_environment):
-        """Test that PRIMARY_MODELS contains models for the tier."""
-        # Test that PRIMARY_MODELS contains models for the tier
-        from lib.model_selector import PRIMARY_MODELS
+        """Test that select_models returns fixed models for all users."""
+        from lib.model_selector import select_models, PRIMARY_MODEL, EMBED_MODEL
         
         hw_info = mock_complete_environment["hardware"]
-        models = PRIMARY_MODELS.get(hw_info.tier, [])
+        models = select_models(hw_info)
         
-        assert len(models) > 0, "Should have models for the tier"
+        # Should return PRIMARY_MODEL and EMBED_MODEL for all users
+        assert len(models) >= 2, "Should have at least primary and embed models"
+        model_names = [m.docker_name for m in models]
+        assert PRIMARY_MODEL.docker_name in model_names, "Should include PRIMARY_MODEL"
+        assert EMBED_MODEL.docker_name in model_names, "Should include EMBED_MODEL"
+        
+        # Verify model types
         for model in models:
             assert isinstance(model, RecommendedModel)
-            # Primary models should have chat role
-            assert "chat" in model.roles or model.role == ModelRole.CHAT
+        
+        # Verify at least one model has chat role (PRIMARY_MODEL)
+        chat_models = [m for m in models if "chat" in m.roles or m.role == ModelRole.CHAT]
+        assert len(chat_models) > 0, "Should have at least one chat model"
+        
+        # Verify at least one model has embed role (EMBED_MODEL)
+        embed_models = [m for m in models if "embed" in m.roles or m.role == ModelRole.EMBED]
+        assert len(embed_models) > 0, "Should have at least one embed model"
 
 
 # =============================================================================
@@ -501,17 +519,20 @@ class TestGracefulDegradation:
     def test_partial_setup_still_useful(self, mock_complete_environment):
         """Test that partial setup is still usable."""
         hw_info = mock_complete_environment["hardware"]
-        from tests.conftest import _generate_best_recommendation
-        recommendation = _generate_best_recommendation(hw_info, "docker")
-        models = recommendation.all_models()
+        from lib.model_selector import select_models
+        models = select_models(hw_info)
         
         # Simulate: primary succeeds, embed fails
         result = validator.SetupResult()
-        result.successful_models.append(models[0])  # Primary
-        if len(models) > 2:
-            result.failed_models.append((models[2], "Error"))  # Embed
+        # Find primary and embed models
+        primary = next((m for m in models if m.role == ModelRole.CHAT), models[0])
+        embed = next((m for m in models if m.role == ModelRole.EMBED), models[1] if len(models) > 1 else None)
         
-        # Should be partial success
+        result.successful_models.append(primary)
+        if embed:
+            result.failed_models.append((embed, "Error"))
+        
+        # Should be partial success if embed failed
         if len(result.failed_models) > 0:
             assert result.partial_success is True
         

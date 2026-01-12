@@ -11,7 +11,7 @@ from lib.docker import (
     check_docker, check_docker_model_runner_status, fetch_available_models_from_api,
     check_docker_model_runner, DMR_API_BASE, DMR_API_HOST, DMR_API_PORT
 )
-from lib.hardware import HardwareInfo, HardwareTier
+from lib.hardware import HardwareInfo
 
 
 class TestCheckDocker:
@@ -155,15 +155,13 @@ class TestCheckDockerModelRunner:
             check_docker_model_runner(None)
     
     @patch('lib.docker.utils.run_command')
-    @patch('lib.docker.models.fetch_available_models_from_docker_hub', return_value=[])
     @patch('lib.docker.ui.print_subheader')
     @patch('lib.docker.ui.print_success')
     @patch('lib.docker.ui.print_info')
-    def test_dmr_available_with_hw_info(self, mock_info, mock_success, mock_subheader, mock_fetch, mock_run):
+    def test_dmr_available_with_hw_info(self, mock_info, mock_success, mock_subheader, mock_run):
         """Test check_docker_model_runner when DMR is available."""
         hw_info = HardwareInfo(
             ram_gb=32.0,
-            tier=HardwareTier.A,
             has_apple_silicon=True
         )
         

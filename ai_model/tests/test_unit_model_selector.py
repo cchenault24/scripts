@@ -87,19 +87,19 @@ class TestRecommendedModel:
         assert model.role == ModelRole.CHAT
         assert "chat" in model.roles
     
-    def test_model_with_fallback(self):
-        """Test model with fallback_name."""
+    def test_model_with_description(self):
+        """Test model with description."""
         model_kwargs = {
             "name": "Primary Model",
             "ram_gb": 8.0,
             "role": ModelRole.CHAT,
             "roles": ["chat"],
-            "fallback_name": "fallback:latest"
+            "description": "A primary model for testing"
         }
         model_kwargs[model_name_attr] = "primary:latest"
         model = RecommendedModel(**model_kwargs)
         
-        assert model.fallback_name == "fallback:latest"
+        assert model.description == "A primary model for testing"
 
 
 

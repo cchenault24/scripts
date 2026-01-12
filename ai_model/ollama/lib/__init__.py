@@ -36,7 +36,6 @@ __all__ = [
     # Key classes and functions
     "ModelRole",
     "RecommendedModel",
-    "ModelRecommendation",
     "select_models",
     "SetupResult",
     "PullResult",
@@ -57,7 +56,6 @@ _EXPORTS = {
     # model_selector exports
     "ModelRole": "model_selector",
     "RecommendedModel": "model_selector",
-    "ModelRecommendation": "model_selector",
     "select_models": "model_selector",
     # validator exports
     "SetupResult": "validator",

@@ -62,7 +62,7 @@ else:
     except ImportError:
         run_diagnostics = None
 from lib.model_selector import RecommendedModel, ModelRole
-from lib.hardware import HardwareTier, HardwareInfo
+from lib.hardware import HardwareInfo
 
 
 class TestPullErrorType:
@@ -381,7 +381,7 @@ class TestValidatePreInstall:
             }
             model_kwargs[model_name_attr] = "test:v"
             models = [RecommendedModel(**model_kwargs)]
-            hw_info = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
+            hw_info = HardwareInfo(ram_gb=24)
             
             success, messages = validate_pre_install(models, hw_info)
             
@@ -421,7 +421,7 @@ class TestPullModelsWithTracking:
         models = [
             RecommendedModel("M1", "granite-code:8b", 5.0, ModelRole.CHAT, ["chat"])
         ]
-        hw_info = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
+        hw_info = HardwareInfo(ram_gb=24)
         
         result = pull_models_with_tracking(models, hw_info)
         
@@ -433,7 +433,7 @@ class TestPullModelsWithTracking:
         models = [
             RecommendedModel("Restricted", "qwen:7b", 5.0, ModelRole.CHAT, ["chat"])
         ]
-        hw_info = HardwareInfo(ram_gb=24, tier=HardwareTier.B)
+        hw_info = HardwareInfo(ram_gb=24)
         
         result = pull_models_with_tracking(models, hw_info)
         

@@ -32,7 +32,7 @@ Both options generate the same Continue.dev configuration and work identically i
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [IDE Support](#ide-support)
-- [Hardware Tiers](#hardware-tiers)
+- [Hardware Requirements](#hardware-requirements)
 - [Model Catalog](#model-catalog)
 - [Troubleshooting](#troubleshooting)
 - [Uninstallation](#uninstallation)
@@ -58,9 +58,8 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 ### Core Functionality
 
 - **Hardware Detection**: Automatically detects CPU, RAM, GPU, and Apple Silicon details
-- **Tier Classification**: Classifies hardware into tiers (S, A, B, C, D) for model recommendations
-- **Model Selection**: Interactive model selection with hardware-aware recommendations
-- **Portfolio Recommendations**: Suggests model portfolios based on hardware tier
+- **Fixed Model Installation**: Installs GPT-OSS 20B and nomic-embed-text for all users (16GB+ RAM)
+- **Simplified Setup**: Same two models for everyone - no complex selection needed
 - **Backend Support**: Full support for both Docker Model Runner and Ollama
 - **Docker Integration**: Full Docker Model Runner integration for model management (Docker option)
 - **Ollama Integration**: Full Ollama integration for model management (Ollama option)
@@ -73,17 +72,14 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 
 > **Note:** "v4.0" refers to the setup script version (see [Changelog](#changelog)), not the Ollama product version. The module API version is `__version__ = "2.0.0"`.
 
-- **Smart Model Recommendations**: Automatically selects the highest quality models that fit your RAM
-- **Tier-Based RAM Reservation**: Variable overhead (40%/35%/30%) based on hardware tier
-- **Two-Level Customization**: Role swapping (Level 1) and optional model adding (Level 2)
-- **Reliable Model Pulling**: Verification after each pull with automatic fallback on failure
+- **Fixed Model Installation**: Installs GPT-OSS 20B and nomic-embed-text for all users
+- **Reliable Model Pulling**: Verification after each pull with automatic retry on failure
 - **IDE Auto-Detection**: Automatically finds VS Code, Cursor, and IntelliJ IDEA
 - **Retry Mechanism**: Re-attempt failed model installations with one command
 
 ### Advanced Features (Both Backends)
 
-- **Variant Discovery**: Automatically discovers and selects optimal model variants (quantization levels)
-- **RAM Validation**: Validates model selections against available system memory
+- **RAM Validation**: Validates that models fit in available system memory
 - **API Endpoint Detection**: Automatically detects API endpoints (Docker Model Runner or Ollama)
 - **Backup & Restore**: Backs up existing Continue.dev configs before overwriting
 - **Progress Tracking**: Enhanced progress bars with real-time download progress (percentage, speed, time remaining) for both Docker and Ollama backends, with optional `rich` library support (auto-installed if needed)
@@ -110,9 +106,8 @@ The setup is optimized for Apple Silicon Macs with Metal GPU acceleration, but a
 
 ### Hardware Recommendations
 
-- **Minimum**: 16GB RAM (Tier C) - systems with less than 16GB RAM are not supported
-- **Recommended**: 24GB+ RAM (Tier B or higher)
-- **Optimal**: 32GB+ RAM (Tier A or S) for larger models
+- **Minimum**: 16GB RAM - systems with less than 16GB RAM are not supported
+- **Recommended**: 16GB+ RAM for GPT-OSS 20B (16GB) + nomic-embed-text (0.3GB)
 
 ### Optional Dependencies
 
@@ -197,14 +192,11 @@ The script will:
 
 ### Preset Selection (Docker)
 
-The Docker script offers presets based on your hardware tier:
-- **Tier S** (>64GB RAM): Large models for complex tasks
-- **Tier A** (32-64GB RAM): High-quality models
-- **Tier B** (>24-32GB RAM): Balanced models
-- **Tier C** (16-24GB RAM): Efficient models
-- **Tier D** (<16GB RAM): Unsupported - minimum 16GB RAM required
+The Docker script offers presets for model selection. All presets install the same two models:
+- **GPT-OSS 20B** (16GB) - Primary reasoning/chat model
+- **nomic-embed-text** (0.3GB) - Embedding model for code indexing
 
-Choose "Custom" preset to manually select models based on your needs.
+Choose "Custom" preset to manually select models if needed.
 
 ### Model Selection (Ollama Setup)
 
@@ -263,7 +255,7 @@ python3 ollama/ollama-llm-setup.py
 3. Backend verification (Docker Model Runner)
 4. API check
 5. Preset selection (or Custom)
-6. Model selection (with recommendations)
+6. Model selection (fixed models: GPT-OSS 20B + nomic-embed-text)
 7. RAM usage validation
 8. Model pulling
 9. Configuration generation
@@ -275,10 +267,10 @@ python3 ollama/ollama-llm-setup.py
 2. IDE auto-detection (VS Code, Cursor, IntelliJ IDEA)
 3. Ollama service verification
 4. API check
-5. **Model selection** - displays the two fixed models (GPT-OSS 20B + embedding)
+5. **Model selection** - displays the two fixed models (GPT-OSS 20B + nomic-embed-text)
 6. **Confirm installation** - proceed with the models
 7. Pre-installation validation (RAM, network, API)
-8. Model pulling with verification and automatic fallback
+8. Model pulling with verification and automatic retry
 9. Setup result display (success/failures with retry options)
 10. Configuration generation
 11. Global rules generation
@@ -434,9 +426,9 @@ ai_model/
 │   └── lib/                     # Ollama-specific modules
 │       ├── __init__.py          # Module exports (v2.0.0)
 │       ├── config.py            # Continue.dev config generation
-│       ├── hardware.py          # Hardware detection with tier-based RAM
+│       ├── hardware.py          # Hardware detection
 │       ├── ide.py               # IDE detection and integration
-│       ├── model_selector.py    # NEW: Smart model recommendation engine
+│       ├── model_selector.py    # Fixed model selection (GPT-OSS 20B + nomic-embed-text)
 │       ├── models.py            # Legacy model catalog (backward compat)
 │       ├── ollama.py            # Ollama service management
 │       ├── ui.py                # Terminal UI utilities
@@ -462,26 +454,23 @@ Main entry points. Orchestrate the setup workflow:
 - User guidance
 
 #### `lib/hardware.py`
-Hardware detection and classification:
+Hardware detection:
 - **HardwareInfo**: Dataclass for system information
-- **HardwareTier**: Enum for tier classification (S, A, B, C, D)
 - **detect_hardware()**: Detects CPU, RAM, GPU, Apple Silicon details
-- **calculate_os_overhead()**: Calculates OS memory overhead
-- **get_estimated_model_memory()**: Estimates available RAM for models
+- **validate_apple_silicon_support()**: Validates Apple Silicon hardware
 
 #### `lib/model_selector.py` (Ollama Setup)
 
-Model selection for fixed model installation:
+Fixed model selection:
 - **ModelRole**: Enum for model roles (CHAT, EDIT, EMBED)
 - **RecommendedModel**: Dataclass for model information with role, RAM, and model names
 - **PRIMARY_MODEL**: GPT-OSS 20B (primary coding model)
 - **EMBED_MODEL**: Universal embedding model (nomic-embed-text)
-- **get_usable_ram()**: Calculates usable RAM for models
-- **select_models()**: Returns the two fixed models for all users
+- **select_models()**: Returns the two fixed models for all users (GPT-OSS 20B + nomic-embed-text)
 
 #### `lib/validator.py` (Ollama Setup v4.0 - NEW)
 
-Robust model pulling with verification and fallback:
+Robust model pulling with verification and retry:
 - **PullResult**: Dataclass tracking individual model pull outcomes
 - **SetupResult**: Dataclass tracking overall setup success/failure
 - **is_ollama_api_available()**: Checks Ollama API status
@@ -553,11 +542,11 @@ General utilities:
 ```text
 User Input
     ↓
-Hardware Detection → Tier Classification
+Hardware Detection → Minimum RAM Check (16GB+)
     ↓
 IDE Selection (VS Code, IntelliJ, or Both)
     ↓
-Preset Selection → Model Recommendations
+Preset Selection → Fixed Models (GPT-OSS 20B + nomic-embed-text)
     ↓
 Model Selection → RAM Validation
     ↓
@@ -588,7 +577,7 @@ Model Pulling with Verification (validator.pull_models_with_tracking)
     │
     ├── Success → Continue
     │
-    └── Failure → Fallback → Retry
+    └── Failure → Retry
                                                           ↓
 Setup Result Display → Retry Option for Failures
     ↓
@@ -891,51 +880,24 @@ When running the setup script, you'll be prompted to select:
 - **IntelliJ only** - Generates JSON config only
 - **Both** - Generates both YAML and JSON (recommended if you use both IDEs)
 
-## 🖥️ Hardware Tiers & RAM Management
+## 🖥️ Hardware Requirements
 
-### RAM Allocation Strategy
+### RAM Requirements
 
-The setup uses a **tier-based overhead reservation** for optimal balance between model quality and system stability:
+The setup installs the same two models for all users:
+- **GPT-OSS 20B**: 16GB RAM (primary reasoning/chat model)
+- **nomic-embed-text**: 0.3GB RAM (embedding model)
+- **Total**: ~16.3GB RAM
 
-| Tier | RAM Range | Reserved | Usable | Rationale |
-|------|-----------|----------|--------|-----------|
-| **C** | 16-24GB | 40% | 60% | Conservative - limited headroom |
-| **B** | 24-32GB | 35% | 65% | Balanced - moderate headroom |
-| **A/S** | 32GB+ | 30% | 70% | Aggressive - ample headroom |
+**Minimum Requirements:**
+- **16GB RAM**: Minimum supported (installs GPT-OSS 20B + nomic-embed-text)
+- Systems with less than 16GB RAM are not supported
 
-```text
-Example: 32GB RAM (Tier A)
-Total RAM:           32 GB
-Reserved (30%):      -9.6 GB
-Usable for Models:   22.4 GB (70% of total)
-Model Budget (70%):  15.7 GB (70% of usable)
-Safety Buffer (30%): 6.7 GB (for OS, apps, context)
-```
-
-**What the overhead covers:**
-- macOS system: 4-6GB
-- VS Code/IntelliJ: 2-4GB
-- Browser (Chrome/Safari): 3-6GB
-- Continue.dev overhead: 1-2GB
-- Model context/KV cache: 2-4GB
-
-### Hardware Tiers
-
-| Tier | Total RAM | Usable | Primary Model | Total Models |
-|------|-----------|--------|---------------|--------------|
-| **S** | >64GB | ~45GB | GPT-OSS 20B (16GB) | ~16GB |
-| **A** | 32-64GB | ~34GB | GPT-OSS 20B (16GB) | ~16GB |
-| **B** | 24-32GB | ~22GB | GPT-OSS 20B (16GB) | ~16GB |
-| **C** | 16-24GB | ~17GB | GPT-OSS 20B (16GB) | ~16GB |
-| **D** | <16GB | Unsupported | Minimum 16GB RAM required | - |
+**Recommended:**
+- **16GB+ RAM**: All systems with 16GB+ RAM get the same models
+- No tier-based selection - same high-quality models for everyone
 
 **Note**: GPT-OSS 20B is the primary model for all configurations (16GB+ RAM). It matches o3-mini performance, runs at 1200 tokens/sec, uses only 16GB RAM, and is Apache 2.0 licensed (US-based, OpenAI, released August 2025).
-
-### Quantization Levels (Ollama)
-
-- **Q5**: 0.75× params - Best quality (Tier S only)
-- **Q4**: 0.6× params - Recommended default (all tiers)
-- **Q3**: 0.5× params - Lower quality (not recommended)
 
 ### Example: M4 Pro (48GB)
 
@@ -954,14 +916,14 @@ Remaining Buffer:          17.3GB ✓
 
 **Note**: GPT-OSS 20B is the primary model for all configurations. It matches o3-mini performance, runs at 1200 tokens/sec, uses only 16GB RAM, and is superior to Llama 3.1/3.3.
 
-### RAM Budget Allocation
+### Fixed Model Installation
 
-The model selection uses a simplified approach:
-- **Primary model**: GPT-OSS 20B (16GB) - used for all configurations (16GB+ RAM)
+The setup uses a simplified approach:
+- **Primary model**: GPT-OSS 20B (16GB) - installed for all users (16GB+ RAM)
   - Matches o3-mini performance, 1200 tokens/sec, Apache 2.0 license
   - Superior to Llama 3.1/3.3 - no longer competitive
-- **Embedding model**: nomic-embed-text (~0.3GB) - included for all configurations
-- **Reserve**: Remaining RAM after model allocation (safety buffer for OS, apps, and context)
+- **Embedding model**: nomic-embed-text (~0.3GB) - installed for all users
+- **No selection needed**: Same two models for everyone - consistent experience
 
 ### Apple Silicon Optimization
 
@@ -1030,12 +992,12 @@ This setup offers **GPT-OSS 20B** as the primary reasoning/chat model:
 
 See the [Model Selection Matrix](#model-selection-matrix-source-of-truth) for exact model selection based on your Mac model and RAM configuration.
 
-### Model Variants
+### Model Installation
 
-Some models support automatic variant discovery:
-- **Quantization Levels**: Q4_K_M, Q5_K_M, Q8_0, etc.
-- **Hardware-Aware Selection**: Automatically selects optimal variant
-- **RAM Optimization**: Balances quality vs. memory usage
+The setup installs fixed model variants:
+- **GPT-OSS 20B**: Pre-selected variant optimized for Apple Silicon
+- **nomic-embed-text**: Standard embedding model
+- **No variant selection needed**: Optimal variants are pre-selected
 
 ### Model Roles
 
@@ -1354,7 +1316,6 @@ ModelInfo(
     ram_gb=8.0,
     context_length=32768,
     roles=["chat", "edit"],
-    tiers=[hardware.HardwareTier.B, hardware.HardwareTier.C],
     recommended_for=["Use case description"]
 )
 ```
@@ -1377,15 +1338,12 @@ python3 -c "from lib import models; print(len(models.MODEL_CATALOG))"
 ```bash
 cd ai_model/ollama
 
-# Test smart model selector
+# Test model selector
 python3 -c "
 from lib import hardware, model_selector
 hw = hardware.detect_hardware()
-rec = model_selector.generate_best_recommendation(hw)
-print(f'Tier: {hw.tier.name}')
-print(f'Usable RAM: {model_selector.get_usable_ram(hw):.1f} GB')
-models = rec.all_models()
-print(f'Models: {len(models)}')
+models = model_selector.select_models(hw)
+print(f'Selected models: {len(models)}')
 for m in models:
     print(f'  - {m.name}: {m.ollama_name} ({m.ram_gb:.1f}GB)')
 "
@@ -1457,9 +1415,9 @@ MIT License - See LICENSE file for details.
   - No hardware-based selection - same two models for everyone
   - Simplified setup process
   - Selects optimal model variant that fits hardware capabilities
-- **Reliable Model Pulling**: Robust installation with fallbacks
+- **Reliable Model Pulling**: Robust installation with retry
   - Immediate verification after each model pull
-  - Automatic fallback to alternatives if primary model fails
+  - Automatic retry on failure
   - Clear feedback and actionable next steps for partial setups
   - Retry mechanism for failed models
 - **Smart Uninstaller v2.0**: Manifest-based cleanup system
@@ -1472,8 +1430,8 @@ MIT License - See LICENSE file for details.
   - Auto-cleanup of cache and temporary files
   - New `lib/uninstaller.py` module
 - **New Modules**: Modular architecture for maintainability
-  - `lib/model_selector.py`: Smart recommendation engine and customization UI
-  - `lib/validator.py`: Robust model pulling with verification and fallback
+  - `lib/model_selector.py`: Fixed model selection (GPT-OSS 20B + nomic-embed-text)
+  - `lib/validator.py`: Robust model pulling with verification and retry
   - `lib/uninstaller.py`: Smart uninstallation with manifest tracking
 - **IDE Auto-Detection**: Automatically finds installed IDEs
   - Detects VS Code, Cursor, and IntelliJ IDEA installations
@@ -1489,9 +1447,9 @@ MIT License - See LICENSE file for details.
   - Handles mixed units (KB/MB/GB) during download progress
   - Shows real-time download progress with percentage, speed, and time remaining
   - Progress bars work correctly throughout the entire download process
-- **Improved Ollama integration**: Better model variant discovery and selection
-  - Enhanced parsing of Ollama model tags and quantization levels
-  - Improved fallback logic for model pulling
+- **Improved Ollama integration**: Simplified model installation
+  - Fixed model selection (GPT-OSS 20B + nomic-embed-text)
+  - Improved retry logic for model pulling
   - Automatic Ollama installation detection and prompts
 - **Dual-backend architecture**: Users can now choose between Docker Model Runner or Ollama
   - Both backends generate identical Continue.dev configurations
@@ -1529,8 +1487,8 @@ MIT License - See LICENSE file for details.
 
 ### Version 1.0.0
 - Initial release
-- Hardware detection and tier classification
-- Model catalog with variant discovery
+- Hardware detection
+- Model catalog
 - Continue.dev configuration generation
 - Global rules file generation
 - VS Code integration
