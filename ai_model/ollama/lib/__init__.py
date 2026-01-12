@@ -5,15 +5,15 @@ Modular components for Ollama and Continue.dev setup.
 
 Modules:
 - config: Continue.dev configuration generation + manifest tracking
-- hardware: Hardware detection and tier classification
+- hardware: Hardware detection
 - ide: IDE detection and integration (VS Code, Cursor, IntelliJ)
-- model_selector: Smart model recommendation engine
+- model_selector: Model selection
 - models: Model catalog and legacy support
 - ollama: Ollama service management
 - ui: Terminal UI utilities
 - uninstaller: Smart uninstallation with manifest tracking
 - utils: General utilities
-- validator: Model verification and fallback handling
+- validator: Model verification
 """
 
 import importlib
@@ -37,14 +37,12 @@ __all__ = [
     "ModelRole",
     "RecommendedModel",
     "ModelRecommendation",
-    "select_models_smart",
-    "get_usable_ram",
+    "select_models",
     "SetupResult",
     "PullResult",
     "pull_models_with_tracking",
     "display_setup_result",
     "validate_pre_install",
-    "HardwareTier",
     "HardwareInfo",
     "detect_hardware",
     "detect_installed_ides",
@@ -60,8 +58,7 @@ _EXPORTS = {
     "ModelRole": "model_selector",
     "RecommendedModel": "model_selector",
     "ModelRecommendation": "model_selector",
-    "select_models_smart": "model_selector",
-    "get_usable_ram": "model_selector",
+    "select_models": "model_selector",
     # validator exports
     "SetupResult": "validator",
     "PullResult": "validator",
@@ -69,7 +66,6 @@ _EXPORTS = {
     "display_setup_result": "validator",
     "validate_pre_install": "validator",
     # hardware exports
-    "HardwareTier": "hardware",
     "HardwareInfo": "hardware",
     "detect_hardware": "hardware",
     # ide exports

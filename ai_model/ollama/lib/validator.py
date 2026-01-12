@@ -1,5 +1,5 @@
 """
-Model Validator and Fallback Handler.
+Model Validator.
 
 Handles:
 - Immediate verification after each model pull
@@ -22,7 +22,7 @@ from . import hardware
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
-from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
+from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL
 
 
 # Ollama API configuration
@@ -227,8 +227,6 @@ class PullResult:
     success: bool
     verified: bool = False
     error_message: str = ""
-    used_fallback: bool = False
-    fallback_model: Optional[RecommendedModel] = None
 
 
 @dataclass
@@ -321,104 +319,18 @@ def verify_model_exists(model_name: str) -> bool:
     return False
 
 
-def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> Optional[RecommendedModel]:
-    """
-    Get a fallback model for a failed pull.
-    
-    Uses the hardcoded catalog to find alternatives based on role and tier.
-    Ensures fallback models are not restricted (Chinese-based).
-    """
-    role = model.role
-    
-    # Try the model's built-in fallback first (but check if it's restricted)
-    if model.fallback_name:
-        # Skip if fallback is restricted
-        if not is_restricted_model_name(model.fallback_name):
-            return RecommendedModel(
-                name=f"{model.name} (fallback)",
-                ollama_name=model.fallback_name,
-                ram_gb=model.ram_gb,
-                role=model.role,
-                roles=model.roles,
-                description=f"Fallback for {model.name}"
-            )
-    
-    # Find alternative from catalog
-    if role == ModelRole.EMBED:
-        # Embedding fallbacks - using widely available models
-        fallbacks = [
-            ("all-minilm", 0.1),  # Very small and widely available
-            ("mxbai-embed-large", 0.7),
-        ]
-        for name, ram in fallbacks:
-            if name != model.ollama_name and name not in model.ollama_name:
-                return RecommendedModel(
-                    name="Fallback Embedding",
-                    ollama_name=name,
-                    ram_gb=ram,
-                    role=ModelRole.EMBED,
-                    roles=["embed"],
-                    description="Alternative embedding model"
-                )
-    
-    elif role == ModelRole.AUTOCOMPLETE:
-        # Autocomplete fallbacks - using reliable models
-        fallbacks = [
-            ("codegemma:2b", 1.5),  # Very reliable Google model
-            ("starcoder2:3b", 2.0),
-        ]
-        for name, ram in fallbacks:
-            if name != model.ollama_name and name not in model.ollama_name:
-                return RecommendedModel(
-                    name="Fallback Autocomplete",
-                    ollama_name=name,
-                    ram_gb=ram,
-                    role=ModelRole.AUTOCOMPLETE,
-                    roles=["autocomplete"],
-                    description="Alternative autocomplete model"
-                )
-    
-    elif role == ModelRole.CHAT:
-        # Primary model fallbacks - try smaller models
-        primary_options = PRIMARY_MODELS.get(tier, [])
-        for option in primary_options:
-            if option.ollama_name != model.ollama_name:
-                return option
-        
-        # If no tier-specific fallback, try general fallbacks (reliable models)
-        fallbacks = [
-            ("codellama:7b", 4.0),  # Meta's CodeLlama - very reliable
-            ("codegemma:7b", 4.5),  # Google's CodeGemma
-            ("starcoder2:3b", 2.0),  # StarCoder2 - reliable coding model
-        ]
-        for name, ram in fallbacks:
-            if name != model.ollama_name and name not in model.ollama_name:
-                return RecommendedModel(
-                    name="Fallback Coding Model",
-                    ollama_name=name,
-                    ram_gb=ram,
-                    role=ModelRole.CHAT,
-                    roles=["chat", "edit"],
-                    description="Alternative coding model"
-                )
-    
-    return None
-
-
 def pull_model_with_verification(
     model: RecommendedModel,
-    tier: hardware.HardwareTier,
     show_progress: bool = True
 ) -> PullResult:
     """
-    Pull a model with immediate verification and fallback.
+    Pull a model with immediate verification.
     
     Strategy:
     1. Check if model is restricted (Chinese-based LLMs are not allowed)
     2. Try to pull the model
     3. Verify it exists in Ollama
-    4. If verification fails, try the fallback
-    5. Track success/failure for reporting
+    4. Track success/failure for reporting
     """
     result = PullResult(model=model, success=False)
     
@@ -458,45 +370,7 @@ def pull_model_with_verification(
                 display_error = error_msg[:300] if len(error_msg) > 300 else error_msg
                 ui.print_error(f"  Error: {display_error}")
     
-    # Store the error for reporting
-    primary_error = error_msg
-    
-    # Try fallback (but check if fallback is also restricted)
-    fallback = get_fallback_model(model, tier)
-    if fallback:
-        # Check if fallback is also restricted
-        if is_restricted_model_name(fallback.ollama_name):
-            if show_progress:
-                ui.print_warning(f"Fallback {fallback.ollama_name} is also restricted, skipping")
-            result.error_message = f"Primary model failed and fallback is restricted: {fallback.ollama_name}"
-            return result
-        
-        if show_progress:
-            ui.print_info(f"Trying fallback: {fallback.ollama_name}")
-        
-        fallback_success, fallback_error = _pull_model(fallback.ollama_name, show_progress)
-        
-        if fallback_success:
-            time.sleep(VERIFICATION_DELAY)
-            if verify_model_exists(fallback.ollama_name):
-                result.success = True
-                result.verified = True
-                result.used_fallback = True
-                result.fallback_model = fallback
-                if show_progress:
-                    ui.print_success(f"Fallback {fallback.name} downloaded and verified")
-                return result
-            else:
-                if show_progress:
-                    ui.print_warning(f"Fallback {fallback.name} pull succeeded but verification failed")
-        else:
-            if show_progress:
-                ui.print_error(f"Fallback {fallback.ollama_name} also failed")
-                if fallback_error:
-                    ui.print_error(f"  Error: {fallback_error[:200]}")
-    
-    # All attempts failed - include detailed error
-    result.error_message = primary_error or "Model pull and fallback both failed"
+    result.error_message = error_msg or "Model pull failed"
     return result
 
 
@@ -1155,12 +1029,10 @@ def pull_models_with_tracking(
     Implements the reliable pulling strategy:
     1. Pull each model
     2. Verify after each pull
-    3. Try fallback if verification fails
-    4. Continue with remaining models on failure
-    5. Report partial setup status
+    3. Continue with remaining models on failure
+    4. Report partial setup status
     """
     result = SetupResult()
-    tier = hw_info.tier
     
     if show_progress:
         ui.print_header("📥 Downloading Models")
@@ -1173,17 +1045,10 @@ def pull_models_with_tracking(
             ui.print_step(i, len(models), f"Pulling {model.name}")
             print()
         
-        pull_result = pull_model_with_verification(model, tier, show_progress)
+        pull_result = pull_model_with_verification(model, show_progress)
         
         if pull_result.success:
-            # Add the actually installed model (might be fallback)
-            if pull_result.used_fallback and pull_result.fallback_model:
-                result.successful_models.append(pull_result.fallback_model)
-                result.warnings.append(
-                    f"Used fallback for {model.name}: {pull_result.fallback_model.ollama_name}"
-                )
-            else:
-                result.successful_models.append(model)
+            result.successful_models.append(model)
         else:
             result.failed_models.append((model, pull_result.error_message))
         
@@ -1482,8 +1347,7 @@ def validate_pre_install(
         return False, warnings
     
     # Check RAM
-    from .model_selector import get_usable_ram
-    usable_ram = get_usable_ram(hw_info)
+    usable_ram = hw_info.ram_gb  # Use total RAM for validation
     total_ram_needed = sum(m.ram_gb for m in models)
     
     if total_ram_needed > usable_ram:

@@ -6,10 +6,8 @@ An interactive Python script that helps you set up a locally hosted LLM
 via Ollama and generates a continue.dev config.yaml for VS Code.
 
 NEW in v2.0:
-- Smart model recommendations that fit your RAM
-- Tier-based RAM reservation (40%/35%/30%)
-- Single "best recommendation" approach with [Accept]/[Customize]
-- Reliable model pulling with verification and fallbacks
+- Fixed model selection (GPT-OSS 20B + embedding model)
+- Reliable model pulling with verification
 - Auto-detection of installed IDEs
 - Installation manifest for smart uninstallation
 
@@ -72,11 +70,11 @@ def get_pre_existing_models() -> list[str]:
 
 
 def main() -> int:
-    """Main entry point with new smart recommendation flow."""
+    """Main entry point."""
     ui.clear_screen()
     
     ui.print_header("🚀 Ollama + Continue.dev Setup v2.0")
-    ui.print_info("Smart model recommendations that fit your hardware")
+    ui.print_info("Installing GPT-OSS 20B + embedding model")
     ui.print_info("Powered by Continue.dev + Ollama")
     print()
     
@@ -136,9 +134,9 @@ def main() -> int:
     pre_existing_models = get_pre_existing_models()
     hw_info.ollama_available = True  # Mark that Ollama is available
     
-    # Step 5: Smart model selection (new approach)
+    # Step 5: Model selection
     print()
-    selected_models = model_selector.select_models_smart(hw_info, installed_ides)
+    selected_models = model_selector.select_models(hw_info, installed_ides)
     
     if not selected_models:
         ui.print_error("No models selected. Aborting setup.")
@@ -166,14 +164,13 @@ def main() -> int:
     print()
     ui.print_subheader("Configuration Summary")
     total_ram = sum(m.ram_gb for m in selected_models)
-    usable_ram = model_selector.get_usable_ram(hw_info)
-    buffer = usable_ram - total_ram
+    # RAM calculation removed - installing fixed models
     
     print(f"  Selected {len(selected_models)} model(s):")
     for model in selected_models:
         roles_str = ", ".join(model.roles)
         print(f"    • {model.ollama_name} (~{model.ram_gb:.1f}GB RAM) - {roles_str}")
-    print(f"  Total RAM: ~{total_ram:.1f}GB / {usable_ram:.1f}GB usable ({buffer:.1f}GB buffer)")
+    print(f"  Total model RAM: ~{total_ram:.1f}GB")
     print(f"  Target IDE(s): {', '.join(installed_ides) if installed_ides else 'VS Code'}")
     print()
     

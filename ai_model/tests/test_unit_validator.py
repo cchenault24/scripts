@@ -490,67 +490,6 @@ class TestConnectivity:
 
 
 # =============================================================================
-# Fallback Model Tests
-# =============================================================================
-
-class TestFallbackModels:
-    """Tests for fallback model selection."""
-    
-    def test_get_fallback_for_embed(self):
-        """Test getting fallback for embedding model."""
-        model_kwargs = {
-            "name": "Nomic Embed",
-            "ram_gb": 0.3,
-            "role": ModelRole.EMBED,
-            "roles": ["embed"],
-            "description": "Test"
-        }
-        model_kwargs[model_name_attr] = "nomic-embed-text"
-        model = RecommendedModel(**model_kwargs)
-        
-        fallback = validator.get_fallback_model(model, HardwareTier.C)
-        
-        assert fallback is not None
-        assert fallback.role == ModelRole.EMBED
-        assert getattr(fallback, model_name_attr) != getattr(model, model_name_attr)
-    
-    def test_get_fallback_for_chat(self):
-        """Test getting fallback for chat model."""
-        model_kwargs = {
-            "name": "Primary",
-            "ram_gb": 5.0,
-            "role": ModelRole.CHAT,
-            "roles": ["chat", "edit"],
-            "description": "Test"
-        }
-        model_kwargs[model_name_attr] = "qwen2.5-coder:7b"
-        model = RecommendedModel(**model_kwargs)
-        
-        fallback = validator.get_fallback_model(model, HardwareTier.C)
-        
-        assert fallback is not None
-        assert getattr(fallback, model_name_attr) != getattr(model, model_name_attr)
-    
-    def test_get_fallback_uses_builtin(self):
-        """Test that built-in fallback is tried first."""
-        model_kwargs = {
-            "name": "Primary",
-            "ram_gb": 5.0,
-            "role": ModelRole.CHAT,
-            "roles": ["chat", "edit"],
-            "description": "Test",
-            "fallback_name": "codellama:7b"
-        }
-        model_kwargs[model_name_attr] = "qwen2.5-coder:7b"
-        model = RecommendedModel(**model_kwargs)
-        
-        fallback = validator.get_fallback_model(model, HardwareTier.C)
-        
-        assert fallback is not None
-        assert getattr(fallback, model_name_attr) == "codellama:7b"
-
-
-# =============================================================================
 # Pre-flight Check Tests
 # =============================================================================
 

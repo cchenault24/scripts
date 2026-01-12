@@ -28,9 +28,8 @@ if _docker_path not in sys.path:
 
 from lib import model_selector
 from lib.model_selector import (
-    ModelRole, RecommendedModel, ModelRecommendation,
-    get_usable_ram,
-    EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
+    ModelRole, RecommendedModel,
+    EMBED_MODEL, PRIMARY_MODEL, select_models
 )
 # generate_multi_model_recommendation may not exist in Docker backend
 try:
@@ -38,7 +37,7 @@ try:
 except ImportError:
     generate_multi_model_recommendation = None
 from lib import hardware
-from lib.hardware import HardwareTier, HardwareInfo
+from lib.hardware import HardwareInfo
 
 # Determine backend from environment for model name attribute
 import os
@@ -46,9 +45,9 @@ _test_backend = os.environ.get('TEST_BACKEND', 'ollama').lower()
 model_name_attr = "docker_name" if _test_backend == "docker" else "ollama_name"
 
 
-def create_hw_info(ram_gb: float, tier: HardwareTier) -> HardwareInfo:
+def create_hw_info(ram_gb: float) -> HardwareInfo:
     """Create a real HardwareInfo object for testing."""
-    return HardwareInfo(ram_gb=ram_gb, tier=tier)
+    return HardwareInfo(ram_gb=ram_gb)
 
 
 class TestModelRole:
@@ -103,106 +102,6 @@ class TestRecommendedModel:
         assert model.fallback_name == "fallback:latest"
 
 
-class TestModelRecommendation:
-    """Tests for ModelRecommendation dataclass."""
-    
-    def test_all_models_returns_list(self):
-        """Test all_models() returns all non-None models."""
-        rec = ModelRecommendation(
-            primary=RecommendedModel("P", "p:v", 5.0, ModelRole.CHAT, ["chat"]),
-            autocomplete=RecommendedModel("A", "a:v", 2.0, ModelRole.AUTOCOMPLETE, ["autocomplete"]),
-            embeddings=RecommendedModel("E", "e:v", 0.3, ModelRole.EMBED, ["embed"]),
-        )
-        
-        models = rec.all_models()
-        assert len(models) == 3
-    
-    def test_all_models_excludes_none(self):
-        """Test all_models() excludes None models."""
-        rec = ModelRecommendation(
-            primary=RecommendedModel("P", "p:v", 5.0, ModelRole.CHAT, ["chat"]),
-            autocomplete=None,
-            embeddings=RecommendedModel("E", "e:v", 0.3, ModelRole.EMBED, ["embed"]),
-        )
-        
-        models = rec.all_models()
-        assert len(models) == 2
-    
-    def test_total_ram(self):
-        """Test total_ram method calculates correctly."""
-        rec = ModelRecommendation(
-            primary=RecommendedModel("P", "p:v", 5.0, ModelRole.CHAT, ["chat"]),
-            autocomplete=RecommendedModel("A", "a:v", 2.0, ModelRole.AUTOCOMPLETE, ["autocomplete"]),
-            embeddings=RecommendedModel("E", "e:v", 0.3, ModelRole.EMBED, ["embed"]),
-        )
-        
-        assert rec.total_ram() == pytest.approx(7.3, abs=0.01)
-    
-    def test_total_ram_primary_only(self):
-        """Test total_ram with only primary model."""
-        rec = ModelRecommendation(
-            primary=RecommendedModel("P", "p:v", 5.0, ModelRole.CHAT, ["chat"]),
-            autocomplete=None,
-            embeddings=None,
-        )
-        
-        assert rec.total_ram() == pytest.approx(5.0, abs=0.01)
-
-
-class TestGetUsableRam:
-    """Tests for get_usable_ram function."""
-    
-    def test_tier_c_reservation(self, backend_type):
-        """Test Tier C reservation."""
-        hw_info = create_hw_info(16, HardwareTier.C)
-        
-        usable = get_usable_ram(hw_info)
-        if backend_type == "docker":
-            # Docker uses fixed 8GB reservation
-            expected = 16 - 8.0  # 8.0 GB
-        else:
-            # Ollama uses 40% reservation (60% usable)
-            expected = 16 * 0.60  # 9.6 GB
-        assert usable == pytest.approx(expected, abs=0.1)
-    
-    def test_tier_b_reservation(self, backend_type):
-        """Test Tier B reservation."""
-        hw_info = create_hw_info(24, HardwareTier.B)
-        
-        usable = get_usable_ram(hw_info)
-        if backend_type == "docker":
-            # Docker uses fixed 8GB reservation
-            expected = 24 - 8.0  # 16.0 GB
-        else:
-            # Ollama uses 35% reservation (65% usable)
-            expected = 24 * 0.65  # 15.6 GB
-        assert usable == pytest.approx(expected, abs=0.1)
-    
-    def test_tier_a_reservation(self, backend_type):
-        """Test Tier A reservation."""
-        hw_info = create_hw_info(32, HardwareTier.A)
-        
-        usable = get_usable_ram(hw_info)
-        if backend_type == "docker":
-            # Docker uses fixed 8GB reservation
-            expected = 32 - 8.0  # 24.0 GB
-        else:
-            # Ollama uses 30% reservation (70% usable)
-            expected = 32 * 0.70  # 22.4 GB
-        assert usable == pytest.approx(expected, abs=0.1)
-    
-    def test_tier_s_reservation(self, backend_type):
-        """Test Tier S reservation."""
-        hw_info = create_hw_info(64, HardwareTier.S)
-        
-        usable = get_usable_ram(hw_info)
-        if backend_type == "docker":
-            # Docker uses fixed 8GB reservation
-            expected = 64 - 8.0  # 56.0 GB
-        else:
-            # Ollama uses 30% reservation (70% usable)
-            expected = 64 * 0.70  # 44.8 GB
-        assert usable == pytest.approx(expected, abs=0.1)
 
 
 class TestEmbedModel:
@@ -224,171 +123,39 @@ class TestEmbedModel:
         assert EMBED_MODEL.ram_gb < 1.0
 
 
-class TestAutocompleteModels:
-    """Tests for AUTOCOMPLETE_MODELS dictionary."""
+class TestSelectModels:
+    """Tests for select_models function - returns fixed models for all users."""
     
-    def test_all_tiers_have_models(self):
-        """Test all hardware tiers have autocomplete models."""
-        for tier in [HardwareTier.C, HardwareTier.B, HardwareTier.A, HardwareTier.S]:
-            assert tier in AUTOCOMPLETE_MODELS
-            model = AUTOCOMPLETE_MODELS[tier]
-            assert model is not None
+    def test_returns_fixed_models(self, backend_type):
+        """Test select_models returns PRIMARY_MODEL and EMBED_MODEL."""
+        hw_info = create_hw_info(32.0)
+        hw_info.has_apple_silicon = True
+        hw_info.apple_chip_model = "M4"
+        
+        models = select_models(hw_info)
+        
+        assert len(models) == 2
+        assert models[0] == PRIMARY_MODEL
+        assert models[1] == EMBED_MODEL
     
-    def test_autocomplete_models_have_correct_role(self):
-        """Test autocomplete models have autocomplete role."""
-        for tier, model in AUTOCOMPLETE_MODELS.items():
-            assert model.role == ModelRole.AUTOCOMPLETE
-            assert "autocomplete" in model.roles
-
-
-class TestPrimaryModels:
-    """Tests for PRIMARY_MODELS dictionary."""
+    def test_primary_model_is_gpt_oss(self, backend_type):
+        """Test primary model is GPT-OSS 20B."""
+        hw_info = create_hw_info(32.0)
+        hw_info.has_apple_silicon = True
+        hw_info.apple_chip_model = "M4"
+        
+        models = select_models(hw_info)
+        
+        assert "gpt-oss" in models[0].name.lower() or "gpt-oss" in getattr(models[0], model_name_attr).lower()
+        assert models[0].ram_gb == 16.0
     
-    def test_all_tiers_have_models(self):
-        """Test all hardware tiers have primary models."""
-        for tier in [HardwareTier.C, HardwareTier.B, HardwareTier.A, HardwareTier.S]:
-            assert tier in PRIMARY_MODELS
-            assert len(PRIMARY_MODELS[tier]) > 0
-    
-    def test_primary_models_have_chat_role(self):
-        """Test primary models have chat role."""
-        for tier, models in PRIMARY_MODELS.items():
-            for model in models:
-                assert model.role == ModelRole.CHAT
-                assert "chat" in model.roles
-
-
-class TestGenerateBestRecommendation:
-    """Tests for generate_best_recommendation function."""
-    
-    def test_returns_recommendation(self, generate_best_recommendation):
-        """Test function returns ModelRecommendation."""
-        hw_info = create_hw_info(24, HardwareTier.B)
+    def test_embed_model_is_nomic(self, backend_type):
+        """Test embedding model is nomic-embed-text."""
+        hw_info = create_hw_info(32.0)
+        hw_info.has_apple_silicon = True
+        hw_info.apple_chip_model = "M4"
         
-        rec = generate_best_recommendation(hw_info)
+        models = select_models(hw_info)
         
-        assert isinstance(rec, ModelRecommendation)
-    
-    def test_includes_primary_model(self, generate_best_recommendation):
-        """Test recommendation includes primary model."""
-        hw_info = create_hw_info(32, HardwareTier.A)
-        
-        rec = generate_best_recommendation(hw_info)
-        
-        assert rec.primary is not None
-        assert rec.primary.role == ModelRole.CHAT
-    
-    def test_includes_embed_model(self, generate_best_recommendation):
-        """Test recommendation includes embedding model."""
-        hw_info = create_hw_info(32, HardwareTier.A)
-        
-        rec = generate_best_recommendation(hw_info)
-        
-        assert rec.embeddings is not None
-        assert rec.embeddings.role == ModelRole.EMBED
-    
-    def test_fits_within_ram_budget(self, generate_best_recommendation):
-        """Test total RAM fits within budget."""
-        hw_info = create_hw_info(16, HardwareTier.C)
-        
-        rec = generate_best_recommendation(hw_info)
-        usable = get_usable_ram(hw_info)
-        
-        # Total should fit within usable RAM
-        assert rec.total_ram() <= usable
-
-
-class TestGenerateMultiModelRecommendation:
-    """Tests for generate_multi_model_recommendation function."""
-    
-    def test_returns_recommendation_or_none(self, backend_type):
-        """Test returns ModelRecommendation or None."""
-        if generate_multi_model_recommendation is None:
-            pytest.skip("generate_multi_model_recommendation not available in Docker backend")
-        hw_info = create_hw_info(24, HardwareTier.B)
-        
-        result = generate_multi_model_recommendation(hw_info)
-        
-        assert result is None or isinstance(result, ModelRecommendation)
-
-
-class TestGenerateBestRecommendationConservative:
-    """Tests for generate_best_recommendation function with conservative RAM."""
-    
-    def test_returns_recommendation_for_tier_c(self, generate_best_recommendation):
-        """Test always returns a recommendation for Tier C."""
-        hw_info = create_hw_info(16, HardwareTier.C)
-        
-        rec = generate_best_recommendation(hw_info)
-        
-        assert isinstance(rec, ModelRecommendation)
-        assert rec.primary is not None
-    
-    def test_best_fits_limited_ram(self, generate_best_recommendation):
-        """Test best recommendation fits in limited RAM."""
-        hw_info = create_hw_info(16, HardwareTier.C)
-        
-        rec = generate_best_recommendation(hw_info)
-        usable = get_usable_ram(hw_info)
-        
-        # Should fit within usable RAM
-        assert rec.total_ram() <= usable
-
-
-class TestPrimaryModelsCatalog:
-    """Tests for PRIMARY_MODELS catalog."""
-    
-    def test_primary_models_exist_for_tier(self):
-        """Test that primary models exist for each tier."""
-        hw_info = create_hw_info(32, HardwareTier.A)
-        
-        # Check that PRIMARY_MODELS has models for this tier
-        assert HardwareTier.A in PRIMARY_MODELS
-        assert len(PRIMARY_MODELS[HardwareTier.A]) > 0
-    
-    def test_primary_models_have_correct_role(self, backend_type, model_name_attr):
-        """Test that primary models have correct role and attributes."""
-        hw_info = create_hw_info(24, HardwareTier.B)
-        
-        current = PRIMARY_MODELS[HardwareTier.B][0]
-        
-        # Current model should have correct role
-        assert current.role == ModelRole.CHAT
-        # Should have backend-appropriate name attribute
-        assert hasattr(current, model_name_attr)
-        assert getattr(current, model_name_attr) is not None
-    
-    def test_primary_models_fit_ram(self):
-        """Test primary models fit within RAM budget for their tier."""
-        hw_info = create_hw_info(16, HardwareTier.C)
-        usable = get_usable_ram(hw_info)
-        
-        # All primary models for this tier should fit
-        for model in PRIMARY_MODELS[HardwareTier.C]:
-            assert model.ram_gb <= usable * 1.1  # Allow 10% margin for model loading overhead
-
-
-class TestModelRamSanity:
-    """Sanity tests for model RAM values across all catalogs."""
-    
-    def test_embed_model_smallest(self):
-        """Test embedding model is smallest."""
-        # Embedding should be much smaller than chat models
-        for tier, models in PRIMARY_MODELS.items():
-            for model in models:
-                assert EMBED_MODEL.ram_gb < model.ram_gb
-    
-    def test_autocomplete_smaller_than_primary(self):
-        """Test autocomplete models are generally smaller than primary."""
-        for tier in [HardwareTier.C, HardwareTier.B]:
-            auto = AUTOCOMPLETE_MODELS[tier]  # Single model, not list
-            primary = PRIMARY_MODELS[tier][0]
-            # Autocomplete should be smaller or equal
-            assert auto.ram_gb <= primary.ram_gb + 1.0
-    
-    def test_higher_tiers_have_larger_models(self):
-        """Test higher tiers have access to larger models."""
-        tier_c_max = max(m.ram_gb for m in PRIMARY_MODELS[HardwareTier.C])
-        tier_s_max = max(m.ram_gb for m in PRIMARY_MODELS[HardwareTier.S])
-        
-        assert tier_s_max >= tier_c_max
+        assert "nomic" in models[1].name.lower() or "nomic" in getattr(models[1], model_name_attr).lower()
+        assert models[1].ram_gb == 0.3

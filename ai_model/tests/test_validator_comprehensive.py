@@ -19,7 +19,7 @@ from lib import validator
 from lib.validator import (
     PullErrorType, classify_pull_error, get_troubleshooting_steps,
     PullResult, SetupResult,
-    get_installed_models, verify_model_exists, get_fallback_model,
+    get_installed_models, verify_model_exists,
     pull_models_with_tracking, display_setup_result, validate_pre_install
 )
 # test_ollama_connectivity may not exist in Docker backend
@@ -294,43 +294,6 @@ class TestVerifyModelExists:
         result = verify_model_exists("nonexistent:model")
         
         assert result is False
-
-
-class TestGetFallbackModel:
-    """Tests for get_fallback_model function."""
-    
-    def test_model_with_fallback(self):
-        """Test model with fallback_name defined."""
-        model_kwargs = {
-            "name": "Primary",
-            "ram_gb": 5.0,
-            "role": ModelRole.CHAT,
-            "roles": ["chat"],
-            "fallback_name": "fallback:v"
-        }
-        model_kwargs[model_name_attr] = "primary:v"
-        model = RecommendedModel(**model_kwargs)
-        
-        result = get_fallback_model(model, HardwareTier.C)
-        
-        if result is not None:
-            assert getattr(result, model_name_attr) == "fallback:v"
-    
-    def test_model_without_fallback(self):
-        """Test model without fallback_name."""
-        model_kwargs = {
-            "name": "Primary",
-            "ram_gb": 5.0,
-            "role": ModelRole.CHAT,
-            "roles": ["chat"]
-        }
-        model_kwargs[model_name_attr] = "primary:v"
-        model = RecommendedModel(**model_kwargs)
-        
-        result = get_fallback_model(model, HardwareTier.C)
-        
-        # May return None or a default fallback
-        assert result is None or isinstance(result, RecommendedModel)
 
 
 class TestRunPreflightCheck:

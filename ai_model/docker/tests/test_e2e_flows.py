@@ -173,51 +173,6 @@ class TestDockerModelRunnerNotEnabled:
 
 
 # =============================================================================
-# E2E Scenario 4: Model Pull Failure with Fallback
-# =============================================================================
-
-class TestModelPullFailureWithFallback:
-    """E2E test: Primary model fails, fallback succeeds."""
-    
-    @patch('lib.validator.is_restricted_model_name', return_value=False)
-    @patch('lib.validator._pull_model')
-    @patch('lib.validator.verify_model_exists')
-    @patch('lib.ui.print_info')
-    @patch('lib.ui.print_success')
-    @patch('lib.ui.print_warning')
-    @patch('lib.ui.print_error')
-    @patch('time.sleep')
-    def test_fallback_success(
-        self, mock_sleep, mock_error, mock_warning, mock_success,
-        mock_info, mock_verify, mock_pull, mock_restricted
-    ):
-        """Test that fallback model is used when primary fails."""
-        # Primary fails, fallback succeeds
-        mock_pull.side_effect = [
-            (False, "Network error"),  # Primary fails
-            (True, ""),  # Fallback succeeds
-        ]
-        mock_verify.return_value = True
-        
-        model = RecommendedModel(
-            name="Primary",
-            docker_name="ai/granite-code:7b",  # Use non-restricted model name
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat"],
-            description="Test",
-            fallback_name="ai/codellama:7b"
-        )
-        
-        result = validator.pull_model_with_verification(
-            model, HardwareTier.C, show_progress=False
-        )
-        
-        # Primary failed but fallback succeeded
-        assert result.success is True or mock_pull.call_count >= 2
-
-
-# =============================================================================
 # E2E Scenario 5: All Models Fail
 # =============================================================================
 
@@ -527,13 +482,13 @@ class TestModelSelectionCustomization:
         from lib.model_selector import PRIMARY_MODELS
         
         hw_info = mock_complete_environment["hardware"]
-        alternatives = PRIMARY_MODELS.get(hw_info.tier, [])
+        models = PRIMARY_MODELS.get(hw_info.tier, [])
         
-        assert len(alternatives) > 0, "Should have models for the tier"
-        for alt in alternatives:
-            assert isinstance(alt, RecommendedModel)
+        assert len(models) > 0, "Should have models for the tier"
+        for model in models:
+            assert isinstance(model, RecommendedModel)
             # Primary models should have chat role
-            assert "chat" in alt.roles or alt.role == ModelRole.CHAT
+            assert "chat" in model.roles or model.role == ModelRole.CHAT
 
 
 # =============================================================================

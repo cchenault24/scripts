@@ -107,7 +107,10 @@ def setup_script_name(backend_type):
 # =============================================================================
 
 def _create_hardware_info(ram_gb, tier, backend_type, **kwargs):
-    """Helper to create HardwareInfo with backend-specific fields."""
+    """Helper to create HardwareInfo with backend-specific fields.
+    
+    Note: tier parameter is ignored (kept for backward compatibility with existing tests).
+    """
     # Import hardware from the correct backend
     if backend_type == "ollama":
         if _ollama_path not in sys.path:
@@ -135,10 +138,7 @@ def _create_hardware_info(ram_gb, tier, backend_type, **kwargs):
         "has_nvidia": kwargs.get("has_nvidia", False),
         "has_apple_silicon": kwargs.get("has_apple_silicon", True),
         "apple_chip_model": kwargs.get("apple_chip_model", "M4"),
-        "tier": tier,
-        "usable_ram_gb": kwargs.get("usable_ram_gb", ram_gb * (0.6 if tier == hardware.HardwareTier.C else (
-            0.65 if tier == hardware.HardwareTier.B else 0.7
-        ))),
+        "usable_ram_gb": kwargs.get("usable_ram_gb", ram_gb),
     }
     
     # Add backend-specific fields
@@ -159,41 +159,16 @@ def _create_hardware_info(ram_gb, tier, backend_type, **kwargs):
 
 
 @pytest.fixture
-def mock_hardware_tier_c(backend_type):
-    """16GB RAM - Tier C (smallest supported tier)."""
-    # Import hardware from correct backend
-    if backend_type == "ollama":
-        if _ollama_path not in sys.path:
-            sys.path.insert(0, _ollama_path)
-        from lib import hardware
-    else:
-        if _docker_path not in sys.path:
-            sys.path.insert(0, _docker_path)
-        from lib import hardware
-    return _create_hardware_info(
-        16.0,
-        hardware.HardwareTier.C,
-        backend_type,
-        usable_ram_gb=9.6,  # 16 * 0.6 = 9.6GB usable
-    )
+def mock_hardware_16gb(backend_type):
+    """16GB RAM - minimum supported."""
+    return _create_hardware_info(16.0, None, backend_type, usable_ram_gb=16.0)
 
 
 @pytest.fixture
-def mock_hardware_tier_b(backend_type):
-    """24GB RAM - Tier B."""
-    # Import hardware from correct backend
-    if backend_type == "ollama":
-        if _ollama_path not in sys.path:
-            sys.path.insert(0, _ollama_path)
-        from lib import hardware
-    else:
-        if _docker_path not in sys.path:
-            sys.path.insert(0, _docker_path)
-        from lib import hardware
+def mock_hardware_24gb(backend_type):
+    """24GB RAM."""
     return _create_hardware_info(
-        24.0,
-        hardware.HardwareTier.B,
-        backend_type,
+        24.0, None, backend_type,
         cpu_brand="Apple M2 Pro",
         cpu_cores=12,
         cpu_perf_cores=8,
@@ -201,26 +176,15 @@ def mock_hardware_tier_b(backend_type):
         gpu_name="Apple M2 Pro",
         gpu_cores=19,
         apple_chip_model="M2 Pro",
-        usable_ram_gb=15.6,  # 24 * 0.65 = 15.6GB usable
+        usable_ram_gb=24.0,
     )
 
 
 @pytest.fixture
-def mock_hardware_tier_a(backend_type):
-    """32GB RAM - Tier A."""
-    # Import hardware from correct backend
-    if backend_type == "ollama":
-        if _ollama_path not in sys.path:
-            sys.path.insert(0, _ollama_path)
-        from lib import hardware
-    else:
-        if _docker_path not in sys.path:
-            sys.path.insert(0, _docker_path)
-        from lib import hardware
+def mock_hardware_32gb(backend_type):
+    """32GB RAM."""
     return _create_hardware_info(
-        32.0,
-        hardware.HardwareTier.A,
-        backend_type,
+        32.0, None, backend_type,
         cpu_brand="Apple M3 Pro",
         cpu_cores=12,
         cpu_perf_cores=8,
@@ -228,26 +192,15 @@ def mock_hardware_tier_a(backend_type):
         gpu_name="Apple M3 Pro",
         gpu_cores=18,
         apple_chip_model="M3 Pro",
-        usable_ram_gb=22.4,  # 32 * 0.70 = 22.4GB usable
+        usable_ram_gb=32.0,
     )
 
 
 @pytest.fixture
-def mock_hardware_tier_s(backend_type):
-    """64GB RAM - Tier S (high-end)."""
-    # Import hardware from correct backend
-    if backend_type == "ollama":
-        if _ollama_path not in sys.path:
-            sys.path.insert(0, _ollama_path)
-        from lib import hardware
-    else:
-        if _docker_path not in sys.path:
-            sys.path.insert(0, _docker_path)
-        from lib import hardware
+def mock_hardware_64gb(backend_type):
+    """64GB RAM."""
     return _create_hardware_info(
-        64.0,
-        hardware.HardwareTier.S,
-        backend_type,
+        64.0, None, backend_type,
         cpu_brand="Apple M3 Max",
         cpu_cores=16,
         cpu_perf_cores=12,
@@ -255,7 +208,7 @@ def mock_hardware_tier_s(backend_type):
         gpu_name="Apple M3 Max",
         gpu_cores=40,
         apple_chip_model="M3 Max",
-        usable_ram_gb=44.8,  # 64 * 0.70 = 44.8GB usable
+        usable_ram_gb=64.0,
     )
 
 
@@ -273,7 +226,7 @@ def mock_hardware_linux(backend_type):
         from lib import hardware
     return _create_hardware_info(
         32.0,
-        hardware.HardwareTier.A,
+        None,
         backend_type,
         os_name="Linux",
         os_version="6.1.0",
@@ -537,79 +490,12 @@ def mock_run_command(backend_type):
 # Model Fixtures (Backend-Aware)
 # =============================================================================
 
-def _generate_best_recommendation(hw_info, backend_type):
-    """
-    Helper function to generate ModelRecommendation for tests.
-    Replaces deprecated generate_best_recommendation function.
-    """
-    # Import from correct backend
-    if backend_type == "ollama":
-        if _ollama_path not in sys.path:
-            sys.path.insert(0, _ollama_path)
-        from lib import hardware
-        from lib.model_selector import (
-            ModelRecommendation, EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS, get_usable_ram
-        )
-    else:
-        if _docker_path not in sys.path:
-            sys.path.insert(0, _docker_path)
-        from lib import hardware
-        from lib.model_selector import (
-            ModelRecommendation, EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS, get_usable_ram
-        )
-    
-    tier = hw_info.tier
-    usable_ram = get_usable_ram(hw_info)
-    
-    # Target usage: 70% of usable RAM for safety buffer
-    target_ram = usable_ram * 0.70
-    
-    # Get embeddings (always included, ~0.3GB)
-    embeddings = EMBED_MODEL
-    remaining_ram = target_ram - embeddings.ram_gb
-    
-    # Get autocomplete (always included)
-    autocomplete = AUTOCOMPLETE_MODELS.get(tier, AUTOCOMPLETE_MODELS[hardware.HardwareTier.C])
-    remaining_ram -= autocomplete.ram_gb
-    
-    # Select best primary model that fits in remaining RAM
-    primary = None
-    primary_options = PRIMARY_MODELS.get(tier, PRIMARY_MODELS[hardware.HardwareTier.C])
-    
-    for model in primary_options:
-        if model.ram_gb <= remaining_ram:
-            primary = model
-            break
-    
-    # Fallback: use the smallest primary model available
-    if primary is None:
-        primary = primary_options[-1] if primary_options else autocomplete
-    
-    # Don't include autocomplete if it's the same model as primary
-    model_name_attr = "ollama_name" if backend_type == "ollama" else "docker_name"
-    include_autocomplete = getattr(autocomplete, model_name_attr) != getattr(primary, model_name_attr)
-    
-    return ModelRecommendation(
-        primary=primary,
-        autocomplete=autocomplete if include_autocomplete else None,
-        embeddings=embeddings
-    )
-
-
-@pytest.fixture
-def generate_best_recommendation(backend_type):
-    """
-    Fixture that provides generate_best_recommendation functionality for tests.
-    Replaces deprecated function.
-    """
-    def _generate(hw_info):
-        return _generate_best_recommendation(hw_info, backend_type)
-    return _generate
+# Recommendation functions removed - we install fixed models for all users
 
 
 @pytest.fixture
 def mock_recommended_models(backend_type):
-    """Mock model recommendation result."""
+    """Mock model selection result - returns list of fixed models."""
     # Import from correct backend
     if backend_type == "ollama":
         if _ollama_path not in sys.path:
@@ -617,33 +503,11 @@ def mock_recommended_models(backend_type):
     else:
         if _docker_path not in sys.path:
             sys.path.insert(0, _docker_path)
-    from lib.model_selector import RecommendedModel, ModelRole, ModelRecommendation
+    from lib.model_selector import RecommendedModel, ModelRole, PRIMARY_MODEL, EMBED_MODEL
+    from lib.hardware import HardwareInfo
     
-    if backend_type == "ollama":
-        primary = RecommendedModel(
-            name="Qwen2.5 Coder 7B",
-            ollama_name="qwen2.5-coder:7b",
-            ram_gb=5.0,
-            role=ModelRole.CHAT,
-            roles=["chat", "edit", "autocomplete"],
-            description="Primary coding model"
-        )
-        
-        autocomplete = RecommendedModel(
-            name="StarCoder2 3B",
-            ollama_name="starcoder2:3b",
-            ram_gb=2.0,
-            role=ModelRole.AUTOCOMPLETE,
-            roles=["autocomplete"],
-            description="Fast autocomplete"
-        )
-        
-        embed = RecommendedModel(
-            name="Nomic Embed Text",
-            ollama_name="nomic-embed-text",
-            ram_gb=0.3,
-            role=ModelRole.EMBED,
-            roles=["embed"],
+    # Return fixed models (same as select_models would return)
+    return [PRIMARY_MODEL, EMBED_MODEL]
             description="Embedding model"
         )
     else:  # docker

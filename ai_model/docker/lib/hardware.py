@@ -1,27 +1,17 @@
 """
 Hardware detection and classification.
 
-Detects system hardware, classifies into tiers, and provides hardware information.
+Detects system hardware and provides hardware information.
 """
 
 import json
 import platform
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import ui
 from . import utils
-
-
-class HardwareTier(Enum):
-    """Hardware tier classification based on RAM."""
-    S = "S"  # >64GB RAM
-    A = "A"  # 32-64GB RAM
-    B = "B"  # >24-32GB RAM
-    C = "C"  # 16-24GB RAM
-    D = "D"  # <16GB RAM (unsupported - minimum 16GB required)
 
 
 @dataclass
@@ -49,22 +39,7 @@ class HardwareInfo:
     available_api_models: List[str] = field(default_factory=list)  # Models available via API
     available_docker_hub_models: List[str] = field(default_factory=list)  # Models available on Docker Hub
     discovered_model_tags: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # Cached model tag discovery results
-    tier: HardwareTier = HardwareTier.C
     usable_ram_gb: float = 0.0  # Calculated usable RAM after OS overhead
-    
-    def get_tier_label(self) -> str:
-        """Get human-readable tier label with tier-based reservation info."""
-        usable = self.get_estimated_model_memory()
-        reservation = int(self.get_tier_ram_reservation() * 100)
-        usable_percent = 100 - reservation
-        labels = {
-            HardwareTier.S: f"Tier S (>64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
-            HardwareTier.A: f"Tier A (32-64GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
-            HardwareTier.B: f"Tier B (24-32GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
-            HardwareTier.C: f"Tier C (16-24GB RAM) - {self.ram_gb:.1f}GB total, ~{usable:.1f}GB usable ({usable_percent}%)",
-            HardwareTier.D: f"Tier D (<16GB RAM) - {self.ram_gb:.1f}GB total (UNSUPPORTED - minimum 16GB required)",
-        }
-        return labels.get(self.tier, "Unknown")
     
     def get_apple_silicon_info(self) -> str:
         """Get Apple Silicon specific information."""
@@ -80,46 +55,11 @@ class HardwareInfo:
         
         return " | ".join(info_parts)
     
-    def get_tier_ram_reservation(self) -> float:
-        """
-        Get tier-based RAM reservation percentage.
-        
-        Variable reservation based on system RAM:
-        - Tier C (16-24GB): Reserve 40% for OS/apps (limited RAM, need more buffer)
-        - Tier B (24-32GB): Reserve 35% for OS/apps
-        - Tier A/S (32GB+): Reserve 30% for OS/apps (more headroom)
-        
-        Returns:
-            Reservation percentage as a float (e.g., 0.40 for 40%)
-        """
-        reservations = {
-            HardwareTier.S: 0.30,  # 30% reserved, 70% for models
-            HardwareTier.A: 0.30,  # 30% reserved, 70% for models
-            HardwareTier.B: 0.35,  # 35% reserved, 65% for models
-            HardwareTier.C: 0.40,  # 40% reserved, 60% for models
-            HardwareTier.D: 0.50,  # 50% reserved (unsupported tier)
-        }
-        return reservations.get(self.tier, 0.40)
-    
-    def calculate_os_overhead(self) -> float:
-        """
-        Calculate OS overhead based on tier-based RAM reservation.
-        
-        Uses variable reservation:
-        - Tier C (16-24GB): 40% for OS/apps
-        - Tier B (24-32GB): 35% for OS/apps
-        - Tier A/S (32GB+): 30% for OS/apps
-        """
-        return self.ram_gb * self.get_tier_ram_reservation()
-    
     def get_estimated_model_memory(self) -> float:
         """
         Get estimated memory available for models.
         
-        Uses tier-based RAM reservation:
-        - Tier C (16-24GB): 60% for models (40% reserved)
-        - Tier B (24-32GB): 65% for models (35% reserved)
-        - Tier A/S (32GB+): 70% for models (30% reserved)
+        For Docker setups, Docker Desktop manually reserves 8GB, so we use: total_ram - 8GB.
         
         Breakdown of overhead:
         - macOS system: 4-6GB
@@ -133,9 +73,8 @@ class HardwareInfo:
         if self.usable_ram_gb > 0:
             return self.usable_ram_gb
         
-        # Use tier-based reservation
-        reserved_percent = self.get_tier_ram_reservation()
-        usable_ram = self.ram_gb * (1 - reserved_percent)
+        # For Docker setups, Docker Desktop manually reserves 8GB
+        usable_ram = max(0, self.ram_gb - 8.0)
         
         # For discrete GPU systems, use VRAM if available and larger
         if not self.has_apple_silicon and self.gpu_vram_gb > 0:
@@ -223,8 +162,7 @@ def get_apple_silicon_usable_ram(hw_info: HardwareInfo) -> Optional[float]:
     """
     Get usable RAM for Apple Silicon systems.
     
-    Validates system is Apple Silicon and calculates actual usable RAM
-    using tier-based reservation (40%/35%/30% based on RAM amount).
+    For Docker setups, Docker Desktop manually reserves 8GB, so we use: total_ram - 8GB.
     
     Args:
         hw_info: Hardware information
@@ -376,7 +314,7 @@ def validate_apple_silicon_support(hw_info: HardwareInfo) -> Tuple[bool, Optiona
 
 
 def detect_hardware() -> HardwareInfo:
-    """Detect system hardware and classify into tier."""
+    """Detect system hardware."""
     ui.print_subheader("Detecting Hardware")
     
     info = HardwareInfo()
@@ -521,21 +459,7 @@ def detect_hardware() -> HardwareInfo:
             ui.print_error(error_msg or "This setup only supports Apple Silicon Macs")
             raise SystemExit("Hardware requirements not met: Apple Silicon required")
     
-    # Classify tier based on total RAM (MUST happen before usable_ram_gb calculation)
-    # Tier system: S (>64GB), A (32-64GB), B (24-32GB), C (16-24GB), D (<16GB - unsupported)
-    if info.ram_gb > 64:
-        info.tier = HardwareTier.S
-    elif info.ram_gb >= 32:
-        info.tier = HardwareTier.A
-    elif info.ram_gb > 24:
-        info.tier = HardwareTier.B
-    elif info.ram_gb >= 16:
-        info.tier = HardwareTier.C
-    else:
-        # This should never be reached due to validation above, but kept for safety
-        info.tier = HardwareTier.D
-    
-    # Calculate usable RAM using tier-based reservation (after tier classification)
+    # Calculate usable RAM (Docker Desktop reserves 8GB)
     info.usable_ram_gb = info.get_estimated_model_memory()
     
     # Print detected hardware
@@ -567,7 +491,6 @@ def detect_hardware() -> HardwareInfo:
         ui.print_info("GPU: None detected (CPU inference only)")
     
     print()
-    ui.print_success(f"Hardware Tier: {info.get_tier_label()}")
     
     if info.has_apple_silicon:
         ui.print_success(f"Apple Silicon: {info.get_apple_silicon_info()}")

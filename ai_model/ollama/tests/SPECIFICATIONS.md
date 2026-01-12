@@ -123,25 +123,6 @@ Tier S (64GB → 44.8GB usable):
   - Can include 22B primary model
 ```
 
-### 2.2 Fallback Model Selection
-
-**Function:** `validator.get_fallback_model(model, tier)`
-
-**Specification:**
-- If model has `fallback_name`, use that model first
-- Fallback must have same role as original
-- Fallback must also fit RAM budget
-- Returns `None` if no valid fallback exists
-
-**Test Cases:**
-
-```text
-qwen2.5-coder:7b fails → Try fallback_name (codellama:7b) ✓
-Fallback succeeds → Return fallback model ✓
-Fallback also fails → Return None ✓
-Model has no fallback_name → Use role-based fallback ✓
-```
-
 ### 2.3 No Duplicate Models
 
 **Function:** `generate_best_recommendation(hw_info)`

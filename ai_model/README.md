@@ -206,13 +206,12 @@ The Docker script offers presets based on your hardware tier:
 
 Choose "Custom" preset to manually select models based on your needs.
 
-### Smart Recommendations (Ollama Setup)
+### Model Selection (Ollama Setup)
 
-The Ollama script uses intelligent hardware-based recommendations:
-- **Automatic selection**: Best model for your Mac model + RAM configuration
-- **Simplified setup**: One primary model + embedding model
-- **Hardware-aware**: Automatically selects Llama 3.1 8B or Llama 3.3 70B based on your hardware
-- **No customization needed**: The script selects the optimal model for your system
+The Ollama script installs the same two models for all users:
+- **Fixed models**: GPT-OSS 20B (primary) + Nomic Embed Text (embedding)
+- **Simplified setup**: No model selection needed - same models for everyone
+- **Consistent experience**: All users get the same high-quality models
 
 Example recommendation for M3 Max 36GB:
 
@@ -220,10 +219,10 @@ Example recommendation for M3 Max 36GB:
 ┌─────────────────────────────────────────────────────────┐
 │  RECOMMENDED SETUP FOR YOUR SYSTEM                       │
 │                                                          │
-│  Primary (Chat/Edit):  llama3.1:8b            ~4.58 GB   │
+│  Primary (Chat/Edit):  gpt-oss:20b            ~16.0 GB   │
 │  Embeddings:           nomic-embed-text        ~0.3 GB    │
 │                                                          │
-│  Total RAM usage: ~4.88 GB                               │
+│  Total RAM usage: ~16.3 GB                               │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -233,10 +232,10 @@ Example recommendation for M4 Pro 48GB:
 ┌─────────────────────────────────────────────────────────┐
 │  RECOMMENDED SETUP FOR YOUR SYSTEM                       │
 │                                                          │
-│  Primary (Chat/Edit):  llama3.3:70b           ~37.22 GB  │
+│  Primary (Chat/Edit):  gpt-oss:20b            ~16.0 GB   │
 │  Embeddings:           nomic-embed-text        ~0.3 GB    │
 │                                                          │
-│  Total RAM usage: ~37.52 GB                              │
+│  Total RAM usage: ~16.3 GB                              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -271,13 +270,13 @@ python3 ollama/ollama-llm-setup.py
 10. Global rules generation
 11. Next steps display
 
-**Interactive Flow (Ollama Setup - Smart Recommendations):**
+**Interactive Flow (Ollama Setup):**
 1. Hardware detection (Mac model + RAM)
 2. IDE auto-detection (VS Code, Cursor, IntelliJ IDEA)
 3. Ollama service verification
 4. API check
-5. **Smart recommendation display** - shows optimal model for your hardware (Llama 3.1 8B or Llama 3.3 70B)
-6. **Accept recommendation** - proceed with the selected model
+5. **Model selection** - displays the two fixed models (GPT-OSS 20B + embedding)
+6. **Confirm installation** - proceed with the models
 7. Pre-installation validation (RAM, network, API)
 8. Model pulling with verification and automatic fallback
 9. Setup result display (success/failures with retry options)
@@ -472,16 +471,13 @@ Hardware detection and classification:
 
 #### `lib/model_selector.py` (Ollama Setup)
 
-Smart model recommendation engine:
+Model selection for fixed model installation:
 - **ModelRole**: Enum for model roles (CHAT, EDIT, EMBED)
-- **RecommendedModel**: Dataclass for recommended models with role, RAM, and model names
-- **MODEL_FAMILIES**: Model catalog with Llama 3.1 8B and Llama 3.3 70B variants
+- **RecommendedModel**: Dataclass for model information with role, RAM, and model names
+- **PRIMARY_MODEL**: GPT-OSS 20B (primary coding model)
 - **EMBED_MODEL**: Universal embedding model (nomic-embed-text)
-- **get_apple_silicon_usable_ram()**: Calculates usable RAM for Apple Silicon Macs
-- **get_apple_silicon_performance_score()**: Calculates CPU performance score
-- **get_model_for_family()**: Selects optimal model based on Mac model + RAM
-- **explain_model_selection()**: Provides reasoning for model choice
-- **select_models_smart()**: Main entry point for smart model selection workflow
+- **get_usable_ram()**: Calculates usable RAM for models
+- **select_models()**: Returns the two fixed models for all users
 
 #### `lib/validator.py` (Ollama Setup v4.0 - NEW)
 
@@ -491,8 +487,7 @@ Robust model pulling with verification and fallback:
 - **is_ollama_api_available()**: Checks Ollama API status
 - **get_installed_models()**: Lists currently installed models
 - **verify_model_exists()**: Confirms model installation
-- **get_fallback_model()**: Finds alternatives from hardcoded catalog
-- **pull_model_with_verification()**: Pulls with verification and fallback
+- **pull_model_with_verification()**: Pulls with verification
 - **pull_models_with_tracking()**: Manages multi-model installation
 - **display_setup_result()**: Clear summary with actionable next steps
 - **retry_failed_models()**: Re-attempts failed installations
@@ -500,17 +495,13 @@ Robust model pulling with verification and fallback:
 
 #### `lib/models.py` (Docker & Ollama - Legacy)
 
-Legacy model catalog (maintained for backward compatibility):
-- **ModelInfo**: Dataclass for model metadata
-- **MODEL_CATALOG**: Comprehensive model catalog
-- **select_preset()**: Preset selection based on hardware tier
-- **select_models()**: Interactive model selection
-- **generate_portfolio_recommendation()**: Hardware-aware recommendations
-- **pull_models_docker()**: Pulls models via Docker Model Runner (Docker version)
-- **pull_models_ollama()**: Pulls models via Ollama with rich progress bars (Ollama version)
+Legacy model catalog (maintained for backward compatibility with config.py):
+- **ModelInfo**: Dataclass for model metadata (used by config.py for normalization)
+- **MODEL_CATALOG**: Static model catalog (GPT-OSS 20B and nomic-embed-text only)
 - **validate_model_selection()**: Validates RAM usage
-- **discover_ollama_model_tags()**: Discovers available model variants from Ollama API
-- **parse_tag_info()**: Parses Ollama model tags to extract size and quantization info
+- **parse_tag_info()**: Parses Docker model tags to extract size and quantization info
+
+**Note**: Most functions have been deprecated in favor of `model_selector` and `validator` modules. This module is kept only for backward compatibility with config.py normalization.
 
 #### `lib/docker.py` (Docker only)
 
@@ -575,7 +566,7 @@ Model Pulling → Configuration Generation → Global Rules Generation
 IDE Setup → Next Steps
 ```
 
-### Data Flow (Ollama Setup Smart Recommendations)
+### Data Flow (Ollama Setup)
 
 ```text
 Hardware Detection → Mac Model + RAM Identification
@@ -584,12 +575,12 @@ IDE Auto-Detection (VS Code, Cursor, IntelliJ)
     ↓
 Ollama Service Check → API Verification
     ↓
-Smart Recommendation (model_selector.get_model_for_family)
-    - Selects Llama 3.1 8B or Llama 3.3 70B based on hardware
+Model Selection (model_selector.select_models)
+    - Returns GPT-OSS 20B + Nomic Embed Text (same for all users)
     ↓
-Display Hardware Info + Selected Model
+Display Hardware Info + Models to Install
     ↓
-User Accepts Recommendation
+User Confirms Installation
     ↓
 Pre-Install Validation (validator.validate_pre_install)
     ↓
@@ -932,13 +923,13 @@ Safety Buffer (30%): 6.7 GB (for OS, apps, context)
 
 | Tier | Total RAM | Usable | Primary Model | Total Models |
 |------|-----------|--------|---------------|--------------|
-| **S** | >64GB | ~45GB | Llama 3.3 70B (39.59GB Ollama / 37.22GB Docker) | ~40GB |
-| **A** | 32-64GB | ~34GB | Llama 3.1 8B (4.58GB) | ~5GB |
-| **B** | 24-32GB | ~22GB | Llama 3.1 8B (4.58GB) | ~5GB |
-| **C** | 16-24GB | ~17GB | Llama 3.1 8B (4.58GB) | ~5GB |
+| **S** | >64GB | ~45GB | GPT-OSS 20B (16GB) | ~16GB |
+| **A** | 32-64GB | ~34GB | GPT-OSS 20B (16GB) | ~16GB |
+| **B** | 24-32GB | ~22GB | GPT-OSS 20B (16GB) | ~16GB |
+| **C** | 16-24GB | ~17GB | GPT-OSS 20B (16GB) | ~16GB |
 | **D** | <16GB | Unsupported | Minimum 16GB RAM required | - |
 
-**Note**: Model selection is based on Mac model + RAM configuration. See [Model Selection Matrix](#model-selection-matrix-source-of-truth) for exact mappings. Ultra models and high-end Max configurations (48GB+) use Llama 3.3 70B, while most other configurations use Llama 3.1 8B.
+**Note**: GPT-OSS 20B is the primary model for all configurations (16GB+ RAM). It matches o3-mini performance, runs at 1200 tokens/sec, uses only 16GB RAM, and is Apache 2.0 licensed (US-based, OpenAI, released August 2025).
 
 ### Quantization Levels (Ollama)
 
@@ -954,21 +945,21 @@ Reserved (30%):     -14.4GB
 Usable:             33.6GB
 
 Recommended Models:
-- llama3.3:70b (Ollama) / ai/llama3.3:70B-Q4_0 (Docker)  37.22GB (primary)
+- gpt-oss:20b (Ollama) / ai/gpt-oss:20B-UD-Q6_K_XL (Docker)  16.0GB (primary)
 - nomic-embed-text (Ollama) / ai/nomic-embed-text-v1.5 (Docker)  0.3GB (embeddings)
 ────────────────────────────────
-Total Models:             37.52GB
-Remaining Buffer:          -3.92GB (uses reserved buffer) ✓
+Total Models:             16.3GB
+Remaining Buffer:          17.3GB ✓
 ```
 
-**Note**: M4 Pro with 48GB RAM qualifies for the Llama 3.3 70B model according to the [Model Selection Matrix](#model-selection-matrix-source-of-truth).
+**Note**: GPT-OSS 20B is the primary model for all configurations. It matches o3-mini performance, runs at 1200 tokens/sec, uses only 16GB RAM, and is superior to Llama 3.1/3.3.
 
 ### RAM Budget Allocation
 
 The model selection uses a simplified approach:
-- **Primary model**: Selected based on Mac model + RAM (see [Model Selection Matrix](#model-selection-matrix-source-of-truth))
-  - Most configurations: Llama 3.1 8B (4.58GB)
-  - Ultra/high-end Max: Llama 3.3 70B (39.59GB Ollama / 37.22GB Docker)
+- **Primary model**: GPT-OSS 20B (16GB) - used for all configurations (16GB+ RAM)
+  - Matches o3-mini performance, 1200 tokens/sec, Apache 2.0 license
+  - Superior to Llama 3.1/3.3 - no longer competitive
 - **Embedding model**: nomic-embed-text (~0.3GB) - included for all configurations
 - **Reserve**: Remaining RAM after model allocation (safety buffer for OS, apps, and context)
 
@@ -986,33 +977,31 @@ The following table shows the exact model selection based on Mac model and RAM c
 
 | Mac Model | RAM | CPU Cores | GPU Cores | Model | Size | Ollama Command | Docker Model Runner Command |
 |-----------|-----|-----------|----------|-------|------|----------------|----------------------------|
-| M1 | 16GB | 8 (4P+4E) | 7-8 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M1 Pro | 16GB | 8-10 (6-8P+2E) | 14-16 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M1 Max | 32GB | 10 (8P+2E) | 24-32 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M1 Ultra | 64GB+ | 20 (16P+4E) | 48-64 | Llama 3.3:70b | 39.59GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
-| M2 | 16GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M2 | 24GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M2 Pro | 16GB | 10-12 (6-8P+4E) | 16-19 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M2 Max | 32GB | 12 (8P+4E) | 30-38 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M2 Ultra | 64GB+ | 24 (16P+8E) | 60-76 | Llama 3.3:70b | 39.59GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
-| M3 | 16GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M3 | 24GB | 8 (4P+4E) | 8-10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M3 Pro | 18GB | 11-12 (5-6P+5-6E) | 14-18 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M3 Pro | 36GB | 12 (6P+6E) | 18 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M3 Max | 36GB | 14-16 (10-12P+4E) | 30-40 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M3 Max | 48GB+ | 16 (12P+4E) | 40 | Llama 3.3:70b | 37.22GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
-| M4 | 16GB | 10 (4P+6E) | 10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M4 | 24GB | 10 (4P+6E) | 10 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M4 Pro | 24GB | 14 (10P+4E) | 20 | Llama 3.1:8b | 4.58GB | `ollama pull llama3.1:8b` | `docker model pull ai/llama3.1:8B-Q4_K_M` |
-| M4 Pro | 48GB | 14 (10P+4E) | 20 | Llama 3.3:70b | 37.22GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
-| M4 Max | 36GB+ | 16 (12P+4E) | 40 | Llama 3.3:70b | 37.22GB | `ollama pull llama3.3:70b` | `docker model pull ai/llama3.3:70B-Q4_0` |
+| M1 | 16GB | 8 (4P+4E) | 7-8 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M1 Pro | 16GB | 8-10 (6-8P+2E) | 14-16 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M1 Max | 32GB | 10 (8P+2E) | 24-32 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M1 Ultra | 64GB+ | 20 (16P+4E) | 48-64 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M2 | 16GB | 8 (4P+4E) | 8-10 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M2 | 24GB | 8 (4P+4E) | 8-10 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M2 Pro | 16GB | 10-12 (6-8P+4E) | 16-19 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M2 Max | 32GB | 12 (8P+4E) | 30-38 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M2 Ultra | 64GB+ | 24 (16P+8E) | 60-76 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M3 | 16GB | 8 (4P+4E) | 8-10 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M3 | 24GB | 8 (4P+4E) | 8-10 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M3 Pro | 18GB | 11-12 (5-6P+5-6E) | 14-18 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M3 Pro | 36GB | 12 (6P+6E) | 18 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M3 Max | 36GB | 14-16 (10-12P+4E) | 30-40 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M3 Max | 48GB+ | 16 (12P+4E) | 40 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M4 | 16GB | 10 (4P+6E) | 10 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M4 | 24GB | 10 (4P+6E) | 10 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M4 Pro | 24GB | 14 (10P+4E) | 20 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M4 Pro | 48GB | 14 (10P+4E) | 20 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
+| M4 Max | 36GB+ | 16 (12P+4E) | 40 | GPT-OSS 20B | 16.0GB | `ollama pull gpt-oss:20b` | `docker model pull ai/gpt-oss:20B-UD-Q6_K_XL` |
 
 **Selection Rules:**
-- **Most configurations**: Use `llama3.1:8b` (4.58GB) - best scaling across all hardware
-- **Ultra models (64GB+)**: Use `llama3.3:70b` (39.59GB Ollama / 37.22GB Docker) - top tier quality
-- **M3 Max 48GB+**: Use `llama3.3:70b` - high-end Max configuration
-- **M4 Pro 48GB**: Use `llama3.3:70b` - Pro configuration with high RAM
-- **M4 Max**: Use `llama3.3:70b` - Max configuration
+- **All configurations (16GB+ RAM)**: Use `gpt-oss:20b` (16GB) - matches o3-mini performance, 1200 tokens/sec
+- **Superior to Llama 3.1/3.3**: Llama models are no longer competitive with GPT-OSS 20B
+- **Apache 2.0 license**: US-based (OpenAI), released August 2025
 
 **Embedding Model (All Configurations):**
 - **Ollama**: `nomic-embed-text` (~0.3GB)
@@ -1022,20 +1011,16 @@ The following table shows the exact model selection based on Mac model and RAM c
 
 ### Available Models
 
-This setup only offers **Meta Llama models** for security and compatibility reasons:
+This setup offers **GPT-OSS 20B** as the primary reasoning/chat model:
 
 #### Primary Models
-- **Llama 3.1 8B** (4.58GB): Used for most Mac configurations
-  - Ollama: `llama3.1:8b`
-  - Docker: `ai/llama3.1:8B-Q4_K_M`
-  - Best scaling across all hardware
-  - Recommended for: M1, M2, M3, M4 (most configurations)
-
-- **Llama 3.3 70B** (39.59GB Ollama / 37.22GB Docker): Used for high-end configurations
-  - Ollama: `llama3.3:70b`
-  - Docker: `ai/llama3.3:70B-Q4_0`
-  - Top tier quality
-  - Recommended for: Ultra models (64GB+), M3 Max 48GB+, M4 Pro 48GB, M4 Max
+- **GPT-OSS 20B** (16GB): Used for all Mac configurations (16GB+ RAM)
+  - Ollama: `gpt-oss:20b`
+  - Docker: `ai/gpt-oss:20B-UD-Q6_K_XL`
+  - Matches o3-mini performance, 1200 tokens/sec, Apache 2.0 license
+  - US-based (OpenAI), released August 2025
+  - Superior to Llama 3.1/3.3 - no longer competitive
+  - Recommended for: All configurations (M1, M2, M3, M4, Ultra, Max)
 
 #### Embedding Models
 - **Nomic Embed Text** (~0.3GB): Used for all configurations
@@ -1462,16 +1447,15 @@ MIT License - See LICENSE file for details.
 
 ## 📝 Changelog
 
-### Version 4.0.0 (Ollama Smart Recommendations)
-- **Simplified Model Selection**: Hardware-based model selection with only Meta Llama models
-  - Automatically selects Llama 3.1 8B or Llama 3.3 70B based on Mac model + RAM
-  - Selection based on source of truth matrix (see Model Selection Matrix in README)
-  - Ultra models and high-end Max configurations (48GB+) get Llama 3.3 70B
-  - All other configurations get Llama 3.1 8B
+### Version 4.0.0 (Fixed Model Selection)
+- **Simplified Model Selection**: Fixed model installation for all users
+  - Installs GPT-OSS 20B for all configurations (16GB+ RAM)
+  - GPT-OSS 20B matches o3-mini performance, 1200 tokens/sec, Apache 2.0 license
+  - Superior to Llama 3.1/3.3 - no longer competitive
   - Includes nomic-embed-text embedding model for all configurations
-- **Hardware-Aware Selection**: Mac model + RAM determines model choice
-  - Detects Apple Silicon chip model and RAM configuration
-  - Calculates usable RAM and CPU performance score
+- **Consistent Experience**: Same models for all users
+  - No hardware-based selection - same two models for everyone
+  - Simplified setup process
   - Selects optimal model variant that fits hardware capabilities
 - **Reliable Model Pulling**: Robust installation with fallbacks
   - Immediate verification after each model pull
@@ -1519,12 +1503,12 @@ MIT License - See LICENSE file for details.
   - Clear installation instructions for both options
 
 ### Version 2.1.0
-- **Conservative model selection**: Simplified to Meta Llama models only
+- **Conservative model selection**: Simplified to GPT-OSS 20B
   - Removed support for multiple model families (Mistral, CodeLlama, etc.)
-  - Focus on Llama 3.1 8B and Llama 3.3 70B for security and compatibility
-  - Model selection based on Mac model + RAM configuration
+  - Focus on GPT-OSS 20B for superior performance and Apache 2.0 license
+  - Model selection based on Mac model + RAM configuration (all 16GB+ get GPT-OSS 20B)
 - **Simplified RAM allocation**: Single model + embedding approach
-  - Primary model: Llama 3.1 8B (4.58GB) or Llama 3.3 70B (37-40GB)
+  - Primary model: GPT-OSS 20B (16GB) - matches o3-mini performance, 1200 tokens/sec
   - Embedding model: nomic-embed-text (~0.3GB)
   - Remaining RAM reserved for OS, apps, and context
 

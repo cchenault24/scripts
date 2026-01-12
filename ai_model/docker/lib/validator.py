@@ -1,5 +1,5 @@
 """
-Model Validator and Fallback Handler for Docker Model Runner.
+Model Validator for Docker Model Runner.
 
 Handles:
 - Immediate verification after each model pull
@@ -23,7 +23,7 @@ from . import models
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
-from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL, AUTOCOMPLETE_MODELS, PRIMARY_MODELS
+from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL
 
 
 # Docker Model Runner API configuration
@@ -199,8 +199,6 @@ class PullResult:
     success: bool
     verified: bool = False
     error_message: str = ""
-    used_fallback: bool = False
-    fallback_model: Optional[RecommendedModel] = None
 
 
 @dataclass
@@ -279,59 +277,6 @@ def verify_model_exists(model_name: str) -> bool:
             return True
     
     return False
-
-
-def get_fallback_model(model: RecommendedModel, tier: hardware.HardwareTier) -> Optional[RecommendedModel]:
-    """Get a fallback model for a failed pull."""
-    role = model.role
-    
-    if model.fallback_name:
-        if not is_restricted_model_name(model.fallback_name):
-            return RecommendedModel(
-                name=f"{model.name} (fallback)",
-                docker_name=model.fallback_name,
-                ram_gb=model.ram_gb,
-                role=model.role,
-                roles=model.roles,
-                context_length=model.context_length,
-                description=f"Fallback for {model.name}"
-            )
-    
-    if role == ModelRole.EMBED:
-        fallbacks = [("ai/all-minilm-l6-v2-vllm", 0.1), ("ai/mxbai-embed-large", 0.8)]
-        for name, ram in fallbacks:
-            if name != model.docker_name:
-                return RecommendedModel(
-                    name="Fallback Embedding", docker_name=name, ram_gb=ram,
-                    role=ModelRole.EMBED, roles=["embed"], context_length=8192,
-                    description="Alternative embedding model"
-                )
-    
-    elif role == ModelRole.AUTOCOMPLETE:
-        fallbacks = [("ai/llama3.2", 1.8), ("ai/granite-4.0-h-tiny", 1.0)]
-        for name, ram in fallbacks:
-            if name != model.docker_name:
-                return RecommendedModel(
-                    name="Fallback Autocomplete", docker_name=name, ram_gb=ram,
-                    role=ModelRole.AUTOCOMPLETE, roles=["autocomplete"], context_length=131072,
-                    description="Alternative autocomplete model"
-                )
-    
-    elif role == ModelRole.CHAT:
-        primary_options = PRIMARY_MODELS.get(tier, [])
-        for option in primary_options:
-            if option.docker_name != model.docker_name:
-                return option
-        fallbacks = [("ai/granite-4.0-h-nano", 4.0), ("ai/llama3.2", 1.8)]
-        for name, ram in fallbacks:
-            if name != model.docker_name:
-                return RecommendedModel(
-                    name="Fallback Coding Model", docker_name=name, ram_gb=ram,
-                    role=ModelRole.CHAT, roles=["chat", "edit"], context_length=131072,
-                    description="Alternative coding model"
-                )
-    
-    return None
 
 
 def _pull_model_single_attempt(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
@@ -537,9 +482,9 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
 
 
 def pull_model_with_verification(
-    model: RecommendedModel, tier: hardware.HardwareTier, show_progress: bool = True
+    model: RecommendedModel, show_progress: bool = True
 ) -> PullResult:
-    """Pull a model with immediate verification and fallback."""
+    """Pull a model with immediate verification."""
     result = PullResult(model=model, success=False)
     
     if is_restricted_model_name(model.docker_name):
@@ -572,33 +517,7 @@ def pull_model_with_verification(
             if error_msg:
                 ui.print_error(f"  Error: {error_msg[:300]}")
     
-    primary_error = error_msg
-    
-    fallback = get_fallback_model(model, tier)
-    if fallback:
-        if is_restricted_model_name(fallback.docker_name):
-            if show_progress:
-                ui.print_warning(f"Fallback {fallback.docker_name} is also restricted")
-            result.error_message = "Primary and fallback both restricted"
-            return result
-        
-        if show_progress:
-            ui.print_info(f"Trying fallback: {fallback.docker_name}")
-        
-        fallback_success, _ = _pull_model(fallback.docker_name, show_progress)
-        
-        if fallback_success:
-            time.sleep(VERIFICATION_DELAY)
-            if verify_model_exists(fallback.docker_name):
-                result.success = True
-                result.verified = True
-                result.used_fallback = True
-                result.fallback_model = fallback
-                if show_progress:
-                    ui.print_success(f"Fallback {fallback.name} downloaded and verified")
-                return result
-    
-    result.error_message = primary_error or "Model pull and fallback both failed"
+    result.error_message = error_msg or "Model pull failed"
     return result
 
 
@@ -607,7 +526,6 @@ def pull_models_with_tracking(
 ) -> SetupResult:
     """Pull multiple models with verification and tracking."""
     result = SetupResult()
-    tier = hw_info.tier
     
     if show_progress:
         ui.print_header("📥 Downloading Models")
@@ -620,14 +538,10 @@ def pull_models_with_tracking(
             ui.print_step(i, len(models), f"Pulling {model.name}")
             print()
         
-        pull_result = pull_model_with_verification(model, tier, show_progress)
+        pull_result = pull_model_with_verification(model, show_progress)
         
         if pull_result.success:
-            if pull_result.used_fallback and pull_result.fallback_model:
-                result.successful_models.append(pull_result.fallback_model)
-                result.warnings.append(f"Used fallback for {model.name}: {pull_result.fallback_model.docker_name}")
-            else:
-                result.successful_models.append(model)
+            result.successful_models.append(model)
         else:
             result.failed_models.append((model, pull_result.error_message))
         
@@ -794,8 +708,7 @@ def validate_pre_install(
         return False, warnings
     
     # Check RAM
-    from .model_selector import get_usable_ram
-    usable_ram = get_usable_ram(hw_info)
+    usable_ram = hw_info.ram_gb  # Use total RAM for validation
     total_ram_needed = sum(m.ram_gb for m in models)
     
     if total_ram_needed > usable_ram:
