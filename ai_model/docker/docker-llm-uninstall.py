@@ -69,6 +69,7 @@ class SystemInfo:
     orphaned_files: List[tuple[Path, str]]
     vscode_extension: bool
     intellij_plugin: bool
+    docker_installed_by_script: bool  # True if we installed it during uninstall
 
 
 @dataclass
@@ -129,13 +130,84 @@ def gather_system_info(args: Any) -> SystemInfo:
     elif not manifest:
         manifest = uninstaller.create_empty_manifest()
     
-    # Check Docker installation and status
-    docker_ok, docker_version = docker.check_docker()
-    docker_running = docker_ok  # If check_docker passes, Docker is running
+    # Check if Docker is installed (simple check without prompting)
+    docker_path = shutil.which("docker")
+    docker_installed_by_script = False
+    
+    if not docker_path:
+        # Docker not found - automatically install via Homebrew Cask if available (silently)
+        if platform.system() == "Darwin" and shutil.which("brew"):
+            # Install Docker Desktop silently via Homebrew Cask
+            code, _, stderr = utils.run_command(["brew", "install", "--cask", "docker"], timeout=600, clean_env=True)
+            if code == 0:
+                # Refresh PATH to find newly installed Docker
+                common_paths = [
+                    "/usr/local/bin",
+                    "/opt/homebrew/bin",
+                    "/Applications/Docker.app/Contents/Resources/bin",
+                ]
+                for path in common_paths:
+                    if os.path.exists(os.path.join(path, "docker")):
+                        os.environ["PATH"] = f"{path}:{os.environ.get('PATH', '')}"
+                        break
+                
+                docker_path = shutil.which("docker")
+                if docker_path:
+                    docker_installed_by_script = True
+                    # Start Docker Desktop silently
+                    try:
+                        subprocess.Popen(
+                            ["open", "-a", "Docker"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                        # Wait silently for Docker to start
+                        for _ in range(30):  # Wait up to 30 seconds
+                            time.sleep(1)
+                            code, _, _ = utils.run_command(["docker", "info"], timeout=5, clean_env=True)
+                            if code == 0:
+                                break
+                    except Exception:
+                        pass  # Silently fail - we'll handle it when checking Docker
+    
+    # Check Docker installation and get version
+    docker_ok = False
+    docker_version = ""
+    docker_running = False
+    
+    if docker_path:
+        # Check docker version
+        code, stdout, _ = utils.run_command(["docker", "--version"], timeout=5, clean_env=True)
+        if code == 0:
+            docker_version = stdout.strip()
+            docker_ok = True
+            
+            # Check if Docker daemon is running
+            code, _, _ = utils.run_command(["docker", "info"], timeout=10, clean_env=True)
+            if code == 0:
+                docker_running = True
+            else:
+                # Try to start Docker Desktop silently if not running
+                if platform.system() == "Darwin":
+                    try:
+                        subprocess.Popen(
+                            ["open", "-a", "Docker"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                        # Wait silently for Docker to start
+                        for _ in range(30):  # Wait up to 30 seconds
+                            time.sleep(1)
+                            code, _, _ = utils.run_command(["docker", "info"], timeout=5, clean_env=True)
+                            if code == 0:
+                                docker_running = True
+                                break
+                    except Exception:
+                        pass  # Silently fail
     
     # Check Docker Model Runner
     dmr_available = False
-    if docker_ok:
+    if docker_running:
         dmr_available, _ = docker.check_docker_model_runner_status()
     
     # Get models from manifest
@@ -209,7 +281,8 @@ def gather_system_info(args: Any) -> SystemInfo:
         customized_configs=customized_configs,
         orphaned_files=orphaned_files,
         vscode_extension=vscode_extension,
-        intellij_plugin=intellij_plugin
+        intellij_plugin=intellij_plugin,
+        docker_installed_by_script=docker_installed_by_script
     )
 
 
@@ -392,7 +465,12 @@ def execute_uninstall(info: SystemInfo, choices: UninstallChoices) -> UninstallR
     # Remove models
     if choices.models_to_remove:
         ui.print_subheader("Removing Models")
-        if info.dmr_available:
+        # Skip if Docker is not installed or not running
+        if not info.docker_installed:
+            ui.print_info("Skipping model removal - Docker is not installed")
+        elif not info.docker_running:
+            ui.print_info("Skipping model removal - Docker is not running")
+        elif info.dmr_available:
             removed = uninstaller.remove_models(choices.models_to_remove)
             results.models_removed = removed
             # Check if all models were removed
@@ -480,6 +558,41 @@ def execute_uninstall(info: SystemInfo, choices: UninstallChoices) -> UninstallR
         except Exception as e:
             results.errors.append(f"Could not remove manifest: {e}")
     
+    # If Docker was installed by this script, remove it at the end
+    if info.docker_installed_by_script:
+        ui.print_subheader("Removing Docker (installed by uninstaller)")
+        # Stop Docker Desktop first if running
+        if info.docker_running:
+            try:
+                if platform.system() == "Darwin":
+                    # Quit Docker Desktop
+                    subprocess.run(
+                        ["osascript", "-e", 'tell application "Docker" to quit'],
+                        timeout=10,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    # Wait for Docker to stop
+                    for _ in range(10):
+                        time.sleep(1)
+                        code, _, _ = utils.run_command(["docker", "info"], timeout=5, clean_env=True)
+                        if code != 0:
+                            break
+            except Exception as e:
+                results.errors.append(f"Could not stop Docker: {e}")
+        
+        # Uninstall Docker Desktop via Homebrew Cask (since we installed it via Homebrew)
+        if platform.system() == "Darwin" and shutil.which("brew"):
+            ui.print_info("Uninstalling Docker Desktop via Homebrew...")
+            code, _, stderr = utils.run_command(
+                ["brew", "uninstall", "--cask", "docker"], timeout=120, clean_env=True
+            )
+            if code == 0:
+                ui.print_success("Docker Desktop removed successfully")
+            else:
+                results.errors.append(f"Failed to remove Docker Desktop: {stderr}")
+        print()
+    
     return results
 
 
@@ -509,7 +622,10 @@ def print_accurate_summary(results: UninstallResults, info: SystemInfo) -> None:
     # Show what remains
     print()
     ui.print_info("Note:")
-    print("  • Docker Desktop and Docker Model Runner were not uninstalled")
+    if info.docker_installed_by_script:
+        print("  • Docker Desktop was removed (installed by uninstaller)")
+    else:
+        print("  • Docker Desktop and Docker Model Runner were not uninstalled")
     if info.pre_existing_models:
         print(f"  • {len(info.pre_existing_models)} pre-existing model(s) were kept")
     print("  • You can reinstall by running docker-llm-setup.py again")

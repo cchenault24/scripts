@@ -71,6 +71,7 @@ class SystemInfo:
     orphaned_files: List[tuple[Path, str]]
     vscode_extension: bool
     intellij_plugin: bool
+    ollama_installed_by_script: bool  # True if we installed it during uninstall
 
 
 @dataclass
@@ -149,16 +150,100 @@ def gather_system_info(args: Any) -> SystemInfo:
     elif not manifest:
         manifest = uninstaller.create_empty_manifest()
     
-    # Check Ollama installation and status
-    ollama_ok, ollama_version = ollama.check_ollama()
+    # Check if Ollama is installed (simple check without prompting)
+    ollama_path = shutil.which("ollama")
+    ollama_installed_by_script = False
+    
+    if not ollama_path:
+        # Ollama not found - automatically install via Homebrew if available (silently)
+        if platform.system() == "Darwin" and shutil.which("brew"):
+            # Install silently via Homebrew
+            code, _, stderr = utils.run_command(["brew", "install", "ollama"], timeout=300, clean_env=True)
+            if code == 0:
+                # Refresh PATH to find newly installed Ollama
+                common_paths = [
+                    os.path.expanduser("~/.local/bin"),
+                    "/usr/local/bin",
+                    "/opt/homebrew/bin",
+                ]
+                for path in common_paths:
+                    if os.path.exists(os.path.join(path, "ollama")):
+                        os.environ["PATH"] = f"{path}:{os.environ.get('PATH', '')}"
+                        break
+                
+                ollama_path = shutil.which("ollama")
+                if ollama_path:
+                    ollama_installed_by_script = True
+                # If installation failed silently, we'll detect it below
+    
+    # Check Ollama installation and get version
+    if ollama_path:
+        ollama_ok = True
+        code, stdout, _ = utils.run_command(["ollama", "--version"], timeout=5, clean_env=True)
+        if code == 0:
+            ollama_version = stdout.strip()
+        else:
+            ollama_version = "unknown"
+    else:
+        ollama_ok = False
+        ollama_version = ""
+    
     ollama_running = ollama.verify_ollama_running() if ollama_ok else False
     
-    # Start Ollama if installed but not running (needed for model queries)
+    # Start Ollama if installed but not running (needed for model queries) - silently
     if ollama_ok and not ollama_running:
-        if ollama.start_ollama_service():
-            ollama_running = True
+        # Start Ollama service silently (no UI output)
+        try:
+            # Try to start via launchd first (macOS)
+            if platform.system() == "Darwin":
+                plist_path = Path.home() / "Library" / "LaunchAgents" / "com.ollama.server.plist"
+                if plist_path.exists():
+                    utils.run_command(["launchctl", "load", str(plist_path)], timeout=10, clean_env=True)
+                    # Wait silently for service to start
+                    for _ in range(15):
+                        time.sleep(1)
+                        if ollama.verify_ollama_running():
+                            ollama_running = True
+                            break
+                    if ollama_running:
+                        pass  # Success, continue silently
+                else:
+                    # Start temporarily in background
+                    subprocess.Popen(
+                        ["ollama", "serve"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True
+                    )
+                    # Wait silently for service to start
+                    for _ in range(15):
+                        time.sleep(1)
+                        if ollama.verify_ollama_running():
+                            ollama_running = True
+                            break
+            else:
+                # Linux/other - start in background
+                subprocess.Popen(
+                    ["ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                # Wait silently for service to start
+                for _ in range(15):
+                    time.sleep(1)
+                    if ollama.verify_ollama_running():
+                        ollama_running = True
+                        break
+        except Exception:
+            # Silently fail - we'll handle it when trying to remove models
+            pass
     
-    install_method = detect_install_method() if ollama_ok else "unknown"
+    # Detect install method - if we installed it, it's homebrew
+    if ollama_installed_by_script:
+        install_method = "homebrew"
+    else:
+        install_method = detect_install_method() if ollama_ok else "unknown"
     
     # Get models from manifest
     installed_models_raw = manifest.get("installed", {}).get("models", [])
@@ -231,7 +316,8 @@ def gather_system_info(args: Any) -> SystemInfo:
         autostart_details=autostart_details,
         orphaned_files=orphaned_files,
         vscode_extension=vscode_extension,
-        intellij_plugin=intellij_plugin
+        intellij_plugin=intellij_plugin,
+        ollama_installed_by_script=ollama_installed_by_script
     )
 
 
@@ -452,20 +538,24 @@ def execute_uninstall(info: SystemInfo, choices: UninstallChoices) -> UninstallR
     # Remove models
     if choices.models_to_remove:
         ui.print_subheader("Removing Models")
-        # Ensure Ollama is running
-        if not info.ollama_running:
-            if uninstaller.ensure_ollama_running_for_removal():
-                info.ollama_running = True
-        
-        if info.ollama_running:
-            removed = uninstaller.remove_models(choices.models_to_remove)
-            results.models_removed = removed
-            # Check if all models were removed
-            if removed < len(choices.models_to_remove):
-                failed = len(choices.models_to_remove) - removed
-                results.errors.append(f"Failed to remove {failed} model(s)")
+        # Skip if Ollama is not installed
+        if not info.ollama_installed:
+            ui.print_info("Skipping model removal - Ollama is not installed")
         else:
-            results.errors.append("Cannot remove models - Ollama service not available")
+            # Ensure Ollama is running
+            if not info.ollama_running:
+                if uninstaller.ensure_ollama_running_for_removal():
+                    info.ollama_running = True
+            
+            if info.ollama_running:
+                removed = uninstaller.remove_models(choices.models_to_remove)
+                results.models_removed = removed
+                # Check if all models were removed
+                if removed < len(choices.models_to_remove):
+                    failed = len(choices.models_to_remove) - removed
+                    results.errors.append(f"Failed to remove {failed} model(s)")
+            else:
+                results.errors.append("Cannot remove models - Ollama service not available")
         print()
     
     # Remove config files
@@ -582,6 +672,35 @@ def execute_uninstall(info: SystemInfo, choices: UninstallChoices) -> UninstallR
             manifest_path.unlink()
         except Exception as e:
             results.errors.append(f"Could not remove manifest: {e}")
+    
+    # If Ollama was installed by this script, remove it at the end
+    if info.ollama_installed_by_script:
+        ui.print_subheader("Removing Ollama (installed by uninstaller)")
+        # Stop service first if running
+        if info.ollama_running:
+            try:
+                subprocess.run(["pkill", "ollama"], timeout=5, check=False)
+                time.sleep(2)
+            except Exception as e:
+                results.errors.append(f"Could not stop Ollama service: {e}")
+        
+        # Uninstall via Homebrew (since we installed it via Homebrew)
+        if info.install_method == "homebrew":
+            ui.print_info("Uninstalling Ollama via Homebrew...")
+            code, _, stderr = utils.run_command(
+                ["brew", "uninstall", "ollama"], timeout=60, clean_env=True
+            )
+            if code == 0:
+                ui.print_success("Ollama removed successfully")
+                results.ollama_uninstalled = True
+            else:
+                results.errors.append(f"Failed to remove Ollama: {stderr}")
+        else:
+            # Fallback: try to remove manually
+            success, errors = ollama.remove_ollama()
+            results.ollama_uninstalled = success
+            results.errors.extend(errors)
+        print()
     
     return results
 
