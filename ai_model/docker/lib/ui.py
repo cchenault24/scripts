@@ -6,6 +6,9 @@ Provides colored terminal output, formatted headers, and interactive prompts.
 
 import os
 import platform
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 from typing import List, Tuple
 
 
@@ -25,6 +28,45 @@ class Colors:
     BG_GREEN = "\033[42m"
 
 
+_LOG_FILE_PATH: Optional[Path] = None
+
+
+def init_logging(log_path: Optional[Path] = None) -> Path:
+    """
+    Initialize file logging for corporate/debug environments.
+
+    Logs all UI output lines to a local file for later troubleshooting.
+    """
+    global _LOG_FILE_PATH
+
+    if log_path is None:
+        log_path = Path.home() / ".continue" / "logs" / "docker-llm-setup.log"
+
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Touch file to validate permissions early
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n--- docker-llm-setup started {datetime.now().isoformat(timespec='seconds')} ---\n")
+        _LOG_FILE_PATH = log_path
+    except Exception:
+        # Logging must never break interactive UX
+        _LOG_FILE_PATH = None
+    return log_path
+
+
+def _log_line(level: str, text: str) -> None:
+    """Best-effort append to log file."""
+    if _LOG_FILE_PATH is None:
+        return
+    try:
+        ts = datetime.now().isoformat(timespec="seconds")
+        with open(_LOG_FILE_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{ts} [{level}] {text}\n")
+    except Exception:
+        # Never crash on logging failures
+        return
+
+
 def colorize(text: str, color: str) -> str:
     """Apply color to text."""
     return f"{color}{text}{Colors.RESET}"
@@ -32,6 +74,7 @@ def colorize(text: str, color: str) -> str:
 
 def print_header(text: str) -> None:
     """Print a styled header."""
+    _log_line("HEADER", text)
     width = max(60, len(text) + 10)
     print()
     print(colorize("═" * width, Colors.CYAN))
@@ -42,6 +85,7 @@ def print_header(text: str) -> None:
 
 def print_subheader(text: str) -> None:
     """Print a styled subheader."""
+    _log_line("SUBHEADER", text)
     print()
     print(colorize(f"▸ {text}", Colors.BLUE + Colors.BOLD))
     print(colorize("─" * 50, Colors.DIM))
@@ -49,26 +93,31 @@ def print_subheader(text: str) -> None:
 
 def print_success(text: str) -> None:
     """Print success message."""
+    _log_line("SUCCESS", text)
     print(colorize(f"✓ {text}", Colors.GREEN))
 
 
 def print_error(text: str) -> None:
     """Print error message."""
+    _log_line("ERROR", text)
     print(colorize(f"✗ {text}", Colors.RED))
 
 
 def print_warning(text: str) -> None:
     """Print warning message."""
+    _log_line("WARN", text)
     print(colorize(f"⚠ {text}", Colors.YELLOW))
 
 
 def print_info(text: str) -> None:
     """Print info message."""
+    _log_line("INFO", text)
     print(colorize(f"ℹ {text}", Colors.BLUE))
 
 
 def print_step(step: int, total: int, text: str) -> None:
     """Print a step indicator."""
+    _log_line("STEP", f"[{step}/{total}] {text}")
     print(colorize(f"[{step}/{total}] {text}", Colors.MAGENTA))
 
 

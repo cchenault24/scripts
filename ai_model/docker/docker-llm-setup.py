@@ -70,6 +70,13 @@ def get_pre_existing_models() -> list[str]:
 
 def main() -> int:
     """Main entry point."""
+    # Initialize file logging early for corporate/debug environments
+    # (best-effort; failures never block setup)
+    try:
+        ui.init_logging()
+    except Exception:
+        pass
+
     ui.clear_screen()
     
     ui.print_header("🚀 Docker Model Runner + Continue.dev Setup v2.0")
@@ -213,6 +220,14 @@ def main() -> int:
     if not models_for_config:
         ui.print_error("No models available for configuration.")
         return 1
+
+    # Step 8b: Apply Docker Model Runner runtime settings (context sizing + auto-start)
+    # Use successfully installed models to avoid configuring nonexistent images.
+    print()
+    try:
+        docker.apply_dmr_runtime_settings([m.docker_name for m in models_for_config], hw_info)
+    except Exception as e:
+        ui.print_warning(f"Could not apply Docker Model Runner runtime settings: {e}")
     
     # Track created files for manifest (using set to avoid duplicates)
     created_files_set: set[Path] = set()

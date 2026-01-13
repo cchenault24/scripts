@@ -6,7 +6,9 @@ and interact with the DMR API.
 """
 
 import json
+import re
 import shutil
+import socket
 import urllib.error
 import urllib.request
 from typing import List, Optional, Tuple
@@ -26,6 +28,212 @@ DMR_API_BASE = f"http://{DMR_API_HOST}:{DMR_API_PORT}/v1"
 # Alternative: Docker Model Runner can also be accessed via Docker socket
 # For some setups, the endpoint might be different
 DMR_SOCKET_ENDPOINT = "http://model-runner.docker.internal/v1"
+
+
+def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
+    """Return True if TCP connect succeeds."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
+def check_dmr_port_conflict() -> Tuple[bool, str]:
+    """
+    Detect whether localhost:12434 is usable by Docker Model Runner.
+
+    Returns:
+        (ok, message)
+        - ok=True: port is free OR appears to be DMR
+        - ok=False: port is in use by a non-DMR service
+    """
+    host, port = DMR_API_HOST, DMR_API_PORT
+    if not _is_port_open(host, port):
+        return True, f"Port {host}:{port} is available (nothing listening)"
+
+    # Something is listening - verify it's DMR (OpenAI-compatible /v1/models)
+    try:
+        req = urllib.request.Request(f"{DMR_API_BASE}/models", method="GET")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
+            if response.status == 200:
+                return True, f"Port {host}:{port} is in use by Docker Model Runner (API reachable)"
+    except Exception:
+        pass
+
+    return False, f"Port {host}:{port} is in use by another service (DMR API not detected)"
+
+
+def detect_docker_allocated_ram_gib() -> Tuple[Optional[float], str]:
+    """
+    Best-effort detection of Docker Engine/VM memory allocation.
+
+    For Docker Desktop this typically corresponds to the VM memory allocation.
+
+    Returns:
+        (ram_gib, reason)
+    """
+    # Preferred: bytes from docker info template
+    code, stdout, stderr = utils.run_command(["docker", "info", "--format", "{{.MemTotal}}"], timeout=10)
+    if code == 0:
+        s = (stdout or "").strip()
+        if s.isdigit():
+            try:
+                bytes_total = int(s)
+                gib = bytes_total / (1024 ** 3)
+                return gib, f"Detected Docker memory from `docker info --format {{.MemTotal}}` ({gib:.2f} GiB)"
+            except Exception:
+                pass
+
+    # Fallback: parse "Total Memory:" line from docker info
+    code, stdout, stderr2 = utils.run_command(["docker", "info"], timeout=10)
+    if code == 0:
+        for line in (stdout or "").splitlines():
+            if "Total Memory:" not in line:
+                continue
+            # Examples: " Total Memory: 7.775GiB" or "Total Memory: 15.5GiB"
+            m = re.search(r"Total Memory:\s*([0-9.]+)\s*([A-Za-z]+)", line)
+            if not m:
+                continue
+            try:
+                val = float(m.group(1))
+                unit = m.group(2)
+                unit_lower = unit.lower()
+                if unit_lower.startswith("g"):
+                    return val, f"Detected Docker memory from `docker info` ({val:.2f} {unit})"
+                if unit_lower.startswith("m"):
+                    return val / 1024.0, f"Detected Docker memory from `docker info` ({val:.2f} {unit})"
+            except Exception:
+                continue
+
+    err = (stderr or stderr2 or "").strip()
+    return None, f"Could not detect Docker memory allocation ({err or 'no details'})"
+
+
+def select_context_size_tokens(docker_ram_gib: Optional[float]) -> Tuple[int, str]:
+    """
+    Select context size tokens based on Docker allocated RAM.
+
+    Mapping (per requirements):
+    - 8-11GB   ->  8,192
+    - 12-15GB  -> 16,384
+    - 16-23GB  -> 24,576
+    - 24-31GB  -> 32,768
+    - 32GB+    -> 49,152
+
+    Default: 32,768 if detection fails.
+    """
+    if docker_ram_gib is None:
+        return 32768, "Docker RAM detection failed; defaulting to 32,768 tokens (safe default)"
+
+    # Use conservative banding for fractional/edge values: round down to safest matching tier.
+    if docker_ram_gib < 12:
+        return 8192, f"Docker RAM ~{docker_ram_gib:.1f}GiB (<12GiB); selecting 8,192 tokens"
+    if docker_ram_gib < 16:
+        return 16384, f"Docker RAM ~{docker_ram_gib:.1f}GiB (12-15GiB); selecting 16,384 tokens"
+    if docker_ram_gib < 24:
+        return 24576, f"Docker RAM ~{docker_ram_gib:.1f}GiB (16-23GiB); selecting 24,576 tokens"
+    if docker_ram_gib < 32:
+        return 32768, f"Docker RAM ~{docker_ram_gib:.1f}GiB (24-31GiB); selecting 32,768 tokens"
+    return 49152, f"Docker RAM ~{docker_ram_gib:.1f}GiB (32GiB+); selecting 49,152 tokens"
+
+
+def configure_docker_model_context(model_name: str, context_tokens: int) -> bool:
+    """Configure Docker Model Runner context size for a model."""
+    code, stdout, stderr = utils.run_command(
+        ["docker", "model", "configure", f"--context-size={context_tokens}", model_name],
+        timeout=30
+    )
+    if code == 0:
+        ui.print_success(f"Configured DMR context-size={context_tokens} for {model_name}")
+        return True
+    ui.print_warning(f"Could not configure context-size for {model_name}: {stderr.strip() or stdout.strip()}")
+    return False
+
+
+def configure_model_runner_restart_policy() -> bool:
+    """
+    Configure Docker Model Runner container(s) to auto-start on reboot.
+
+    Applies: docker update --restart unless-stopped <container>
+    """
+    code, stdout, stderr = utils.run_command(["docker", "ps", "-a", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}"], timeout=10)
+    if code != 0:
+        ui.print_warning(f"Could not list containers to set restart policy: {stderr.strip()}")
+        return False
+
+    candidates: List[str] = []
+    for line in (stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        cid, name, image = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        hay = f"{name} {image}".lower()
+        if "model-runner" in hay or "modelrunner" in hay:
+            candidates.append(cid or name)
+
+    if not candidates:
+        ui.print_warning("Could not find a Docker Model Runner container to set restart policy on.")
+        ui.print_info("Once DMR has started at least once, re-run this script or run:")
+        print(ui.colorize("    docker ps -a | grep -i model-runner", ui.Colors.CYAN))
+        return False
+
+    ok_any = False
+    for cid in candidates:
+        code, stdout, stderr = utils.run_command(["docker", "update", "--restart", "unless-stopped", cid], timeout=10)
+        if code == 0:
+            ok_any = True
+            ui.print_success(f"Set restart policy: unless-stopped ({cid})")
+        else:
+            ui.print_warning(f"Failed to set restart policy for {cid}: {stderr.strip() or stdout.strip()}")
+    return ok_any
+
+
+def apply_dmr_runtime_settings(
+    model_names: List[str],
+    hw_info: hardware.HardwareInfo,
+    also_configure_model: str = "gpt-oss:20B-UD-Q6_K_XL",
+) -> None:
+    """
+    Apply runtime settings to Docker Model Runner:
+    - Configure per-model context size (docker model configure --context-size=...)
+    - Configure container restart policy (--restart unless-stopped)
+    """
+    ui.print_subheader("Configuring Docker Model Runner Runtime")
+
+    # Validate Docker daemon is running before issuing changes
+    code, _, stderr = utils.run_command(["docker", "info"], timeout=10)
+    if code != 0:
+        ui.print_warning("Docker daemon is not running; skipping DMR runtime configuration.")
+        ui.print_info("Start Docker Desktop and re-run to apply context sizing + auto-start settings.")
+        return
+
+    # Determine context tokens (prefer values computed earlier)
+    context_tokens = hw_info.dmr_context_size_tokens if hw_info and hw_info.dmr_context_size_tokens else 0
+    reason = hw_info.dmr_context_reason if hw_info else ""
+    if context_tokens <= 0:
+        docker_ram_gib, ram_reason = detect_docker_allocated_ram_gib()
+        context_tokens, ctx_reason = select_context_size_tokens(docker_ram_gib)
+        reason = f"{ctx_reason}. {ram_reason}"
+
+    ui.print_info(f"Configuring DMR context-size={context_tokens} ({reason or 'dynamic sizing'})")
+
+    # Configure restart policy so the model runner comes back after reboot
+    configure_model_runner_restart_policy()
+
+    # Configure requested default model explicitly (even if user didn't select it)
+    if also_configure_model:
+        configure_docker_model_context(also_configure_model, context_tokens)
+
+    # Configure selected/pulled models (dedupe)
+    seen: set[str] = set()
+    for name in model_names:
+        n = (name or "").strip()
+        if not n or n in seen:
+            continue
+        seen.add(n)
+        configure_docker_model_context(n, context_tokens)
 
 
 def check_docker() -> Tuple[bool, str]:
@@ -122,6 +330,15 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
         raise ValueError("hw_info is required")
     
     ui.print_subheader("Checking Docker Model Runner (DMR)")
+
+    # Port conflict detection (localhost:12434)
+    ok_port, port_msg = check_dmr_port_conflict()
+    if ok_port:
+        ui.print_info(port_msg)
+    else:
+        ui.print_warning(port_msg)
+        ui.print_warning("Docker Model Runner may not be able to start until this port conflict is resolved.")
+        ui.print_info("If you need DMR on 12434, stop the conflicting service or change its port.")
     
     # Docker Model Runner was introduced in Docker Desktop 4.40+
     # It uses the 'docker model' command namespace
@@ -131,6 +348,17 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
     if code == 0:
         hw_info.docker_model_runner_available = True
         ui.print_success("Docker Model Runner is available and running")
+
+        # Dynamic context sizing based on Docker RAM allocation
+        docker_ram_gib, ram_reason = detect_docker_allocated_ram_gib()
+        if docker_ram_gib is not None:
+            hw_info.docker_allocated_ram_gib = docker_ram_gib
+        context_tokens, ctx_reason = select_context_size_tokens(docker_ram_gib)
+        hw_info.dmr_context_size_tokens = context_tokens
+        hw_info.dmr_context_reason = f"{ctx_reason}. {ram_reason}"
+
+        ui.print_info(f"Selected contextLength={context_tokens} tokens ({ctx_reason})")
+        ui.print_info("If you want a larger context window, increase Docker Desktop → Resources → Memory.")
         
         # Determine the API endpoint
         # Try the standard localhost endpoint first

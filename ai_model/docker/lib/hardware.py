@@ -39,6 +39,9 @@ class HardwareInfo:
     available_api_models: List[str] = field(default_factory=list)  # Models available via API
     available_docker_hub_models: List[str] = field(default_factory=list)  # Models available on Docker Hub
     discovered_model_tags: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # Cached model tag discovery results
+    docker_allocated_ram_gib: float = 0.0  # Docker Engine/VM memory allocation (best-effort)
+    dmr_context_size_tokens: int = 0  # Selected DMR/Continue context length based on Docker RAM
+    dmr_context_reason: str = ""  # Why the context size was selected
     usable_ram_gb: float = 0.0  # Calculated usable RAM after OS overhead
     
     def get_apple_silicon_info(self) -> str:
