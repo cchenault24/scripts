@@ -32,7 +32,7 @@ class RecommendedModel:
     ram_gb: float  # Estimated RAM usage
     role: ModelRole  # Primary role
     roles: List[str]  # All supported roles
-    context_length: int = 32768  # Default context length
+    context_length: int = 131072  # Default context length
     description: str = ""
     min_perf_score: float = 1.0  # Minimum CPU performance score needed
     requires_fp16: bool = False  # Whether FP16 quantization is required (M3 Pro+ or M4+)
@@ -65,7 +65,7 @@ PRIMARY_MODEL = RecommendedModel(
     ram_gb=16.0,
     role=ModelRole.CHAT,
     roles=["chat", "edit", "autocomplete"],
-    context_length=32768,
+    context_length=131072,
     description="OpenAI GPT-OSS 20B - Matches o3-mini performance, 1200 tokens/sec, Apache 2.0 license",
     min_perf_score=1.0,
     requires_fp16=False,

@@ -100,7 +100,7 @@ def generate_setup_summary(
     for model in model_list:
         # Handle both ModelInfo and RecommendedModel objects
         selected_variant = getattr(model, 'selected_variant', None)
-        context_length = getattr(model, 'context_length', 32768)  # Default for RecommendedModel
+        context_length = getattr(model, 'context_length', 131072)  # Default matches GPT-OSS 20B
         roles = getattr(model, 'roles', ["chat"])  # Fallback for safety
         
         models_summary.append({
@@ -1132,7 +1132,7 @@ def _normalize_model(model: Any) -> Dict[str, Any]:
             "docker_name": model.docker_name,
             "ram_gb": model.ram_gb,
             "roles": getattr(model, 'roles', ["chat"]),
-            "context_length": getattr(model, 'context_length', 32768),
+            "context_length": getattr(model, 'context_length', 131072),
         }
     
     # Handle dictionary format

@@ -36,7 +36,7 @@ class TestModelInfo:
             "name": "Test Model",
             "description": "A test model",
             "ram_gb": 5.0,
-            "context_length": 32768,
+            "context_length": 131072,
             "roles": ["chat", "edit"],
             "recommended_for": ["Testing"],
             "base_model_name": "test"
@@ -70,7 +70,7 @@ class TestModelInfo:
             "name": "Test Model",
             "description": "Test model with variant",
             "ram_gb": 5.0,
-            "context_length": 32768,
+            "context_length": 131072,
             "roles": ["chat"],
             "selected_variant": "7b-q4_k_m"
         }

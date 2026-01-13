@@ -1314,7 +1314,7 @@ ModelInfo(
     docker_name="ai/new-model",
     description="Description of the model",
     ram_gb=8.0,
-    context_length=32768,
+    context_length=131072,
     roles=["chat", "edit"],
     recommended_for=["Use case description"]
 )

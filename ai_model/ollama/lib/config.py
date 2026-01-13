@@ -55,7 +55,7 @@ def _normalize_model(model: Any) -> Dict[str, Any]:
                 "ollama_name": model.ollama_name,
                 "ram_gb": model.ram_gb,
                 "roles": model.roles,
-                "context_length": 32768,  # Default for RecommendedModel
+                "context_length": model.context_length,
             }
     except ImportError:
         pass
@@ -67,7 +67,7 @@ def _normalize_model(model: Any) -> Dict[str, Any]:
             "ollama_name": model.ollama_name,
             "ram_gb": model.ram_gb,
             "roles": getattr(model, 'roles', ["chat"]),
-            "context_length": getattr(model, 'context_length', 32768),
+            "context_length": getattr(model, 'context_length', 131072),
         }
     
     # Handle dictionary format
