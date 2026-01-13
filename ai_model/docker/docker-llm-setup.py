@@ -55,6 +55,14 @@ from lib import ui
 from lib import model_selector
 from lib import validator
 
+# =============================================================================
+# VPN Resilience: Configure environment at startup
+# =============================================================================
+# VPNs (especially corporate VPNs) can break localhost connections by modifying
+# DNS resolution and routing tables. Using 127.0.0.1 instead of localhost and
+# setting NO_PROXY ensures the model server remains accessible.
+docker.setup_vpn_resilient_environment()
+
 # Module logger
 _logger = logging.getLogger(__name__)
 
@@ -289,6 +297,25 @@ def main() -> int:
     # Check if we have an embedding model for the codebase awareness info
     has_embedding = any("embed" in m.roles for m in models_for_config)
     ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide, has_embedding=has_embedding)
+    
+    # Step 15: Configure shell profile for VPN resilience (macOS)
+    import platform
+    if platform.system() == "Darwin":
+        print()
+        ui.print_subheader("VPN Resilience Configuration")
+        ui.print_info("Corporate VPNs can break localhost connections by modifying DNS/routing")
+        ui.print_info("Adding environment variables to ~/.zshrc for permanent VPN resilience")
+        print()
+        
+        if ui.prompt_yes_no("Configure shell profile for VPN resilience?", default=True):
+            if docker.update_shell_profile_for_vpn():
+                ui.print_success("VPN resilience configured successfully")
+            else:
+                ui.print_warning("Could not update shell profile automatically")
+        else:
+            ui.print_info("Skipping shell profile update")
+            ui.print_info("You can manually add these to your ~/.zshrc if needed:")
+            ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"')
     
     print()
     return 0

@@ -35,6 +35,22 @@ def format_yaml_value(value: Any) -> str:
     return str(value)
 
 
+def ensure_vpn_resilient_url(url: str) -> str:
+    """
+    Ensure URL uses 127.0.0.1 instead of localhost for VPN resilience.
+    
+    VPNs can modify DNS resolution and break localhost connections.
+    Using the IP address directly bypasses DNS.
+    
+    Args:
+        url: URL that may contain 'localhost'
+    
+    Returns:
+        URL with 'localhost' replaced by '127.0.0.1'
+    """
+    return url.replace("://localhost:", "://127.0.0.1:").replace("://localhost/", "://127.0.0.1/")
+
+
 def generate_yaml(config: Dict[str, Any], indent: int = 0) -> str:
     """Generate YAML string from config dict."""
     lines = []
@@ -234,6 +250,10 @@ def generate_continue_config(
     api_base = hw_info.dmr_api_endpoint
     ui.print_info(f"Using API endpoint: {api_base}")
     
+    # VPN Resilience: Ensure we use 127.0.0.1 instead of localhost
+    # VPNs can modify DNS resolution and break localhost connections
+    api_base = ensure_vpn_resilient_url(api_base)
+    
     # Ensure apiBase doesn't have trailing slash and includes /v1 for OpenAI-compatible API
     # Continue.dev expects the full base URL including /v1 for OpenAI-compatible APIs
     api_base_clean = api_base.rstrip('/')
@@ -243,7 +263,7 @@ def generate_continue_config(
         # For Docker Model Runner, the API is typically at /v1
         if api_base_clean.endswith(':12434') or api_base_clean.endswith(':8080'):
             api_base_clean = f"{api_base_clean}/v1"
-        elif 'model-runner.docker.internal' in api_base_clean:
+        elif 'model-runner.docker.internal' in api_base_clean or '127.0.0.1' in api_base_clean:
             api_base_clean = f"{api_base_clean}/v1" if not api_base_clean.endswith('/v1') else api_base_clean
     
     def _ensure_pyyaml():

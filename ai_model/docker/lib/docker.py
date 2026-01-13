@@ -21,13 +21,29 @@ from .utils import get_unverified_ssl_context
 
 # Docker Model Runner API configuration
 # DMR exposes an OpenAI-compatible API endpoint
-DMR_API_HOST = "localhost"
+# IMPORTANT: Use 127.0.0.1 instead of localhost for VPN resilience
+# VPNs can modify DNS/routing and break localhost resolution
+DMR_API_HOST = "127.0.0.1"  # Use IP address for VPN resilience
 DMR_API_PORT = 12434  # Default Docker Model Runner port
 DMR_API_BASE = f"http://{DMR_API_HOST}:{DMR_API_PORT}/v1"
 
 # Alternative: Docker Model Runner can also be accessed via Docker socket
 # For some setups, the endpoint might be different
 DMR_SOCKET_ENDPOINT = "http://model-runner.docker.internal/v1"
+
+# VPN-resilient environment variables
+VPN_RESILIENT_ENV = {
+    "DMR_HOST": f"{DMR_API_HOST}:{DMR_API_PORT}",
+    "NO_PROXY": "localhost,127.0.0.1,::1,host.docker.internal",
+}
+
+# Docker container VPN-resilient configuration
+# Note: Docker Desktop Mac runs in a VM, cannot use --network host
+# Must use explicit port binding: -p 127.0.0.1:PORT:PORT
+DOCKER_CONTAINER_ENV = {
+    "OLLAMA_HOST": "0.0.0.0:11434",  # Inside container, bind to all interfaces
+    "NO_PROXY": "localhost,127.0.0.1,::1,host.docker.internal",
+}
 
 
 def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
@@ -490,6 +506,227 @@ def get_docker_cpu_allocation() -> Optional[int]:
     except (ValueError, OSError):
         pass
     return None
+
+
+# =============================================================================
+# VPN Resilience Functions
+# =============================================================================
+
+def setup_vpn_resilient_environment() -> None:
+    """
+    Configure environment variables for VPN resilience.
+    
+    VPNs (especially corporate VPNs) can break localhost connections by:
+    - Modifying DNS resolution
+    - Changing routing tables
+    - Intercepting connections via proxy
+    
+    This function sets environment variables to bypass these issues.
+    """
+    import os
+    
+    # Prevent proxy interception of local connections
+    os.environ['NO_PROXY'] = VPN_RESILIENT_ENV['NO_PROXY']
+    
+    # Remove SSH_AUTH_SOCK which can cause HTTPS corruption with some Go HTTP clients
+    os.environ.pop('SSH_AUTH_SOCK', None)
+
+
+def verify_model_server(retry_on_failure: bool = True, max_retries: int = 3) -> bool:
+    """
+    Verify that the Docker Model Runner server is accessible and restart if needed.
+    
+    This function is VPN-resilient - it uses curl with -k flag to handle
+    corporate SSL interception and tests the 127.0.0.1 endpoint.
+    
+    Args:
+        retry_on_failure: If True, attempt to restart the service on failure
+        max_retries: Maximum number of restart attempts
+    
+    Returns:
+        True if server is accessible, False otherwise
+    """
+    import subprocess
+    import time
+    
+    # Test the models endpoint (OpenAI-compatible)
+    api_url = f"{DMR_API_BASE}/models"
+    
+    # Use curl -k to handle corporate SSL interception
+    def check_server() -> bool:
+        try:
+            result = subprocess.run(
+                ["curl", "-k", "-s", "-f", "--connect-timeout", "5", api_url],
+                capture_output=True,
+                timeout=10
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return False
+    
+    # First check
+    if check_server():
+        return True
+    
+    if not retry_on_failure:
+        return False
+    
+    # Server not responding, try to restart Docker Model Runner containers
+    ui.print_warning("Docker Model Runner not responding, attempting restart...")
+    
+    for attempt in range(max_retries):
+        ui.print_info(f"Restart attempt {attempt + 1}/{max_retries}...")
+        
+        # Try to restart model-runner containers
+        if restart_model_runner_containers():
+            # Wait for service to be ready
+            time.sleep(5)
+            
+            if check_server():
+                ui.print_success("Docker Model Runner is now accessible")
+                return True
+        
+        if attempt < max_retries - 1:
+            time.sleep(3)  # Wait before next attempt
+    
+    ui.print_error("Failed to restore Docker Model Runner connectivity")
+    ui.print_info("Please check Docker Desktop is running and Model Runner is enabled")
+    return False
+
+
+def restart_model_runner_containers() -> bool:
+    """
+    Restart Docker Model Runner containers.
+    
+    Returns:
+        True if restart was attempted, False on error
+    """
+    import subprocess
+    
+    # Find model-runner containers
+    code, stdout, _ = utils.run_command(
+        ["docker", "ps", "-a", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}"],
+        timeout=10
+    )
+    
+    if code != 0:
+        return False
+    
+    restarted = False
+    for line in (stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        cid, name, image = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        hay = f"{name} {image}".lower()
+        if "model-runner" in hay or "modelrunner" in hay:
+            # Restart the container
+            restart_code, _, _ = utils.run_command(
+                ["docker", "restart", cid],
+                timeout=30
+            )
+            if restart_code == 0:
+                ui.print_info(f"Restarted container: {name}")
+                restarted = True
+    
+    return restarted
+
+
+def update_shell_profile_for_vpn() -> bool:
+    """
+    Update ~/.zshrc with VPN-resilient environment variables.
+    
+    Appends the following if not already present:
+    - export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"
+    - unset SSH_AUTH_SOCK
+    
+    Returns:
+        True if profile was updated or already configured, False on error
+    """
+    import shutil
+    from pathlib import Path
+    
+    zshrc_path = Path.home() / ".zshrc"
+    
+    # VPN-resilient shell configuration block
+    vpn_config_marker = "# Docker Model Runner VPN Resilience Configuration"
+    vpn_config_block = f'''
+{vpn_config_marker}
+# Prevent VPN proxy from intercepting local connections
+export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"
+# Prevent SSH_AUTH_SOCK from corrupting HTTPS connections
+unset SSH_AUTH_SOCK
+# End Docker Model Runner VPN Resilience Configuration
+'''
+    
+    try:
+        # Check if already configured
+        if zshrc_path.exists():
+            current_content = zshrc_path.read_text()
+            if vpn_config_marker in current_content:
+                ui.print_info("VPN resilience already configured in ~/.zshrc")
+                return True
+        else:
+            current_content = ""
+        
+        # Backup existing .zshrc
+        if zshrc_path.exists():
+            backup_path = zshrc_path.with_suffix(".zshrc.backup")
+            shutil.copy(zshrc_path, backup_path)
+            ui.print_info(f"Backed up existing .zshrc to {backup_path}")
+        
+        # Append VPN configuration
+        with open(zshrc_path, "a") as f:
+            f.write(vpn_config_block)
+        
+        ui.print_success("Updated ~/.zshrc with VPN-resilient configuration")
+        ui.print_info("Run 'source ~/.zshrc' or open a new terminal to apply changes")
+        return True
+        
+    except (OSError, IOError, PermissionError) as e:
+        ui.print_warning(f"Could not update ~/.zshrc: {e}")
+        ui.print_info("You can manually add the following to your shell profile:")
+        ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"')
+        ui.print_info('  unset SSH_AUTH_SOCK')
+        return False
+
+
+def get_vpn_resilient_api_base() -> str:
+    """
+    Get the VPN-resilient API base URL.
+    
+    Returns:
+        The API base URL using 127.0.0.1 instead of localhost
+    """
+    return DMR_API_BASE
+
+
+def get_docker_run_args_for_vpn_resilience() -> List[str]:
+    """
+    Get Docker run arguments for VPN-resilient container configuration.
+    
+    Docker Desktop Mac runs containers in a VM, so we cannot use --network host.
+    Instead, we must use explicit port binding to 127.0.0.1.
+    
+    Returns:
+        List of Docker run arguments for VPN resilience
+    """
+    # Port binding to 127.0.0.1 (not localhost) for VPN resilience
+    # This ensures the port is bound to the loopback interface directly
+    args = [
+        "-p", f"127.0.0.1:11434:11434",
+        # Environment variables inside the container
+        "-e", f"OLLAMA_HOST={DOCKER_CONTAINER_ENV['OLLAMA_HOST']}",
+        "-e", f"NO_PROXY={DOCKER_CONTAINER_ENV['NO_PROXY']}",
+        # Health check using curl
+        "--health-cmd", "curl -f http://localhost:11434/api/version || exit 1",
+        "--health-interval", "30s",
+        "--health-timeout", "10s",
+        "--health-retries", "3",
+        # Auto-restart for VPN connect/disconnect resilience
+        "--restart", "always",
+    ]
+    return args
 
 
 def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, bool]:
