@@ -523,10 +523,13 @@ def get_model_download_url(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bo
         return False, "", f"Unknown quantization: {quantization}"
     
     filename = model_info["name"]
-    # HuggingFace model URL pattern
+    # HuggingFace model URL pattern - use raw.githubusercontent.com for public models
+    # or try direct HuggingFace CDN
     base_url = "https://huggingface.co/microsoft/gpt-oss-20b-gguf/resolve/main"
     url = f"{base_url}/{filename}"
     
+    # Alternative: Try using huggingface_hub if available
+    # For now, use direct URL with proper headers
     return True, url, filename
 
 
@@ -553,12 +556,57 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         ui.print_error(f"Failed to get model URL: {url}")
         return False, model_path
     
+    # Try using huggingface_hub if available (better for authentication)
+    if utils.ensure_huggingface_hub_installed():
+        try:
+            import huggingface_hub
+        ui.print_info(f"Downloading {filename} using huggingface_hub...")
+        ui.print_warning("This may take a while (model is ~12-18GB)")
+        
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        huggingface_hub.hf_hub_download(
+            repo_id="microsoft/gpt-oss-20b-gguf",
+            filename=filename,
+            local_dir=str(model_path.parent),
+            local_dir_use_symlinks=False
+        )
+        
+        # Move file to expected location if needed
+        downloaded_path = model_path.parent / filename
+        if downloaded_path.exists() and downloaded_path != model_path:
+            downloaded_path.rename(model_path)
+        
+        ui.print_success(f"Model downloaded to {model_path}")
+        return True, model_path
+    except ImportError:
+        # huggingface_hub not available, try direct download
+        ui.print_info("huggingface_hub not available, using direct download...")
+        ui.print_info("(Install with: pip install huggingface_hub for better download support)")
+    except Exception as e:
+        ui.print_warning(f"Download with huggingface_hub failed: {e}")
+        ui.print_info("Trying direct download...")
+    
+    # Fallback to direct download
     try:
         ui.print_info(f"Downloading {filename}...")
         ui.print_warning("This may take a while (model is ~12-18GB)")
         
+        # Add headers to mimic browser request
         req = urllib.request.Request(url)
+        req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        
         with urllib.request.urlopen(req, timeout=3600, context=utils.get_unverified_ssl_context()) as response:
+            if response.status == 401:
+                ui.print_error("Authentication required. Please download manually:")
+                ui.print_info(f"  1. Visit: https://huggingface.co/microsoft/gpt-oss-20b-gguf")
+                ui.print_info(f"  2. Download {filename}")
+                ui.print_info(f"  3. Place it at: {model_path}")
+                ui.print_info("")
+                ui.print_info("Or install huggingface_hub for automatic download:")
+                ui.print_info("  pip install huggingface_hub")
+                return False, model_path
+            
             total_size = int(response.headers.get('Content-Length', 0))
             downloaded = 0
             
@@ -580,6 +628,17 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             print()  # New line after progress
             ui.print_success(f"Model downloaded to {model_path}")
             return True, model_path
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            ui.print_error("Authentication required. Please install huggingface_hub:")
+            ui.print_info("  pip install huggingface_hub")
+            ui.print_info("")
+            ui.print_info("Or download manually from:")
+            ui.print_info(f"  https://huggingface.co/microsoft/gpt-oss-20b-gguf/tree/main")
+            ui.print_info(f"  Place {filename} at: {model_path}")
+        else:
+            ui.print_error(f"Download failed: HTTP {e.code}")
+        return False, model_path
     except Exception as e:
         ui.print_error(f"Download failed: {e}")
         return False, model_path

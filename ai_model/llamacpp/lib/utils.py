@@ -54,6 +54,38 @@ def ensure_rich_installed() -> bool:
         return False
 
 
+def ensure_huggingface_hub_installed() -> bool:
+    """
+    Ensure huggingface_hub is installed, installing it if necessary.
+    
+    Returns:
+        True if huggingface_hub is available (either was already installed or just installed)
+    """
+    try:
+        import huggingface_hub
+        return True
+    except ImportError:
+        try:
+            import subprocess
+            import sys
+            
+            code, _, stderr = run_command(
+                [sys.executable, "-m", "pip", "install", "huggingface_hub>=0.20.0"],
+                timeout=120
+            )
+            
+            if code == 0:
+                try:
+                    import huggingface_hub
+                    return True
+                except ImportError:
+                    return False
+            else:
+                return False
+        except Exception:
+            return False
+
+
 # SSL context that skips certificate verification (equivalent to curl -k)
 _UNVERIFIED_SSL_CONTEXT: Optional[ssl.SSLContext] = None
 
