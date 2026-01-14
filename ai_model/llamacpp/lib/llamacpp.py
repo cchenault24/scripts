@@ -150,11 +150,37 @@ def get_latest_release_url() -> Tuple[bool, str]:
                 data = json.loads(response.read().decode('utf-8'))
                 assets = data.get("assets", [])
                 
-                for asset in assets:
-                    name = asset.get("name", "")
-                    if "server" in name.lower() and "darwin" in name.lower() and "arm64" in name.lower():
-                        return True, asset.get("browser_download_url", "")
+                # Try multiple naming patterns
+                patterns = [
+                    # Pattern 1: server-darwin-arm64
+                    (lambda n: "server" in n.lower() and "darwin" in n.lower() and "arm64" in n.lower()),
+                    # Pattern 2: llama-server-darwin-arm64
+                    (lambda n: "llama-server" in n.lower() and "darwin" in n.lower() and "arm64" in n.lower()),
+                    # Pattern 3: server-macos-arm64
+                    (lambda n: "server" in n.lower() and "macos" in n.lower() and "arm64" in n.lower()),
+                    # Pattern 4: server-apple-silicon
+                    (lambda n: "server" in n.lower() and ("apple" in n.lower() or "silicon" in n.lower())),
+                    # Pattern 5: server-darwin (any darwin binary)
+                    (lambda n: "server" in n.lower() and "darwin" in n.lower()),
+                ]
                 
+                for asset in assets:
+                    name = asset.get("name", "").lower()
+                    # Skip source archives and non-binary files
+                    if any(skip in name for skip in [".zip", ".tar.gz", ".tar", "source", "src"]):
+                        continue
+                    
+                    for pattern in patterns:
+                        if pattern(name):
+                            url = asset.get("browser_download_url", "")
+                            if url:
+                                ui.print_info(f"Found binary: {asset.get('name', 'unknown')}")
+                                return True, url
+                
+                # If no match, list available assets for debugging
+                available = [a.get("name", "") for a in assets if "server" in a.get("name", "").lower()]
+                if available:
+                    return False, f"No macOS ARM64 server binary found. Available server binaries: {', '.join(available[:5])}"
                 return False, "No macOS ARM64 server binary found in latest release"
             else:
                 return False, f"GitHub API returned status {response.status}"
@@ -202,33 +228,182 @@ def download_binary(url: str, dest_path: Path) -> Tuple[bool, str]:
         return False, f"Download failed: {e}"
 
 
+def check_existing_binary() -> Optional[Path]:
+    """
+    Check for existing llama-server binary in common locations.
+    
+    Returns:
+        Path to binary if found, None otherwise
+    """
+    # Check common locations
+    common_paths = [
+        Path.home() / "ai_models" / "llamacpp" / "bin" / "llama-server",
+        Path("/usr/local/bin/llama-server"),
+        Path("/opt/homebrew/bin/llama-server"),
+        Path.home() / ".local" / "bin" / "llama-server",
+    ]
+    
+    # Also check if llama-server is in PATH
+    path_binary = shutil.which("llama-server")
+    if path_binary:
+        return Path(path_binary)
+    
+    for path in common_paths:
+        if path.exists() and path.is_file():
+            import os
+            if os.access(path, os.X_OK):
+                return path
+    
+    return None
+
+
+def build_from_source() -> Tuple[bool, Path]:
+    """
+    Attempt to build llama.cpp server from source.
+    
+    Returns:
+        Tuple of (success, binary_path)
+    """
+    ui.print_subheader("Building llama.cpp Server from Source")
+    
+    # Check for required tools
+    if not shutil.which("git"):
+        ui.print_error("git is required to build from source")
+        ui.print_info("Install with: brew install git")
+        return False, get_binary_path()
+    
+    if not shutil.which("make"):
+        ui.print_error("make is required to build from source")
+        ui.print_info("Install Xcode Command Line Tools: xcode-select --install")
+        return False, get_binary_path()
+    
+    ui.print_info("Cloning llama.cpp repository...")
+    
+    import tempfile
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo_path = Path(tmpdir) / "llama.cpp"
+        
+        # Clone repository
+        code, stdout, stderr = utils.run_command(
+            ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
+            timeout=300
+        )
+        
+        if code != 0:
+            ui.print_error(f"Failed to clone repository: {stderr}")
+            return False, get_binary_path()
+        
+        ui.print_info("Building server (this may take a few minutes)...")
+        
+        # Build server
+        code, stdout, stderr = utils.run_command(
+            ["make", "server"],
+            timeout=600,
+            cwd=str(repo_path)
+        )
+        
+        if code != 0:
+            ui.print_error(f"Build failed: {stderr}")
+            ui.print_info("You may need to install build dependencies:")
+            ui.print_info("  brew install cmake")
+            return False, get_binary_path()
+        
+        # Copy binary to destination
+        built_binary = repo_path / "server"
+        if not built_binary.exists():
+            ui.print_error("Build succeeded but binary not found")
+            return False, get_binary_path()
+        
+        binary_path = get_binary_path()
+        binary_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            shutil.copy2(built_binary, binary_path)
+            binary_path.chmod(0o755)
+            ui.print_success(f"Binary built and installed at {binary_path}")
+            return True, binary_path
+        except Exception as e:
+            ui.print_error(f"Failed to copy binary: {e}")
+            return False, binary_path
+
+
 def install_binary() -> Tuple[bool, Path]:
     """
     Download and install llama.cpp server binary.
+    
+    Tries multiple methods:
+    1. Check for existing binary
+    2. Download from GitHub releases (if available)
+    3. Build from source
+    4. Manual installation instructions
     
     Returns:
         Tuple of (success, binary_path)
     """
     binary_path = get_binary_path()
     
+    # Check if binary already exists
     if binary_path.exists():
         ui.print_info(f"Binary already exists at {binary_path}")
         return True, binary_path
     
-    ui.print_subheader("Downloading llama.cpp Server Binary")
+    # Check for existing binary in common locations
+    existing = check_existing_binary()
+    if existing:
+        ui.print_info(f"Found existing binary at {existing}")
+        if ui.prompt_yes_no(f"Use existing binary at {existing}?", default=True):
+            binary_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(existing, binary_path)
+                binary_path.chmod(0o755)
+                ui.print_success(f"Binary copied to {binary_path}")
+                return True, binary_path
+            except Exception as e:
+                ui.print_warning(f"Could not copy binary: {e}")
     
+    ui.print_subheader("Installing llama.cpp Server Binary")
+    
+    # Try to download from releases
     success, url_or_error = get_latest_release_url()
-    if not success:
-        ui.print_error(f"Failed to get release URL: {url_or_error}")
-        ui.print_info("You may need to build from source or download manually")
-        return False, binary_path
+    if success:
+        success, message = download_binary(url_or_error, binary_path)
+        if success:
+            return True, binary_path
+        ui.print_warning(f"Download failed: {message}")
     
-    success, message = download_binary(url_or_error, binary_path)
-    if not success:
-        ui.print_error(message)
-        return False, binary_path
+    # If download failed, try building from source
+    ui.print_info("")
+    ui.print_info("Pre-built binaries are not available.")
+    ui.print_info("Options:")
+    ui.print_info("1. Build from source (automatic)")
+    ui.print_info("2. Build manually and place binary")
+    ui.print_info("")
     
-    return True, binary_path
+    if ui.prompt_yes_no("Build from source automatically?", default=True):
+        success, binary_path = build_from_source()
+        if success:
+            return True, binary_path
+    
+    # Provide manual instructions
+    ui.print_info("")
+    ui.print_info("Manual installation instructions:")
+    ui.print_info("1. Clone and build:")
+    ui.print_info("   git clone https://github.com/ggerganov/llama.cpp.git")
+    ui.print_info("   cd llama.cpp")
+    ui.print_info("   make server")
+    ui.print_info(f"   cp server {binary_path}")
+    ui.print_info("")
+    ui.print_info("2. Or if you already have llama-server built:")
+    ui.print_info(f"   cp /path/to/llama-server {binary_path}")
+    ui.print_info("")
+    
+    if ui.prompt_yes_no("Continue anyway? (You'll need to provide binary manually)", default=False):
+        if binary_path.exists():
+            ui.print_success(f"Found binary at {binary_path}")
+            return True, binary_path
+    
+    return False, binary_path
 
 
 def get_model_download_url(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, str, str]:

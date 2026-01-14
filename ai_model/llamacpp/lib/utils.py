@@ -41,7 +41,8 @@ def run_command(
     cmd: List[str], 
     capture: bool = True, 
     timeout: int = 300,
-    clean_env: bool = False
+    clean_env: bool = False,
+    cwd: Optional[str] = None
 ) -> Tuple[int, str, str]:
     """
     Run a shell command and return the result.
@@ -51,6 +52,7 @@ def run_command(
         capture: Whether to capture stdout/stderr (default: True)
         timeout: Maximum time to wait in seconds (default: 300)
         clean_env: If True, remove SSH_AUTH_SOCK from environment
+        cwd: Working directory for command (default: None)
     
     Returns:
         Tuple of (returncode, stdout, stderr)
@@ -66,7 +68,8 @@ def run_command(
             capture_output=capture,
             text=True,
             timeout=timeout,
-            env=env
+            env=env,
+            cwd=cwd
         )
         return result.returncode, result.stdout or "", result.stderr or ""
     except subprocess.TimeoutExpired:
