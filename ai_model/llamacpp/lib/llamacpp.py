@@ -561,50 +561,86 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
     # 3. Or download manually from the HuggingFace website
     
     # Try using HuggingFace CLI first (best for authentication)
-    # Install CLI if huggingface_hub is available but CLI is not
-    if not shutil.which("huggingface-cli") and utils.ensure_huggingface_hub_installed():
-        try:
-            import huggingface_hub
-            # The CLI should be available if huggingface_hub is installed
-            # Check again after import
-            if not shutil.which("huggingface-cli"):
-                ui.print_info("HuggingFace CLI not found, will use Python library instead")
-        except ImportError:
-            pass
-    
-    if shutil.which("huggingface-cli"):
-        ui.print_info(f"Downloading {filename} using HuggingFace CLI...")
-        ui.print_warning("This may take a while (model is ~12-18GB)")
+    # The CLI is installed as part of huggingface_hub
+    if utils.ensure_huggingface_hub_installed():
+        # Check if CLI is available (it should be after installing huggingface_hub)
+        # The CLI might be in user's local bin directory
+        import os
+        import sys
         
-        model_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Use huggingface-cli download command
-        code, stdout, stderr = utils.run_command(
-            [
-                "huggingface-cli", "download",
-                "microsoft/gpt-oss-20b-gguf",
-                filename,
-                "--local-dir", str(model_path.parent),
-                "--local-dir-use-symlinks", "False"
-            ],
-            timeout=3600
-        )
-        
-        if code == 0:
-            # Check if file was downloaded
-            downloaded_path = model_path.parent / filename
-            if downloaded_path.exists():
-                if downloaded_path != model_path:
-                    if model_path.exists():
-                        model_path.unlink()
-                    downloaded_path.rename(model_path)
-                ui.print_success(f"Model downloaded to {model_path}")
-                return True, model_path
+        # Check common locations for huggingface-cli
+        cli_path = shutil.which("huggingface-cli")
+        if not cli_path:
+            # Check user's local bin directory
+            user_bin = Path.home() / ".local" / "bin" / "huggingface-cli"
+            if user_bin.exists():
+                cli_path = str(user_bin)
             else:
-                ui.print_warning("CLI download completed but file not found")
+                # Try to find it via Python module
+                try:
+                    import huggingface_hub
+                    # The CLI might be available as a module
+                    code, _, _ = utils.run_command(
+                        [sys.executable, "-m", "huggingface_hub.commands.huggingface_cli", "--help"],
+                        timeout=5
+                    )
+                    if code == 0:
+                        cli_path = f"{sys.executable} -m huggingface_hub.commands.huggingface_cli"
+                except Exception:
+                    pass
+        
+        if cli_path:
+            ui.print_info(f"Downloading {filename} using HuggingFace CLI...")
+            ui.print_warning("This may take a while (model is ~12-18GB)")
+            
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use huggingface-cli download command
+            # Build command based on how CLI is available
+            if " -m " in cli_path:
+                # CLI available as Python module
+                cmd_parts = cli_path.split() + [
+                    "download",
+                    "microsoft/gpt-oss-20b-gguf",
+                    filename,
+                    "--local-dir", str(model_path.parent),
+                ]
+            else:
+                # CLI available as executable
+                cmd_parts = [
+                    cli_path, "download",
+                    "microsoft/gpt-oss-20b-gguf",
+                    filename,
+                    "--local-dir", str(model_path.parent),
+                ]
+            
+            code, stdout, stderr = utils.run_command(
+                cmd_parts,
+                timeout=3600
+            )
+            
+            if code == 0:
+                # Check if file was downloaded
+                downloaded_path = model_path.parent / filename
+                if downloaded_path.exists():
+                    if downloaded_path != model_path:
+                        if model_path.exists():
+                            model_path.unlink()
+                        downloaded_path.rename(model_path)
+                    ui.print_success(f"Model downloaded to {model_path}")
+                    return True, model_path
+                else:
+                    ui.print_warning("CLI download completed but file not found")
+            else:
+                if "not logged in" in stderr.lower() or "authentication" in stderr.lower():
+                    ui.print_warning("Authentication required for HuggingFace CLI")
+                    ui.print_info("You can log in with: huggingface-cli login")
+                    ui.print_info("Or the script will try other methods...")
+                else:
+                    ui.print_warning(f"HuggingFace CLI download failed: {stderr}")
+                ui.print_info("Trying Python library...")
         else:
-            ui.print_warning(f"HuggingFace CLI download failed: {stderr}")
-            ui.print_info("Trying Python library...")
+            ui.print_info("HuggingFace CLI not found, will use Python library instead")
     
     # Try using huggingface_hub Python library if available (better for authentication)
     if utils.ensure_huggingface_hub_installed():
