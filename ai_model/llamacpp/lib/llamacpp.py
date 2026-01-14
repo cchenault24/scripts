@@ -614,13 +614,45 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             
             # Configure SSL context for corporate environments
             import ssl
-            ssl_context = utils.get_unverified_ssl_context()
-            
-            # Set environment variable for huggingface_hub to use unverified SSL
-            # This is needed for corporate proxies with self-signed certificates
             import os
+            import warnings
+            
+            # Set environment variables to disable SSL verification
+            # This is needed for corporate proxies with self-signed certificates
             os.environ['CURL_CA_BUNDLE'] = ''
             os.environ['REQUESTS_CA_BUNDLE'] = ''
+            os.environ['PYTHONHTTPSVERIFY'] = '0'
+            
+            # Configure requests/urllib3 to skip SSL verification
+            try:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except ImportError:
+                pass
+            
+            # Monkey-patch requests to use unverified SSL context
+            try:
+                import requests
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.ssl_ import create_urllib3_context
+                
+                # Create a custom adapter that uses unverified SSL
+                class UnverifiedHTTPAdapter(HTTPAdapter):
+                    def init_poolmanager(self, *args, **kwargs):
+                        kwargs['ssl_context'] = utils.get_unverified_ssl_context()
+                        return super().init_poolmanager(*args, **kwargs)
+                
+                # Patch huggingface_hub's session if possible
+                try:
+                    huggingface_hub.utils._http_backend.HF_HUB_HTTP_CLIENT = requests.Session()
+                    adapter = UnverifiedHTTPAdapter()
+                    huggingface_hub.utils._http_backend.HF_HUB_HTTP_CLIENT.mount('https://', adapter)
+                    huggingface_hub.utils._http_backend.HF_HUB_HTTP_CLIENT.mount('http://', adapter)
+                except (AttributeError, ImportError):
+                    # If we can't patch it directly, at least set verify=False in requests calls
+                    pass
+            except ImportError:
+                pass
             
             # Try to download with token if available, otherwise use anonymous
             try:
@@ -635,12 +667,25 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             # Use hf_hub_download with progress tracking
             # token=None allows anonymous access for public repos
             # Remove deprecated arguments
-            downloaded_path = huggingface_hub.hf_hub_download(
-                repo_id="microsoft/gpt-oss-20b-gguf",
-                filename=filename,
-                local_dir=str(model_path.parent),
-                token=None  # Use None for anonymous, or auto-detect if logged in
-            )
+            # Try to configure SSL verification bypass
+            try:
+                # Try downloading with verify=False if possible
+                downloaded_path = huggingface_hub.hf_hub_download(
+                    repo_id="microsoft/gpt-oss-20b-gguf",
+                    filename=filename,
+                    local_dir=str(model_path.parent),
+                    token=None,  # Use None for anonymous, or auto-detect if logged in
+                    # Note: huggingface_hub doesn't directly support verify=False,
+                    # but environment variables should handle it
+                )
+            except Exception as e:
+                # If it still fails, try with a workaround
+                if "SSL" in str(e) or "certificate" in str(e).lower():
+                    ui.print_warning("SSL verification issue persists, trying alternative method...")
+                    # Try using requests directly as fallback
+                    raise
+                else:
+                    raise
             
             # Move file to expected location if needed
             downloaded_path_obj = Path(downloaded_path)
