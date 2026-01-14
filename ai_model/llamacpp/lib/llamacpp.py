@@ -531,9 +531,118 @@ def get_model_download_url(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bo
     return True, url, filename
 
 
+def find_ollama_model() -> Optional[Path]:
+    """
+    Check if GPT-OSS 20B model is available via Ollama.
+    
+    Returns:
+        Path to Ollama model file if found, None otherwise
+    """
+    # Check if Ollama is installed
+    if not shutil.which("ollama"):
+        return None
+    
+    # Try to find Ollama model storage location
+    # Ollama stores models in ~/.ollama/models/
+    ollama_models_dir = Path.home() / ".ollama" / "models"
+    
+    if not ollama_models_dir.exists():
+        return None
+    
+    # Look for GPT-OSS 20B model files
+    # Ollama model names might be: gpt-oss-20b, gpt-oss:20b, etc.
+    model_patterns = [
+        "gpt-oss-20b*",
+        "gpt-oss:20b*",
+        "*gpt-oss*20b*",
+    ]
+    
+    for pattern in model_patterns:
+        for model_file in ollama_models_dir.rglob(pattern):
+            if model_file.suffix == ".gguf" or "q4" in model_file.name.lower():
+                return model_file
+    
+    return None
+
+
+def download_model_via_ollama(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path]:
+    """
+    Download model using Ollama, then copy GGUF file.
+    
+    Args:
+        quantization: Model quantization (for reference)
+    
+    Returns:
+        Tuple of (success, model_path)
+    """
+    model_path = LLAMACPP_MODEL_DIR / GPT_OSS_20B_MODELS[quantization]["name"]
+    
+    if not shutil.which("ollama"):
+        return False, model_path
+    
+    ui.print_info("Using Ollama to download model...")
+    ui.print_info("This will pull the model via Ollama, then extract the GGUF file")
+    
+    # Try different Ollama model names
+    ollama_model_names = [
+        "gpt-oss-20b",
+        "gpt-oss:20b",
+        "microsoft/gpt-oss-20b",
+    ]
+    
+    pulled_model = None
+    for model_name in ollama_model_names:
+        ui.print_info(f"Trying to pull {model_name}...")
+        code, stdout, stderr = utils.run_command(
+            ["ollama", "pull", model_name],
+            timeout=3600
+        )
+        
+        if code == 0:
+            pulled_model = model_name
+            ui.print_success(f"Successfully pulled {model_name}")
+            break
+        else:
+            ui.print_warning(f"Failed to pull {model_name}: {stderr}")
+    
+    if not pulled_model:
+        ui.print_error("Could not pull model via Ollama")
+        ui.print_info("Available models might have different names")
+        return False, model_path
+    
+    # Find the downloaded model file
+    ui.print_info("Locating downloaded model file...")
+    ollama_model_file = find_ollama_model()
+    
+    if not ollama_model_file:
+        ui.print_warning("Model pulled but GGUF file not found in Ollama storage")
+        ui.print_info("Ollama models are typically stored in ~/.ollama/models/")
+        return False, model_path
+    
+    ui.print_info(f"Found model file at: {ollama_model_file}")
+    ui.print_info("Copying to llama.cpp model directory...")
+    
+    # Copy to our model directory
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(ollama_model_file, model_path)
+        ui.print_success(f"Model copied to {model_path}")
+        return True, model_path
+    except Exception as e:
+        ui.print_error(f"Failed to copy model: {e}")
+        return False, model_path
+
+
 def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path]:
     """
     Download GPT-OSS 20B model.
+    
+    Tries multiple methods:
+    1. Check if model already exists
+    2. Check if available via Ollama
+    3. Try HuggingFace CLI
+    4. Try huggingface_hub Python library
+    5. Try direct download
     
     Args:
         quantization: Model quantization to download
@@ -548,6 +657,27 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         return True, model_path
     
     ui.print_subheader(f"Downloading GPT-OSS 20B Model ({quantization})")
+    
+    # Check if model is available via Ollama
+    ollama_model = find_ollama_model()
+    if ollama_model:
+        ui.print_info(f"Found model in Ollama storage: {ollama_model}")
+        if ui.prompt_yes_no("Use Ollama model file?", default=True):
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(ollama_model, model_path)
+                ui.print_success(f"Model copied to {model_path}")
+                return True, model_path
+            except Exception as e:
+                ui.print_warning(f"Failed to copy: {e}")
+    
+    # Offer to download via Ollama
+    if shutil.which("ollama"):
+        if ui.prompt_yes_no("Download model using Ollama? (More reliable than HuggingFace)", default=True):
+            success, model_path = download_model_via_ollama(quantization)
+            if success:
+                return True, model_path
+            ui.print_info("Ollama download failed, trying HuggingFace...")
     
     success, url, filename = get_model_download_url(quantization)
     if not success:
