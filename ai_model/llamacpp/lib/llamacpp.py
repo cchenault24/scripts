@@ -556,7 +556,42 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         ui.print_error(f"Failed to get model URL: {url}")
         return False, model_path
     
-    # Try using huggingface_hub if available (better for authentication)
+    # Try using HuggingFace CLI first (best for authentication)
+    if shutil.which("huggingface-cli"):
+        ui.print_info(f"Downloading {filename} using HuggingFace CLI...")
+        ui.print_warning("This may take a while (model is ~12-18GB)")
+        
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Use huggingface-cli download command
+        code, stdout, stderr = utils.run_command(
+            [
+                "huggingface-cli", "download",
+                "microsoft/gpt-oss-20b-gguf",
+                filename,
+                "--local-dir", str(model_path.parent),
+                "--local-dir-use-symlinks", "False"
+            ],
+            timeout=3600
+        )
+        
+        if code == 0:
+            # Check if file was downloaded
+            downloaded_path = model_path.parent / filename
+            if downloaded_path.exists():
+                if downloaded_path != model_path:
+                    if model_path.exists():
+                        model_path.unlink()
+                    downloaded_path.rename(model_path)
+                ui.print_success(f"Model downloaded to {model_path}")
+                return True, model_path
+            else:
+                ui.print_warning("CLI download completed but file not found")
+        else:
+            ui.print_warning(f"HuggingFace CLI download failed: {stderr}")
+            ui.print_info("Trying Python library...")
+    
+    # Try using huggingface_hub Python library if available (better for authentication)
     if utils.ensure_huggingface_hub_installed():
         try:
             import huggingface_hub
@@ -609,7 +644,8 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             if e.response.status_code == 401:
                 ui.print_warning("Authentication required for this model")
                 ui.print_info("You can log in with: huggingface-cli login")
-                ui.print_info("Or the script will try direct download...")
+                ui.print_info("Or install huggingface-cli: pip install --user huggingface_hub[cli]")
+                ui.print_info("Trying direct download...")
             else:
                 ui.print_warning(f"Download with huggingface_hub failed: {e}")
                 ui.print_info("Trying direct download...")
