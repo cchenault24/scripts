@@ -667,7 +667,24 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             # Try to download using requests directly if SSL issues persist
             # This gives us full control over SSL verification
             try:
-                import requests
+                # Try to import requests, install if needed
+                try:
+                    import requests
+                except ImportError:
+                    ui.print_info("Installing requests library...")
+                    import subprocess
+                    import sys
+                    code, _, _ = utils.run_command(
+                        [sys.executable, "-m", "pip", "install", "--user", "requests"],
+                        timeout=60
+                    )
+                    if code != 0:
+                        # Try with --break-system-packages
+                        utils.run_command(
+                            [sys.executable, "-m", "pip", "install", "--break-system-packages", "requests"],
+                            timeout=60
+                        )
+                    import requests
                 from requests.adapters import HTTPAdapter
                 from urllib3.util.retry import Retry
                 
