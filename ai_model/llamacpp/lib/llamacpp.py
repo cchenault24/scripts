@@ -557,6 +557,7 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         return False, model_path
     
     # Try using huggingface_hub if available (better for authentication)
+    ui.print_info("Installing huggingface_hub if needed...")
     if utils.ensure_huggingface_hub_installed():
         try:
             import huggingface_hub
@@ -566,27 +567,42 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             
             model_path.parent.mkdir(parents=True, exist_ok=True)
             
-            huggingface_hub.hf_hub_download(
+            # Use hf_hub_download with progress tracking
+            downloaded_path = huggingface_hub.hf_hub_download(
                 repo_id="microsoft/gpt-oss-20b-gguf",
                 filename=filename,
                 local_dir=str(model_path.parent),
-                local_dir_use_symlinks=False
+                local_dir_use_symlinks=False,
+                resume_download=True
             )
             
             # Move file to expected location if needed
-            downloaded_path = model_path.parent / filename
-            if downloaded_path.exists() and downloaded_path != model_path:
-                downloaded_path.rename(model_path)
+            downloaded_path_obj = Path(downloaded_path)
+            if downloaded_path_obj.exists() and downloaded_path_obj != model_path:
+                if model_path.exists():
+                    model_path.unlink()  # Remove existing file if present
+                downloaded_path_obj.rename(model_path)
+            elif downloaded_path_obj != model_path:
+                # File is already in the right place, just ensure it's named correctly
+                if not model_path.exists() and downloaded_path_obj.exists():
+                    downloaded_path_obj.rename(model_path)
             
-            ui.print_success(f"Model downloaded to {model_path}")
-            return True, model_path
-        except ImportError:
+            if model_path.exists():
+                ui.print_success(f"Model downloaded to {model_path}")
+                return True, model_path
+            else:
+                ui.print_warning("Download completed but file not found at expected location")
+                ui.print_info(f"Downloaded to: {downloaded_path}")
+                return False, model_path
+        except ImportError as e:
             # huggingface_hub not available, try direct download
-            ui.print_info("huggingface_hub not available, using direct download...")
-            ui.print_info("(Install with: pip install huggingface_hub for better download support)")
+            ui.print_warning(f"huggingface_hub import failed: {e}")
+            ui.print_info("Trying direct download...")
         except Exception as e:
             ui.print_warning(f"Download with huggingface_hub failed: {e}")
             ui.print_info("Trying direct download...")
+    else:
+        ui.print_warning("Could not install huggingface_hub, trying direct download...")
     
     # Fallback to direct download
     try:
