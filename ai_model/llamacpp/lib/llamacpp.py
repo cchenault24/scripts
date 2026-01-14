@@ -554,6 +554,12 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         ui.print_error(f"Failed to get model URL: {url}")
         return False, model_path
     
+    # Note: The microsoft/gpt-oss-20b-gguf repository may require authentication
+    # or may not exist. If downloads fail, user may need to:
+    # 1. Check if repository exists at https://huggingface.co/microsoft/gpt-oss-20b-gguf
+    # 2. Log in with: huggingface-cli login
+    # 3. Or download manually from the HuggingFace website
+    
     # Try using HuggingFace CLI first (best for authentication)
     # Install CLI if huggingface_hub is available but CLI is not
     if not shutil.which("huggingface-cli") and utils.ensure_huggingface_hub_installed():
@@ -866,15 +872,23 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             continue
     
     # All URL patterns failed
-    ui.print_error("All download methods failed. The model may require authentication.")
+    ui.print_error("All download methods failed. The model may require authentication or the repository may not exist.")
     ui.print_info("")
-    ui.print_info("Please download manually:")
-    ui.print_info(f"  1. Visit: https://huggingface.co/microsoft/gpt-oss-20b-gguf/tree/main")
-    ui.print_info(f"  2. Download {filename}")
-    ui.print_info(f"  3. Place it at: {model_path}")
+    ui.print_info("Troubleshooting steps:")
+    ui.print_info(f"  1. Verify the repository exists: https://huggingface.co/microsoft/gpt-oss-20b-gguf")
+    ui.print_info(f"  2. If it requires authentication, log in with: huggingface-cli login")
+    ui.print_info(f"  3. Or download manually:")
+    ui.print_info(f"     - Visit: https://huggingface.co/microsoft/gpt-oss-20b-gguf/tree/main")
+    ui.print_info(f"     - Download {filename}")
+    ui.print_info(f"     - Place it at: {model_path}")
     ui.print_info("")
-    ui.print_info("Or authenticate with HuggingFace:")
-    ui.print_info("  huggingface-cli login")
+    ui.print_info("Note: If the repository doesn't exist, you may need to use a different model.")
+    ui.print_info("The script will continue, but you'll need to provide the model file manually.")
+    
+    # Ask if user wants to continue without the model
+    if ui.prompt_yes_no("Continue setup without downloading the model? (You can add it manually later)", default=False):
+        return False, model_path
+    
     return False, model_path
             
             total_size = int(response.headers.get('Content-Length', 0))
