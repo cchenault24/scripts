@@ -69,20 +69,27 @@ def ensure_huggingface_hub_installed() -> bool:
             import subprocess
             import sys
             
-            code, _, stderr = run_command(
-                [sys.executable, "-m", "pip", "install", "huggingface_hub>=0.20.0"],
+            from . import ui
+            ui.print_info("Installing huggingface_hub...")
+            
+            code, stdout, stderr = run_command(
+                [sys.executable, "-m", "pip", "install", "huggingface_hub>=0.20.0", "--quiet"],
                 timeout=120
             )
             
             if code == 0:
                 try:
                     import huggingface_hub
+                    ui.print_success("huggingface_hub installed")
                     return True
                 except ImportError:
+                    ui.print_warning("huggingface_hub installed but import failed")
                     return False
             else:
+                ui.print_warning(f"Failed to install huggingface_hub: {stderr}")
                 return False
-        except Exception:
+        except Exception as e:
+            ui.print_warning(f"Error installing huggingface_hub: {e}")
             return False
 
 

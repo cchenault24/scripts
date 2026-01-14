@@ -557,7 +557,6 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         return False, model_path
     
     # Try using huggingface_hub if available (better for authentication)
-    ui.print_info("Installing huggingface_hub if needed...")
     if utils.ensure_huggingface_hub_installed():
         try:
             import huggingface_hub
