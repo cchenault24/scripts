@@ -694,14 +694,39 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
                 
-                # Get the download URL
-                file_url = f"https://huggingface.co/microsoft/gpt-oss-20b-gguf/resolve/main/{filename}"
+                # Get the download URL - try multiple patterns
+                url_patterns = [
+                    f"https://huggingface.co/microsoft/gpt-oss-20b-gguf/resolve/main/{filename}",
+                    f"https://huggingface.co/microsoft/gpt-oss-20b-gguf/resolve/refs%2Fmain%2F{filename}",
+                ]
+                
+                downloaded_successfully = False
+                for file_url in url_patterns:
+                    try:
+                        ui.print_info(f"Trying download URL...")
+                        
+                        # Download with progress
+                        response = session.get(file_url, stream=True, timeout=3600, allow_redirects=True)
+                        
+                        if response.status_code == 401:
+                            ui.print_warning("Authentication required, trying next URL pattern...")
+                            continue
+                        elif response.status_code == 404:
+                            ui.print_warning("File not found at this URL, trying next pattern...")
+                            continue
+                        
+                        response.raise_for_status()
+                        downloaded_successfully = True
+                        break
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code in (401, 404):
+                            continue
+                        raise
+                
+                if not downloaded_successfully:
+                    raise Exception("All URL patterns failed with 401/404")
                 
                 ui.print_info("Downloading with SSL verification disabled (corporate proxy)...")
-                
-                # Download with progress
-                response = session.get(file_url, stream=True, timeout=3600)
-                response.raise_for_status()
                 
                 total_size = int(response.headers.get('Content-Length', 0))
                 downloaded = 0
