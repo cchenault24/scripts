@@ -566,13 +566,25 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             
             model_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Try to download with token if available, otherwise use anonymous
+            try:
+                # Check if user is logged in
+                token = huggingface_hub.HfFolder.get_token()
+                if token:
+                    ui.print_info("Using HuggingFace authentication")
+            except Exception:
+                # No token, will try anonymous access
+                ui.print_info("Downloading as anonymous user (public models only)")
+            
             # Use hf_hub_download with progress tracking
+            # token=None allows anonymous access for public repos
             downloaded_path = huggingface_hub.hf_hub_download(
                 repo_id="microsoft/gpt-oss-20b-gguf",
                 filename=filename,
                 local_dir=str(model_path.parent),
                 local_dir_use_symlinks=False,
-                resume_download=True
+                resume_download=True,
+                token=None  # Use None for anonymous, or auto-detect if logged in
             )
             
             # Move file to expected location if needed
@@ -593,6 +605,14 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
                 ui.print_warning("Download completed but file not found at expected location")
                 ui.print_info(f"Downloaded to: {downloaded_path}")
                 return False, model_path
+        except huggingface_hub.utils.HfHubHTTPError as e:
+            if e.response.status_code == 401:
+                ui.print_warning("Authentication required for this model")
+                ui.print_info("You can log in with: huggingface-cli login")
+                ui.print_info("Or the script will try direct download...")
+            else:
+                ui.print_warning(f"Download with huggingface_hub failed: {e}")
+                ui.print_info("Trying direct download...")
         except ImportError as e:
             # huggingface_hub not available, try direct download
             ui.print_warning(f"huggingface_hub import failed: {e}")
