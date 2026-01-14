@@ -890,28 +890,6 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         return False, model_path
     
     return False, model_path
-            
-            total_size = int(response.headers.get('Content-Length', 0))
-            downloaded = 0
-            
-            model_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(model_path, 'wb') as f:
-                while True:
-                    chunk = response.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        percent = (downloaded / total_size) * 100
-                        mb_downloaded = downloaded / (1024 * 1024)
-                        mb_total = total_size / (1024 * 1024)
-                        print(f"\r  Progress: {percent:.1f}% ({mb_downloaded:.1f}MB / {mb_total:.1f}MB)", end='', flush=True)
-            
-            print()  # New line after progress
-            ui.print_success(f"Model downloaded to {model_path}")
-            return True, model_path
     except urllib.error.HTTPError as e:
         if e.code == 401:
             ui.print_error("Authentication required. Please install huggingface_hub:")
