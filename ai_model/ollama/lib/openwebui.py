@@ -339,21 +339,90 @@ def verify_openwebui_accessible(port: int = OPENWEBUI_PORT) -> bool:
 
 
 def pull_openwebui_image() -> bool:
-    """Pull the Open WebUI Docker image."""
+    """Pull the Open WebUI Docker image with real-time progress."""
     ui.print_info(f"Pulling Open WebUI image: {OPENWEBUI_IMAGE}")
     ui.print_info("This may take a few minutes on first run...")
+    print()  # Add blank line before progress
     
-    code, stdout, stderr = utils.run_command(
-        ["docker", "pull", OPENWEBUI_IMAGE],
-        timeout=600  # 10 minutes for large image
-    )
+    import re
     
-    if code != 0:
-        ui.print_error(f"Failed to pull image: {stderr}")
+    try:
+        # Use Popen to stream output in real-time
+        # Docker writes progress to stderr, so we merge it with stdout
+        process = subprocess.Popen(
+            ["docker", "pull", OPENWEBUI_IMAGE],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Merge stderr into stdout
+            text=True,
+            bufsize=1,  # Line buffered
+            universal_newlines=True
+        )
+        
+        # Stream output line by line
+        last_progress_line = ""
+        error_lines = []
+        
+        for line in process.stdout:
+            if not line:
+                continue
+            
+            # Clean ANSI escape codes for display
+            clean_line = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', line).strip()
+            
+            if not clean_line:
+                continue
+            
+            # Check for errors
+            if any(keyword in clean_line.lower() for keyword in ["error", "failed", "unauthorized", "denied"]):
+                error_lines.append(clean_line)
+                print()  # New line for errors
+                ui.print_error(f"  {clean_line}")
+            # Show progress updates (Docker pull format)
+            elif any(keyword in clean_line.lower() for keyword in [
+                "pulling", "downloading", "extracting", "pull complete", 
+                "digest:", "status:", "already exists", "verifying"
+            ]):
+                # Only update if different from last line to avoid flicker
+                if clean_line != last_progress_line:
+                    # Show progress on same line (overwrite with \r)
+                    print(f"\r  {clean_line[:80]}", end="", flush=True)  # Limit width
+                    last_progress_line = clean_line
+        
+        # Wait for process to complete
+        returncode = process.wait(timeout=600)  # 10 minutes timeout
+        
+        print()  # New line after progress completes
+        
+        if returncode != 0:
+            if error_lines:
+                ui.print_error("Failed to pull Open WebUI image")
+                for err in error_lines[-3:]:  # Show last 3 errors
+                    ui.print_error(f"  {err}")
+            else:
+                ui.print_error("Failed to pull Open WebUI image (unknown error)")
+            return False
+        
+        ui.print_success("Open WebUI image pulled successfully")
+        return True
+        
+    except subprocess.TimeoutExpired:
+        if 'process' in locals():
+            process.kill()
+        print()
+        ui.print_error("Docker pull timed out after 10 minutes")
+        ui.print_info("This can happen with slow connections. Try running manually:")
+        ui.print_info(f"  docker pull {OPENWEBUI_IMAGE}")
         return False
-    
-    ui.print_success("Open WebUI image pulled successfully")
-    return True
+    except KeyboardInterrupt:
+        if 'process' in locals():
+            process.kill()
+        print()
+        ui.print_warning("Docker pull cancelled by user")
+        return False
+    except Exception as e:
+        print()
+        ui.print_error(f"Failed to pull image: {e}")
+        return False
 
 
 def create_openwebui_container(
