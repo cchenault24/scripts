@@ -331,51 +331,51 @@ def build_from_source() -> Tuple[bool, Path]:
             ui.print_error("cmake is required but not found and Homebrew is not available")
             return False, get_binary_path()
     
-        ui.print_info("Cloning llama.cpp repository...")
+    ui.print_info("Cloning llama.cpp repository...")
+    
+    import tempfile
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo_path = Path(tmpdir) / "llama.cpp"
+        build_path = repo_path / "build"
         
-        import tempfile
+        # Clone repository
+        code, stdout, stderr = utils.run_command(
+            ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
+            timeout=300
+        )
         
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_path = Path(tmpdir) / "llama.cpp"
-            build_path = repo_path / "build"
-            
-            # Clone repository
-            code, stdout, stderr = utils.run_command(
-                ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
-                timeout=300
-            )
-            
-            if code != 0:
-                ui.print_error(f"Failed to clone repository: {stderr}")
-                return False, get_binary_path()
-            
-            ui.print_success("Repository cloned")
-            ui.print_info("Configuring build with CMake...")
-            
-            # Create build directory
-            build_path.mkdir(parents=True, exist_ok=True)
-            
-            # Configure with CMake - enable server target
-            cmake_args = [
-                "cmake", "..",
-                "-DCMAKE_BUILD_TYPE=Release",
-                "-DBUILD_SHARED_LIBS=OFF",
-                "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
-            ]
-            
-            code, stdout, stderr = utils.run_command(
-                cmake_args,
-                timeout=300,
-                cwd=str(build_path)
-            )
-            
-            if code != 0:
-                ui.print_error(f"CMake configuration failed: {stderr}")
-                ui.print_info("Configuration output:")
-                ui.print_info(stdout[-500:] if stdout else "No output")
-                return False, get_binary_path()
-            
-            ui.print_success("CMake configuration complete")
+        if code != 0:
+            ui.print_error(f"Failed to clone repository: {stderr}")
+            return False, get_binary_path()
+        
+        ui.print_success("Repository cloned")
+        ui.print_info("Configuring build with CMake...")
+        
+        # Create build directory
+        build_path.mkdir(parents=True, exist_ok=True)
+        
+        # Configure with CMake - enable server target
+        cmake_args = [
+            "cmake", "..",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
+        ]
+        
+        code, stdout, stderr = utils.run_command(
+            cmake_args,
+            timeout=300,
+            cwd=str(build_path)
+        )
+        
+        if code != 0:
+            ui.print_error(f"CMake configuration failed: {stderr}")
+            ui.print_info("Configuration output:")
+            ui.print_info(stdout[-500:] if stdout else "No output")
+            return False, get_binary_path()
+        
+        ui.print_success("CMake configuration complete")
         
         ui.print_info("Building server (this may take 5-10 minutes)...")
         ui.print_info("Progress:")
