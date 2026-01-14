@@ -259,7 +259,7 @@ def check_existing_binary() -> Optional[Path]:
 
 def build_from_source() -> Tuple[bool, Path]:
     """
-    Attempt to build llama.cpp server from source.
+    Attempt to build llama.cpp server from source using CMake.
     
     Returns:
         Tuple of (success, binary_path)
@@ -272,9 +272,9 @@ def build_from_source() -> Tuple[bool, Path]:
         ui.print_info("Install with: brew install git")
         return False, get_binary_path()
     
-    if not shutil.which("make"):
-        ui.print_error("make is required to build from source")
-        ui.print_info("Install Xcode Command Line Tools: xcode-select --install")
+    if not shutil.which("cmake"):
+        ui.print_error("cmake is required to build from source")
+        ui.print_info("Install with: brew install cmake")
         return False, get_binary_path()
     
     ui.print_info("Cloning llama.cpp repository...")
@@ -283,6 +283,7 @@ def build_from_source() -> Tuple[bool, Path]:
     
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_path = Path(tmpdir) / "llama.cpp"
+        build_path = repo_path / "build"
         
         # Clone repository
         code, stdout, stderr = utils.run_command(
@@ -294,25 +295,64 @@ def build_from_source() -> Tuple[bool, Path]:
             ui.print_error(f"Failed to clone repository: {stderr}")
             return False, get_binary_path()
         
-        ui.print_info("Building server (this may take a few minutes)...")
+        ui.print_info("Configuring build with CMake...")
         
-        # Build server
+        # Create build directory
+        build_path.mkdir(parents=True, exist_ok=True)
+        
+        # Configure with CMake
+        cmake_args = [
+            "cmake", "..",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DBUILD_SHARED_LIBS=OFF",
+        ]
+        
         code, stdout, stderr = utils.run_command(
-            ["make", "server"],
-            timeout=600,
-            cwd=str(repo_path)
+            cmake_args,
+            timeout=300,
+            cwd=str(build_path)
         )
         
         if code != 0:
-            ui.print_error(f"Build failed: {stderr}")
+            ui.print_error(f"CMake configuration failed: {stderr}")
             ui.print_info("You may need to install build dependencies:")
             ui.print_info("  brew install cmake")
             return False, get_binary_path()
         
-        # Copy binary to destination
-        built_binary = repo_path / "server"
-        if not built_binary.exists():
-            ui.print_error("Build succeeded but binary not found")
+        ui.print_info("Building server (this may take a few minutes)...")
+        
+        # Build server target
+        code, stdout, stderr = utils.run_command(
+            ["cmake", "--build", ".", "--config", "Release", "--target", "server"],
+            timeout=900,  # 15 minutes for build
+            cwd=str(build_path)
+        )
+        
+        if code != 0:
+            ui.print_error(f"Build failed: {stderr}")
+            ui.print_info("Build output:")
+            ui.print_info(stdout[-500:] if stdout else "No output")
+            return False, get_binary_path()
+        
+        # Find the built binary (location varies by platform)
+        possible_locations = [
+            build_path / "bin" / "server",
+            build_path / "server",
+            build_path / "bin" / "Release" / "server",
+            build_path / "bin" / "server.exe",  # Windows, but check anyway
+        ]
+        
+        built_binary = None
+        for location in possible_locations:
+            if location.exists():
+                built_binary = location
+                break
+        
+        if not built_binary:
+            ui.print_error("Build succeeded but binary not found in expected locations")
+            ui.print_info("Searched in:")
+            for loc in possible_locations:
+                ui.print_info(f"  {loc}")
             return False, get_binary_path()
         
         binary_path = get_binary_path()
@@ -388,11 +428,13 @@ def install_binary() -> Tuple[bool, Path]:
     # Provide manual instructions
     ui.print_info("")
     ui.print_info("Manual installation instructions:")
-    ui.print_info("1. Clone and build:")
+    ui.print_info("1. Clone and build with CMake:")
     ui.print_info("   git clone https://github.com/ggerganov/llama.cpp.git")
     ui.print_info("   cd llama.cpp")
-    ui.print_info("   make server")
-    ui.print_info(f"   cp server {binary_path}")
+    ui.print_info("   mkdir build && cd build")
+    ui.print_info("   cmake .. -DCMAKE_BUILD_TYPE=Release")
+    ui.print_info("   cmake --build . --config Release --target server")
+    ui.print_info(f"   cp bin/server {binary_path}")
     ui.print_info("")
     ui.print_info("2. Or if you already have llama-server built:")
     ui.print_info(f"   cp /path/to/llama-server {binary_path}")
