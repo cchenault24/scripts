@@ -35,10 +35,18 @@ def ensure_rich_installed() -> bool:
         import subprocess
         import sys
         
-        code, _, stderr = run_command(
-            [sys.executable, "-m", "pip", "install", "rich>=13.0.0"],
-            timeout=120
-        )
+            # Try with --user first (safer for externally-managed environments)
+            code, _, stderr = run_command(
+                [sys.executable, "-m", "pip", "install", "--user", "rich>=13.0.0"],
+                timeout=120
+            )
+            
+            # If --user fails, try with --break-system-packages as fallback
+            if code != 0 and "externally-managed-environment" in stderr:
+                code, _, stderr = run_command(
+                    [sys.executable, "-m", "pip", "install", "--break-system-packages", "rich>=13.0.0"],
+                    timeout=120
+                )
         
         if code == 0:
             # Try importing again
@@ -79,10 +87,24 @@ def ensure_huggingface_hub_installed(show_messages: bool = True) -> bool:
                 except ImportError:
                     print("Installing huggingface_hub...")
             
+            # Try with --user first (safer for externally-managed environments)
             code, stdout, stderr = run_command(
-                [sys.executable, "-m", "pip", "install", "huggingface_hub>=0.20.0", "--quiet"],
+                [sys.executable, "-m", "pip", "install", "--user", "huggingface_hub>=0.20.0", "--quiet"],
                 timeout=120
             )
+            
+            # If --user fails, try with --break-system-packages as fallback
+            if code != 0 and "externally-managed-environment" in stderr:
+                if show_messages:
+                    try:
+                        from . import ui
+                        ui.print_info("Trying with --break-system-packages flag...")
+                    except ImportError:
+                        pass
+                code, stdout, stderr = run_command(
+                    [sys.executable, "-m", "pip", "install", "--break-system-packages", "huggingface_hub>=0.20.0", "--quiet"],
+                    timeout=120
+                )
             
             if code == 0:
                 try:
