@@ -45,6 +45,9 @@ from lib import llamacpp
 from lib import ui
 from lib import utils
 
+# Ensure Rich is installed for progress bars
+utils.ensure_rich_installed()
+
 # Configure VPN resilience at startup
 llamacpp.setup_vpn_resilient_environment()
 

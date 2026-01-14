@@ -18,6 +18,42 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
+def ensure_rich_installed() -> bool:
+    """
+    Ensure Rich is installed, installing it if necessary.
+    
+    Returns:
+        True if Rich is available (either was already installed or just installed)
+    """
+    global RICH_AVAILABLE
+    
+    if RICH_AVAILABLE:
+        return True
+    
+    # Try to install Rich
+    try:
+        import subprocess
+        import sys
+        
+        code, _, stderr = run_command(
+            [sys.executable, "-m", "pip", "install", "rich>=13.0.0"],
+            timeout=120
+        )
+        
+        if code == 0:
+            # Try importing again
+            try:
+                from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+                RICH_AVAILABLE = True
+                return True
+            except ImportError:
+                return False
+        else:
+            return False
+    except Exception:
+        return False
+
+
 # SSL context that skips certificate verification (equivalent to curl -k)
 _UNVERIFIED_SSL_CONTEXT: Optional[ssl.SSLContext] = None
 
@@ -72,6 +108,9 @@ def run_command(
             env = None
         
         if show_progress:
+            # Ensure Rich is available
+            ensure_rich_installed()
+            
             # Show progress with Rich if available, otherwise show real-time output
             if RICH_AVAILABLE:
                 process = subprocess.Popen(
