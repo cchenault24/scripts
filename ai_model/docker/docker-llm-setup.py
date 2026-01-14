@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Docker Model Runner + Continue.dev Setup Script (v2.0)
+Docker Model Runner + Continue.dev Setup Script (v3.0)
 
-An interactive Python script that helps you set up a locally hosted LLM
-via Docker Model Runner (DMR) and generates a continue.dev config.yaml for VS Code.
-
-NEW in v2.0:
-- Fixed model selection (GPT-OSS 20B + embedding model)
-- Reliable model pulling with verification
-- Auto-detection of installed IDEs
-- Installation manifest for smart uninstallation
+Complete rewrite with AI fine-tuning capabilities:
+- Hardware-aware tuning profile auto-detection
+- Model parameter optimization
+- Enhanced context management
+- Comprehensive global rules
 
 Optimized for Mac with Apple Silicon (M1/M2/M3/M4) using Docker Model Runner.
 
@@ -18,12 +15,6 @@ Requirements:
 - Docker Desktop 4.40+ (with Docker Model Runner enabled)
 - macOS with Apple Silicon (recommended) or Linux/Windows with NVIDIA GPU
 
-Docker Model Runner Commands:
-- docker model pull <model>   - Download a model
-- docker model run <model>    - Run a model interactively
-- docker model list           - List available models
-- docker model rm <model>     - Remove a model
-
 Author: AI-Generated for Local LLM Development
 License: MIT
 """
@@ -31,55 +22,33 @@ License: MIT
 from __future__ import annotations
 
 import logging
-import subprocess
 import sys
-import os
 from pathlib import Path
 
-# Add docker directory to path so we can import lib modules
-# Use absolute path to ensure it works from any directory
+# Add docker directory to path
 script_path = Path(__file__).resolve() if __file__ else Path(sys.argv[0]).resolve()
 docker_dir = script_path.parent
-
-# Ensure the docker_dir is in sys.path (so we import from docker/lib/)
 docker_dir_str = str(docker_dir)
 if docker_dir_str not in sys.path:
     sys.path.insert(0, docker_dir_str)
 
-# Import from lib modules (from docker/lib/)
 from lib import config
 from lib import docker
 from lib import hardware
 from lib import ide
-from lib import ui
 from lib import model_selector
+from lib import tuning
+from lib import ui
 from lib import validator
 
-# =============================================================================
-# VPN Resilience: Configure environment at startup
-# =============================================================================
-# VPNs (especially corporate VPNs) can break localhost connections by modifying
-# DNS resolution and routing tables. Using 127.0.0.1 instead of localhost and
-# setting NO_PROXY ensures the model server remains accessible.
+# Configure VPN resilience at startup
 docker.setup_vpn_resilient_environment()
 
-# Module logger
 _logger = logging.getLogger(__name__)
-
-
-def get_pre_existing_models() -> list[str]:
-    """Get list of models that exist before we start pulling."""
-    try:
-        return validator.get_installed_models()
-    except (OSError, IOError, subprocess.SubprocessError) as e:
-        _logger.warning(f"Failed to detect pre-existing models: {type(e).__name__}: {e}")
-        return []
 
 
 def main() -> int:
     """Main entry point."""
-    # Initialize file logging early for corporate/debug environments
-    # (best-effort; failures never block setup)
     try:
         ui.init_logging()
     except Exception:
@@ -87,9 +56,8 @@ def main() -> int:
 
     ui.clear_screen()
     
-    ui.print_header("🚀 Docker Model Runner + Continue.dev Setup v2.0")
-    ui.print_info("Installing GPT-OSS 20B + embedding model")
-    ui.print_info("Powered by Continue.dev + Docker Model Runner")
+    ui.print_header("🚀 Docker Model Runner + Continue.dev Setup v3.0")
+    ui.print_info("AI Fine-Tuning Edition")
     print()
     
     if not ui.prompt_yes_no("Ready to begin setup?", default=True):
@@ -119,7 +87,6 @@ def main() -> int:
     if "IntelliJ IDEA" in installed_ides:
         target_ide.append("intellij")
     
-    # Default to vscode if no IDEs detected
     if not target_ide:
         target_ide = ["vscode"]
         ui.print_info("Defaulting to VS Code configuration")
@@ -143,18 +110,14 @@ def main() -> int:
         ui.print_error("Docker Model Runner is required but not available.")
         return 1
     
-    # Step 4b: Validate Docker resource allocation
+    # Step 5: Validate Docker resource allocation
     print()
     resources_acceptable, should_continue = docker.validate_docker_resources(hw_info)
     if not should_continue:
         ui.print_info("Setup cancelled. Please adjust Docker Desktop settings and try again.")
         return 0
     
-    # Step 4c: Record pre-existing models for manifest
-    pre_existing_models = get_pre_existing_models()
-    hw_info.docker_model_runner_available = True
-    
-    # Step 5: Model selection
+    # Step 6: Model selection (fixed: GPT-OSS 20B + nomic-embed-text)
     print()
     selected_models = model_selector.select_models(hw_info, installed_ides)
     
@@ -162,7 +125,49 @@ def main() -> int:
         ui.print_error("No models selected. Aborting setup.")
         return 1
     
-    # Step 6: Pre-install validation
+    # Step 7: Auto-detect tuning profile
+    print()
+    ui.print_subheader("AI Fine-Tuning Configuration")
+    tier, tuning_profile, reason = tuning.auto_detect_tuning_profile(hw_info)
+    ui.print_success(f"Selected {tier} tuning profile")
+    ui.print_info(f"  {reason}")
+    ui.print_info(f"  Temperature: {tuning_profile.temperature}, Context: {tuning_profile.context_length:,} tokens")
+    print()
+    
+    # Step 8: Calculate optimal context size (model-aware)
+    docker_ram_gib, _ = docker.detect_docker_allocated_ram_gib()
+    if docker_ram_gib and selected_models:
+        primary_model = selected_models[0]  # GPT-OSS 20B
+        context_tokens, ctx_reason = docker.calculate_optimal_context_size(
+            primary_model, docker_ram_gib, hw_info
+        )
+        
+        # Check if Docker RAM is insufficient
+        if "WARNING" in ctx_reason or "insufficient" in ctx_reason.lower():
+            ui.print_warning("⚠️  Docker RAM allocation may be insufficient for the model")
+            ui.print_warning(ctx_reason)
+            print()
+            ui.print_info("To fix this:")
+            ui.print_info("  1. Open Docker Desktop")
+            ui.print_info("  2. Go to Settings → Resources → Advanced")
+            ui.print_info(f"  3. Increase Memory allocation to at least {primary_model.ram_gb + 2:.0f}GB")
+            ui.print_info("  4. Click 'Apply & restart'")
+            print()
+            if not ui.prompt_yes_no("Continue with minimal context? (Model may fail to load)", default=False):
+                ui.print_info("Setup cancelled. Please increase Docker memory allocation first.")
+                return 0
+        
+        # Update tuning profile with calculated context
+        tuning_profile.context_length = min(context_tokens, tuning_profile.context_length)
+        hw_info.dmr_context_size_tokens = context_tokens
+        hw_info.dmr_context_reason = ctx_reason
+        ui.print_info(f"Optimized context: {context_tokens:,} tokens")
+        if len(ctx_reason) > 100:
+            ui.print_info(f"  {ctx_reason[:100]}...")
+        else:
+            ui.print_info(f"  {ctx_reason}")
+    
+    # Step 9: Pre-install validation
     print()
     ui.print_subheader("Pre-Installation Validation")
     is_valid, warnings = validator.validate_pre_install(selected_models, hw_info)
@@ -180,17 +185,17 @@ def main() -> int:
     else:
         ui.print_success("Validation passed")
     
-    # Step 7: Confirm selection
+    # Step 10: Configuration summary
     print()
     ui.print_subheader("Configuration Summary")
     total_ram = sum(m.ram_gb for m in selected_models)
-    # RAM calculation removed - installing fixed models
     
-    print(f"  Selected {len(selected_models)} model(s):")
+    print(f"  Models: {len(selected_models)}")
     for model in selected_models:
         roles_str = ", ".join(model.roles)
-        print(f"    • {model.docker_name} (~{model.ram_gb:.1f}GB RAM) - {roles_str}")
-    print(f"  Total model RAM: ~{total_ram:.1f}GB")
+        print(f"    • {model.docker_name} (~{model.ram_gb:.1f}GB) - {roles_str}")
+    print(f"  Total RAM: ~{total_ram:.1f}GB")
+    print(f"  Tuning: {tier} profile (temp={tuning_profile.temperature}, context={tuning_profile.context_length:,})")
     print(f"  Target IDE(s): {', '.join(installed_ides) if installed_ides else 'VS Code'}")
     print()
     
@@ -198,124 +203,85 @@ def main() -> int:
         ui.print_info("Setup cancelled. Run again to reconfigure.")
         return 0
     
-    # Step 8: Pull models with verification
+    # Step 11: Pull models with verification
     print()
     setup_result = validator.pull_models_with_tracking(selected_models, hw_info)
-    
-    # Display setup result with actionable feedback
     validator.display_setup_result(setup_result)
     
-    # Handle partial or complete failure
     if setup_result.complete_failure:
         ui.print_error("No models were installed. Please check your network connection.")
         return 1
     
-    # Prompt for next action if there were failures
     if setup_result.failed_models:
         action = validator.prompt_setup_action(setup_result)
         
         if action == "retry":
-            # Retry failed models
             setup_result = validator.retry_failed_models(setup_result, hw_info)
             validator.display_setup_result(setup_result)
         elif action == "exit":
             ui.print_info("Exiting. You can retry later with 'docker model pull <model>'")
             return 1
     
-    # Use successfully installed models for config
     models_for_config = setup_result.successful_models
     
     if not models_for_config:
         ui.print_error("No models available for configuration.")
         return 1
-
-    # Step 8b: Apply Docker Model Runner runtime settings (context sizing + auto-start)
-    # Use successfully installed models to avoid configuring nonexistent images.
+    
+    # Step 12: Calculate context size for runtime configuration
+    docker_ram_gib, _ = docker.detect_docker_allocated_ram_gib()
+    if docker_ram_gib and models_for_config:
+        primary_model = models_for_config[0]
+        context_tokens, _ = docker.calculate_optimal_context_size(
+            primary_model, docker_ram_gib, hw_info
+        )
+    else:
+        context_tokens = tuning_profile.context_length
+    
+    # Step 13: Apply Docker Model Runner runtime settings
     print()
     try:
-        docker.apply_dmr_runtime_settings([m.docker_name for m in models_for_config], hw_info)
+        docker.apply_dmr_runtime_settings(
+            [m.docker_name for m in models_for_config],
+            hw_info,
+            context_tokens=context_tokens
+        )
     except Exception as e:
         ui.print_warning(f"Could not apply Docker Model Runner runtime settings: {e}")
     
-    # Track created files for manifest (using set to avoid duplicates)
-    created_files_set: set[Path] = set()
-    
-    # Step 9: Generate config
+    # Step 14: Generate config with tuning profile
     print()
-    config_path = config.generate_continue_config(models_for_config, hw_info, target_ide=target_ide)
-    if config_path:
-        created_files_set.add(config_path)
-        # Also track JSON if both were created
-        json_path = config_path.with_suffix('.json')
-        if json_path.exists() and json_path != config_path:
-            created_files_set.add(json_path)
+    config_path = config.generate_continue_config(
+        models_for_config,
+        hw_info,
+        tuning_profile,
+        target_ide
+    )
     
-    # Step 10: Generate global-rule.md
+    # Step 15: Generate global rules
     print()
-    rule_path = config.generate_global_rule()
-    if rule_path:
-        created_files_set.add(rule_path)
+    rule_path = config.generate_global_rule(tuning_profile)
     
-    # Step 10b: Generate codebase awareness rules for Agent mode
+    # Step 16: Generate codebase awareness rules
     print()
     try:
         codebase_rules_path = config.generate_codebase_rules()
-        if codebase_rules_path:
-            created_files_set.add(codebase_rules_path)
         ui.print_info("Agent mode will use this file to understand your codebase")
     except Exception as e:
         ui.print_warning(f"Could not create codebase rules template: {e}")
-        ui.print_warning("You can manually create ~/.continue/rules/codebase-context.md later")
     
-    # Step 11: Generate .continueignore
+    # Step 17: Generate .continueignore
     print()
     ignore_path = config.generate_continueignore()
-    if ignore_path:
-        created_files_set.add(ignore_path)
     
-    # Step 12: Save setup summary
+    # Step 18: Save setup summary
     print()
-    summary_path = config.save_setup_summary(models_for_config, hw_info)
-    if summary_path:
-        created_files_set.add(summary_path)
+    summary_path = config.save_setup_summary(models_for_config, hw_info, tuning_profile)
     
-    # Step 13: Create installation manifest for uninstaller
+    # Step 19: Show next steps
     print()
-    ui.print_subheader("Creating Installation Manifest")
-    # Convert set to list for manifest creation
-    created_files = list(created_files_set)
-    config.create_installation_manifest(
-        installed_models=models_for_config,
-        created_files=created_files,
-        hw_info=hw_info,
-        target_ide=target_ide,
-        pre_existing_models=pre_existing_models
-    )
-    
-    # Step 14: Show next steps
-    print()
-    # Check if we have an embedding model for the codebase awareness info
     has_embedding = any("embed" in m.roles for m in models_for_config)
     ide.show_next_steps(config_path, models_for_config, hw_info, target_ide=target_ide, has_embedding=has_embedding)
-    
-    # Step 15: Configure shell profile for VPN resilience (macOS)
-    import platform
-    if platform.system() == "Darwin":
-        print()
-        ui.print_subheader("VPN Resilience Configuration")
-        ui.print_info("Corporate VPNs can break localhost connections by modifying DNS/routing")
-        ui.print_info("Adding environment variables to ~/.zshrc for permanent VPN resilience")
-        print()
-        
-        if ui.prompt_yes_no("Configure shell profile for VPN resilience?", default=True):
-            if docker.update_shell_profile_for_vpn():
-                ui.print_success("VPN resilience configured successfully")
-            else:
-                ui.print_warning("Could not update shell profile automatically")
-        else:
-            ui.print_info("Skipping shell profile update")
-            ui.print_info("You can manually add these to your ~/.zshrc if needed:")
-            ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"')
     
     print()
     return 0

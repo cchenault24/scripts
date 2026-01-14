@@ -13,8 +13,6 @@ import platform
 import shutil
 import subprocess
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import List, Optional
 
@@ -22,36 +20,19 @@ from . import hardware
 from . import models
 from . import ui
 from . import utils
-from .utils import get_unverified_ssl_context
+from .model_selector import RecommendedModel
 
-
-# =============================================================================
-# IDE AUTO-DETECTION
-# =============================================================================
 
 def detect_installed_ides() -> List[str]:
-    """
-    Auto-detect installed IDEs that support Continue.dev.
-    
-    Scans for:
-    - VS Code (Visual Studio Code)
-    - Cursor
-    - IntelliJ IDEA (Community and Ultimate)
-    
-    Returns:
-        List of installed IDE names
-    """
+    """Auto-detect installed IDEs that support Continue.dev."""
     installed = []
     
-    # Check VS Code
     if is_vscode_installed():
         installed.append("VS Code")
     
-    # Check Cursor
     if is_cursor_installed():
         installed.append("Cursor")
     
-    # Check IntelliJ IDEA
     if is_intellij_installed():
         installed.append("IntelliJ IDEA")
     
@@ -60,11 +41,9 @@ def detect_installed_ides() -> List[str]:
 
 def is_vscode_installed() -> bool:
     """Check if VS Code is installed."""
-    # Check CLI in PATH
     if shutil.which("code"):
         return True
     
-    # Check common installation paths
     if platform.system() == "Darwin":
         app_paths = [
             Path("/Applications/Visual Studio Code.app"),
@@ -96,11 +75,9 @@ def is_vscode_installed() -> bool:
 
 def is_cursor_installed() -> bool:
     """Check if Cursor IDE is installed."""
-    # Check CLI in PATH
     if shutil.which("cursor"):
         return True
     
-    # Check common installation paths
     if platform.system() == "Darwin":
         app_paths = [
             Path("/Applications/Cursor.app"),
@@ -130,11 +107,9 @@ def is_cursor_installed() -> bool:
 
 def is_intellij_installed() -> bool:
     """Check if IntelliJ IDEA is installed."""
-    # Check CLI in PATH
     if shutil.which("idea"):
         return True
     
-    # Check common installation paths
     if platform.system() == "Darwin":
         app_paths = [
             Path("/Applications/IntelliJ IDEA.app"),
@@ -167,34 +142,24 @@ def is_intellij_installed() -> bool:
 
 def install_vscode_extension(extension_id: str) -> bool:
     """Install a VS Code extension using the CLI."""
-    # Check if VS Code CLI is available
     code_path = shutil.which("code")
     if not code_path:
         return False
     
-    # Check if extension is already installed
     code, stdout, _ = utils.run_command(["code", "--list-extensions"], timeout=10)
     if code == 0 and extension_id in stdout:
-        return True  # Already installed
+        return True
     
-    # Install the extension
     code, stdout, stderr = utils.run_command(["code", "--install-extension", extension_id], timeout=60)
     return code == 0
 
 
 def detect_intellij_cli() -> Optional[str]:
-    """
-    Detect IntelliJ IDEA CLI command.
-    
-    Returns:
-        Path to IntelliJ CLI if found, None otherwise.
-    """
-    # Check if 'idea' command is in PATH
+    """Detect IntelliJ IDEA CLI command."""
     idea_path = shutil.which("idea")
     if idea_path:
         return idea_path
     
-    # Check common macOS installation path
     if platform.system() == "Darwin":
         common_paths = [
             "/Applications/IntelliJ IDEA.app/Contents/MacOS/idea",
@@ -205,7 +170,6 @@ def detect_intellij_cli() -> Optional[str]:
             if Path(path).exists():
                 return path
     
-    # Check common Linux paths
     if platform.system() == "Linux":
         common_paths = [
             "/usr/local/bin/idea",
@@ -219,7 +183,6 @@ def detect_intellij_cli() -> Optional[str]:
             elif Path(path).exists():
                 return path
     
-    # Check Windows paths
     if platform.system() == "Windows":
         common_paths = [
             Path.home() / "AppData/Local/JetBrains/Toolbox/scripts/idea.bat",
@@ -233,30 +196,12 @@ def detect_intellij_cli() -> Optional[str]:
 
 
 def install_intellij_plugin(plugin_id: str) -> bool:
-    """
-    Install an IntelliJ IDEA plugin using the CLI.
-    
-    Args:
-        plugin_id: Plugin ID (e.g., "Continue.continue")
-    
-    Returns:
-        True if installation successful or already installed, False otherwise.
-    """
+    """Install an IntelliJ IDEA plugin using the CLI."""
     idea_path = detect_intellij_cli()
     if not idea_path:
         return False
     
-    # Check if plugin is already installed
-    # Note: IntelliJ CLI doesn't have a simple list command, so we'll try to install
-    # and check the result. If it's already installed, the command may still succeed.
-    
-    # Install the plugin
-    # IntelliJ CLI plugin installation syntax may vary, but typically:
-    # idea --install-plugin <plugin_id>
-    # or for newer versions: idea install-plugin <plugin_id>
     code, stdout, stderr = utils.run_command([idea_path, "install-plugin", plugin_id], timeout=60)
-    
-    # Also try alternative syntax
     if code != 0:
         code, stdout, stderr = utils.run_command([idea_path, "--install-plugin", plugin_id], timeout=60)
     
@@ -269,10 +214,8 @@ def restart_vscode() -> bool:
         return False
     
     try:
-        # Quit VS Code
         utils.run_command(["killall", "Visual Studio Code"], timeout=5)
         time.sleep(1)
-        # Reopen VS Code
         utils.run_command(["open", "-a", "Visual Studio Code"], timeout=5)
         return True
     except Exception:
@@ -280,99 +223,27 @@ def restart_vscode() -> bool:
 
 
 def restart_intellij() -> bool:
-    """
-    Restart IntelliJ IDEA (macOS only for now).
-    
-    Returns:
-        True if restart successful, False otherwise.
-    """
+    """Restart IntelliJ IDEA (macOS only for now)."""
     if platform.system() != "Darwin":
         return False
     
     try:
-        # Quit IntelliJ IDEA
         utils.run_command(["killall", "IntelliJ IDEA"], timeout=5)
         time.sleep(1)
-        # Reopen IntelliJ IDEA
         utils.run_command(["open", "-a", "IntelliJ IDEA"], timeout=5)
         return True
     except Exception:
         return False
 
 
-def start_model_server(model_name: str) -> Optional[subprocess.Popen]:
-    """
-    Start the Docker Model Runner API server in the background.
-    
-    Args:
-        model_name: Name of the model to run (e.g., "ai/llama3.2")
-    
-    Returns:
-        subprocess.Popen process object if successful, None otherwise.
-        The process runs in the background and should be managed by the caller.
-        
-    Note:
-        The returned process is meant to run indefinitely. If you need to stop it,
-        call process.terminate() or process.kill() on the returned process object.
-        The process will automatically clean up when the parent Python process exits.
-    """
-    process = None
-    try:
-        process = subprocess.Popen(
-            ["docker", "model", "run", model_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        # Give it a moment to start
-        time.sleep(2)
-        # Check if it's still running (didn't immediately fail)
-        if process.poll() is None:
-            return process
-        else:
-            # Process failed immediately, clean it up
-            try:
-                process.terminate()
-                process.wait(timeout=2)
-            except (subprocess.TimeoutExpired, Exception):
-                try:
-                    process.kill()
-                    process.wait()
-                except Exception:
-                    pass
-            return None
-    except Exception:
-        # Ensure cleanup if process was created but exception occurred
-        if process is not None:
-            try:
-                process.terminate()
-                process.wait(timeout=2)
-            except (subprocess.TimeoutExpired, Exception):
-                try:
-                    process.kill()
-                    process.wait()
-                except Exception:
-                    pass
-        return None
-
-
 def show_next_steps(
-    config_path: Path, 
-    model_list: List[models.ModelInfo], 
+    config_path: Path,
+    model_list: List[RecommendedModel],
     hw_info: hardware.HardwareInfo,
     target_ide: List[str] = ["vscode"],
     has_embedding: bool = True
 ) -> None:
-    """
-    Display next steps after setup with information about both codebase awareness approaches.
-    
-    Args:
-        config_path: Path to the generated config file
-        model_list: List of configured models
-        hw_info: Hardware information
-        target_ide: List of IDEs to configure (e.g., ["vscode"], ["intellij"], or ["vscode", "intellij"])
-        has_embedding: Whether an embedding model was selected
-    """
+    """Display next steps after setup."""
     ui.print_header("✅ Setup Complete!")
     
     print(ui.colorize("Installation Summary:", ui.Colors.GREEN + ui.Colors.BOLD))
@@ -390,62 +261,16 @@ def show_next_steps(
     print(f"  Config: {config_path}")
     print()
     
-    # Codebase Awareness Section
-    print(ui.colorize("━" * 60, ui.Colors.DIM))
-    print(ui.colorize("📚 Codebase Understanding - Two Approaches:", ui.Colors.BLUE + ui.Colors.BOLD))
-    print()
-    
-    # Approach 1: Legacy @Codebase
-    print(ui.colorize("  1️⃣  Embedding-Based Search (Legacy @Codebase)", ui.Colors.GREEN))
-    if has_embedding:
-        print(ui.colorize("     ✅ Configured with embedding model", ui.Colors.DIM))
-        print(ui.colorize("     📖 Usage: Type @Codebase or @Folder in the chat", ui.Colors.DIM))
-        print(ui.colorize("     💡 Best for: 'Find all code related to authentication'", ui.Colors.DIM))
-        print(ui.colorize("     ⚠️  Status: Deprecated but fully functional", ui.Colors.DIM))
-    else:
-        print(ui.colorize("     ❌ Not available (no embedding model selected)", ui.Colors.YELLOW))
-        print(ui.colorize("     ⚠️  Required for JetBrains IDEs (no fallback)", ui.Colors.YELLOW))
-        if "intellij" in target_ide:
-            print(ui.colorize("     🚨 CRITICAL: Re-run setup and select an embedding model!", ui.Colors.RED))
-    print()
-    
-    # Approach 2: Agent Mode
-    print(ui.colorize("  2️⃣  Agent Mode Codebase Awareness (New & Recommended)", ui.Colors.GREEN))
-    print(ui.colorize("     ✅ Rules template created: ~/.continue/rules/codebase-context.md", ui.Colors.DIM))
-    print(ui.colorize("     📝 Action: Edit this file with your project details", ui.Colors.DIM))
-    print(ui.colorize("     💡 Best for: Complex tasks, architectural changes", ui.Colors.DIM))
-    print(ui.colorize("     🎯 Uses: Built-in AI tools + your project context", ui.Colors.DIM))
-    print()
-    
-    # Combined recommendation
-    print(ui.colorize("  🌟 RECOMMENDED: Use Both Together", ui.Colors.YELLOW))
-    print(ui.colorize("     • Embedding search for quick code discovery", ui.Colors.DIM))
-    print(ui.colorize("     • Agent mode rules for intelligent assistance", ui.Colors.DIM))
-    print(ui.colorize("     • Edit ~/.continue/rules/codebase-context.md now!", ui.Colors.DIM))
-    print()
-    
-    # Documentation links
-    print(ui.colorize("  📖 Documentation:", ui.Colors.DIM))
-    print(ui.colorize("     • Agent Mode: https://docs.continue.dev/guides/codebase-documentation-awareness", ui.Colors.DIM))
-    print(ui.colorize("     • Legacy @Codebase: https://docs.continue.dev/reference/deprecated-codebase", ui.Colors.DIM))
-    print()
-    
-    print(ui.colorize("━" * 60, ui.Colors.DIM))
     print(ui.colorize("Next Steps:", ui.Colors.YELLOW + ui.Colors.BOLD))
     print()
     
     step = 1
     
-    # IDE-specific installation steps
     if "vscode" in target_ide:
-        # Step: Install Continue.dev extension in VS Code
         print(f"  {step}. Install Continue.dev extension in VS Code:")
-        
-        # Check if VS Code CLI is available
         vscode_available = shutil.which("code") is not None
         
         if vscode_available:
-            # Check if already installed
             code, stdout, _ = utils.run_command(["code", "--list-extensions"], timeout=10)
             already_installed = code == 0 and "Continue.continue" in stdout
             
@@ -482,15 +307,10 @@ def show_next_steps(
         step += 1
     
     if "intellij" in target_ide:
-        # Step: Install Continue plugin in IntelliJ
         print(f"  {step}. Install Continue plugin in IntelliJ IDEA:")
-        
-        # Check if IntelliJ CLI is available
         intellij_available = detect_intellij_cli() is not None
         
         if intellij_available:
-            # Note: IntelliJ plugin installation via CLI is less reliable than VS Code
-            # So we'll primarily provide manual instructions
             ui.print_info("    IntelliJ IDEA detected. Please install the Continue plugin manually:")
             if hw_info.os_name == "Darwin":
                 print(ui.colorize("       • Open IntelliJ IDEA", ui.Colors.DIM))
@@ -515,87 +335,14 @@ def show_next_steps(
         print()
         step += 1
     
-    # Step: Docker Model Runner setup (shared for both IDEs)
     if hw_info.docker_model_runner_available:
         print(f"  {step}. Verify Docker Model Runner is running:")
         print(ui.colorize("     docker model list", ui.Colors.CYAN))
         print()
         step += 1
-        
-        # Run a model if needed
-        chat_models = [m for m in model_list if "chat" in m.roles]
-        if chat_models:
-            print(f"  {step}. Start the model server (if not already running):")
-            
-            # Convert model name for Docker Hub format
-            model_to_run = chat_models[0].docker_name
-            if model_to_run.startswith("ai.docker.com/"):
-                remaining = model_to_run[len("ai.docker.com/"):]
-                parts = remaining.split("/")
-                if len(parts) > 1:
-                    model_part = parts[1]
-                else:
-                    model_part = parts[0]
-                if ":" in model_part:
-                    model_part = model_part.split(":")[0]
-                model_to_run = f"ai/{model_part}"
-            
-            # Check if API is already running
-            api_running = False
-            try:
-                req = urllib.request.Request(f"{hw_info.dmr_api_endpoint}/models", method="GET")
-                with urllib.request.urlopen(req, timeout=2, context=get_unverified_ssl_context()) as response:
-                    if response.status == 200:
-                        api_running = True
-            except (urllib.error.URLError, urllib.error.HTTPError, OSError):
-                pass
-            
-            if api_running:
-                ui.print_success("    Model server is already running")
-            else:
-                if ui.prompt_yes_no("    Start the model server now?", default=True):
-                    ui.print_info("    Starting model server in background...")
-                    process = start_model_server(model_to_run)
-                    if process:
-                        ui.print_success("    Model server started")
-                        ui.print_info("    (Server is running in background)")
-                    else:
-                        ui.print_warning("    Failed to start automatically. Start manually with:")
-                        print(ui.colorize(f"       docker model run {model_to_run}", ui.Colors.CYAN))
-                else:
-                    ui.print_info("    Start manually with:")
-                    print(ui.colorize(f"       docker model run {model_to_run}", ui.Colors.CYAN))
-            print()
-            step += 1
-    else:
-        print(f"  {step}. Enable Docker Model Runner:")
-        if hw_info.os_name == "Darwin":
-            print(ui.colorize("     Option A - Via Docker Desktop:", ui.Colors.DIM))
-            print(ui.colorize("       • Open Docker Desktop", ui.Colors.DIM))
-            print(ui.colorize("       • Settings → Features in development", ui.Colors.DIM))
-            print(ui.colorize("       • Enable 'Docker Model Runner' or 'Enable Docker AI'", ui.Colors.DIM))
-            print(ui.colorize("       • Click 'Apply & restart'", ui.Colors.DIM))
-            print()
-            print(ui.colorize("     Option B - Via terminal:", ui.Colors.DIM))
-            print(ui.colorize("       docker desktop enable model-runner --tcp 12434", ui.Colors.CYAN))
-        else:
-            print(ui.colorize("     • Open Docker Desktop → Settings", ui.Colors.DIM))
-            print(ui.colorize("     • Features in development → Enable Docker Model Runner", ui.Colors.DIM))
-            print(ui.colorize("     • Apply & restart", ui.Colors.DIM))
-        print()
-        step += 1
-        
-        print(f"  {step}. Pull the models:")
-        for model in model_list:
-            print(ui.colorize(f"     docker model pull {model.docker_name}", ui.Colors.CYAN))
-        print()
-        step += 1
     
-    # Step: Restart IDE(s) (automated if possible)
     if "vscode" in target_ide:
         print(f"  {step}. Restart VS Code:")
-        
-        # Check if VS Code is running
         vscode_running = False
         if hw_info.os_name == "Darwin":
             code, _, _ = utils.run_command(["pgrep", "-f", "Visual Studio Code"], timeout=5)
@@ -611,26 +358,11 @@ def show_next_steps(
                     if restart_vscode():
                         ui.print_success("    VS Code restarted")
                     else:
-                        ui.print_warning("    Failed to restart automatically. Please restart manually:")
-                        if hw_info.os_name == "Darwin":
-                            print(ui.colorize("       • Quit VS Code completely (Cmd+Q)", ui.Colors.DIM))
-                        else:
-                            print(ui.colorize("       • Close all VS Code windows", ui.Colors.DIM))
-                        print(ui.colorize("       • Reopen VS Code", ui.Colors.DIM))
+                        ui.print_warning("    Failed to restart automatically. Please restart manually.")
                 else:
                     ui.print_info("    Skipping automatic restart.")
-                    if hw_info.os_name == "Darwin":
-                        print(ui.colorize("     • Quit VS Code completely (Cmd+Q)", ui.Colors.DIM))
-                    else:
-                        print(ui.colorize("     • Close all VS Code windows", ui.Colors.DIM))
-                    print(ui.colorize("     • Reopen VS Code", ui.Colors.DIM))
             else:
-                ui.print_info("    Please restart VS Code manually:")
-                if hw_info.os_name == "Darwin":
-                    print(ui.colorize("     • Quit VS Code completely (Cmd+Q)", ui.Colors.DIM))
-                else:
-                    print(ui.colorize("     • Close all VS Code windows", ui.Colors.DIM))
-                print(ui.colorize("     • Reopen VS Code", ui.Colors.DIM))
+                ui.print_info("    Please restart VS Code manually when ready.")
         else:
             ui.print_info("    VS Code is not running. Open VS Code when ready.")
         print()
@@ -638,8 +370,6 @@ def show_next_steps(
     
     if "intellij" in target_ide:
         print(f"  {step}. Restart IntelliJ IDEA:")
-        
-        # Check if IntelliJ is running
         intellij_running = False
         if hw_info.os_name == "Darwin":
             code, _, _ = utils.run_command(["pgrep", "-f", "IntelliJ IDEA"], timeout=5)
@@ -655,32 +385,16 @@ def show_next_steps(
                     if restart_intellij():
                         ui.print_success("    IntelliJ IDEA restarted")
                     else:
-                        ui.print_warning("    Failed to restart automatically. Please restart manually:")
-                        if hw_info.os_name == "Darwin":
-                            print(ui.colorize("       • Quit IntelliJ IDEA completely (Cmd+Q)", ui.Colors.DIM))
-                        else:
-                            print(ui.colorize("       • Close all IntelliJ IDEA windows", ui.Colors.DIM))
-                        print(ui.colorize("       • Reopen IntelliJ IDEA", ui.Colors.DIM))
+                        ui.print_warning("    Failed to restart automatically. Please restart manually.")
                 else:
                     ui.print_info("    Skipping automatic restart.")
-                    if hw_info.os_name == "Darwin":
-                        print(ui.colorize("     • Quit IntelliJ IDEA completely (Cmd+Q)", ui.Colors.DIM))
-                    else:
-                        print(ui.colorize("     • Close all IntelliJ IDEA windows", ui.Colors.DIM))
-                    print(ui.colorize("     • Reopen IntelliJ IDEA", ui.Colors.DIM))
             else:
-                ui.print_info("    Please restart IntelliJ IDEA manually:")
-                if hw_info.os_name == "Darwin":
-                    print(ui.colorize("     • Quit IntelliJ IDEA completely (Cmd+Q)", ui.Colors.DIM))
-                else:
-                    print(ui.colorize("     • Close all IntelliJ IDEA windows", ui.Colors.DIM))
-                print(ui.colorize("     • Reopen IntelliJ IDEA", ui.Colors.DIM))
+                ui.print_info("    Please restart IntelliJ IDEA manually when ready.")
         else:
             ui.print_info("    IntelliJ IDEA is not running. Open IntelliJ IDEA when ready.")
         print()
         step += 1
     
-    # Step: Start using (IDE-specific keyboard shortcuts)
     print(f"  {step}. Start coding with AI:")
     
     if "vscode" in target_ide:
@@ -705,50 +419,13 @@ def show_next_steps(
             print(ui.colorize("     • Ctrl+J - Open Continue chat", ui.Colors.DIM))
             print(ui.colorize("     • Ctrl+Shift+J - Inline edit", ui.Colors.DIM))
     
-    # Shared features
-    print(ui.colorize("     • @Codebase - Semantic code search", ui.Colors.DIM))
-    print(ui.colorize("     • @file - Reference specific files", ui.Colors.DIM))
     print()
     
-    print(ui.colorize("━" * 60, ui.Colors.DIM))
     print(ui.colorize("Useful Commands:", ui.Colors.BLUE + ui.Colors.BOLD))
     print()
     print("  Check installed models:")
     print(ui.colorize("     docker model list", ui.Colors.CYAN))
     print()
-    print("  Run a model interactively:")
-    if model_list:
-        print(ui.colorize(f"     docker model run {model_list[0].docker_name}", ui.Colors.CYAN))
-    else:
-        print(ui.colorize("     docker model run <model-name>", ui.Colors.CYAN))
-    print()
-    print("  Remove a model:")
-    print(ui.colorize("     docker model rm <model-name>", ui.Colors.CYAN))
-    print()
     print("  View config:")
     print(ui.colorize(f"     cat {config_path}", ui.Colors.CYAN))
     print()
-    
-    print(ui.colorize("━" * 60, ui.Colors.DIM))
-    print(ui.colorize("Documentation:", ui.Colors.BLUE + ui.Colors.BOLD))
-    print()
-    print("  • Continue.dev: https://docs.continue.dev")
-    print("  • Docker Model Runner: https://docs.docker.com/desktop/features/ai/")
-    if hw_info.has_apple_silicon:
-        print("  • Apple Silicon optimization: Metal acceleration is automatic")
-    print()
-    
-    # IntelliJ-specific verification instructions
-    if "intellij" in target_ide:
-        print(ui.colorize("━" * 60, ui.Colors.DIM))
-        print(ui.colorize("IntelliJ IDEA Verification:", ui.Colors.BLUE + ui.Colors.BOLD))
-        print()
-        print("  To verify the Continue plugin loaded your config correctly:")
-        print(ui.colorize("     • Open IntelliJ IDEA", ui.Colors.DIM))
-        print(ui.colorize("     • Press Cmd+J (or Ctrl+J) to open Continue", ui.Colors.DIM))
-        print(ui.colorize("     • Check that your models appear in the model selector", ui.Colors.DIM))
-        print(ui.colorize("     • If models don't appear, check:", ui.Colors.DIM))
-        print(ui.colorize("       - Config file exists: ~/.continue/config.json", ui.Colors.DIM))
-        print(ui.colorize("       - Model server is running: docker model list", ui.Colors.DIM))
-        print(ui.colorize("       - Restart IntelliJ IDEA if needed", ui.Colors.DIM))
-        print()

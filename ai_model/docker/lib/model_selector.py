@@ -108,6 +108,26 @@ def select_models(hw_info: hardware.HardwareInfo, installed_ides: Optional[List[
     print()
     print(f"  System RAM:           {hw_info.ram_gb:.0f}GB")
     
+    # Block systems with 16GB or less
+    if hw_info.ram_gb <= 16.0:
+        print()
+        ui.print_error("❌ Insufficient System RAM")
+        ui.print_error(f"Detected {hw_info.ram_gb:.0f}GB RAM - minimum 24GB required")
+        print()
+        ui.print_info("Why 24GB minimum?")
+        ui.print_info("  • GPT-OSS 20B model requires 16GB RAM for model weights")
+        ui.print_info("  • Docker Desktop needs 2-4GB overhead for system operations")
+        ui.print_info("  • macOS needs 4-6GB for system processes")
+        ui.print_info("  • Total: 22-26GB minimum for stable operation")
+        print()
+        ui.print_info("16GB systems cannot reliably run GPT-OSS 20B:")
+        ui.print_info("  • Even with maximum Docker allocation (14GB), only 2GB remains for macOS")
+        ui.print_info("  • System will be unstable and model may fail to load")
+        ui.print_info("  • Context window would be minimal (8K tokens)")
+        print()
+        ui.print_info("Recommendation: Upgrade to 24GB+ RAM for this setup")
+        raise SystemExit("Hardware requirements not met: 24GB+ RAM required")
+    
     # Always install the same two models
     models_to_install = [PRIMARY_MODEL, EMBED_MODEL]
     

@@ -6,6 +6,7 @@ and interact with the DMR API.
 """
 
 import json
+import os
 import re
 import shutil
 import socket
@@ -14,36 +15,25 @@ import urllib.request
 from typing import List, Optional, Tuple
 
 from . import hardware
-from . import models
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
 
 # Docker Model Runner API configuration
-# DMR exposes an OpenAI-compatible API endpoint
-# IMPORTANT: Use 127.0.0.1 instead of localhost for VPN resilience
-# VPNs can modify DNS/routing and break localhost resolution
 DMR_API_HOST = "127.0.0.1"  # Use IP address for VPN resilience
 DMR_API_PORT = 12434  # Default Docker Model Runner port
 DMR_API_BASE = f"http://{DMR_API_HOST}:{DMR_API_PORT}/v1"
 
 # Alternative: Docker Model Runner can also be accessed via Docker socket
-# For some setups, the endpoint might be different
 DMR_SOCKET_ENDPOINT = "http://model-runner.docker.internal/v1"
 
-# VPN-resilient environment variables
-VPN_RESILIENT_ENV = {
-    "DMR_HOST": f"{DMR_API_HOST}:{DMR_API_PORT}",
-    "NO_PROXY": "localhost,127.0.0.1,::1,host.docker.internal",
-}
 
-# Docker container VPN-resilient configuration
-# Note: Docker Desktop Mac runs in a VM, cannot use --network host
-# Must use explicit port binding: -p 127.0.0.1:PORT:PORT
-DOCKER_CONTAINER_ENV = {
-    "OLLAMA_HOST": "0.0.0.0:11434",  # Inside container, bind to all interfaces
-    "NO_PROXY": "localhost,127.0.0.1,::1,host.docker.internal",
-}
+def setup_vpn_resilient_environment() -> None:
+    """Configure environment variables for VPN resilience."""
+    # Prevent proxy interception of local connections
+    os.environ['NO_PROXY'] = "localhost,127.0.0.1,::1,host.docker.internal"
+    # Remove SSH_AUTH_SOCK which can cause HTTPS corruption
+    os.environ.pop('SSH_AUTH_SOCK', None)
 
 
 def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
@@ -56,19 +46,12 @@ def _is_port_open(host: str, port: int, timeout_s: float = 0.5) -> bool:
 
 
 def check_dmr_port_conflict() -> Tuple[bool, str]:
-    """
-    Detect whether localhost:12434 is usable by Docker Model Runner.
-
-    Returns:
-        (ok, message)
-        - ok=True: port is free OR appears to be DMR
-        - ok=False: port is in use by a non-DMR service
-    """
+    """Detect whether localhost:12434 is usable by Docker Model Runner."""
     host, port = DMR_API_HOST, DMR_API_PORT
     if not _is_port_open(host, port):
         return True, f"Port {host}:{port} is available (nothing listening)"
 
-    # Something is listening - verify it's DMR (OpenAI-compatible /v1/models)
+    # Something is listening - verify it's DMR
     try:
         req = urllib.request.Request(f"{DMR_API_BASE}/models", method="GET")
         req.add_header("Content-Type", "application/json")
@@ -82,14 +65,7 @@ def check_dmr_port_conflict() -> Tuple[bool, str]:
 
 
 def detect_docker_allocated_ram_gib() -> Tuple[Optional[float], str]:
-    """
-    Best-effort detection of Docker Engine/VM memory allocation.
-
-    For Docker Desktop this typically corresponds to the VM memory allocation.
-
-    Returns:
-        (ram_gib, reason)
-    """
+    """Best-effort detection of Docker Engine/VM memory allocation."""
     # Preferred: bytes from docker info template
     code, stdout, stderr = utils.run_command(["docker", "info", "--format", "{{.MemTotal}}"], timeout=10)
     if code == 0:
@@ -108,7 +84,6 @@ def detect_docker_allocated_ram_gib() -> Tuple[Optional[float], str]:
         for line in (stdout or "").splitlines():
             if "Total Memory:" not in line:
                 continue
-            # Examples: " Total Memory: 7.775GiB" or "Total Memory: 15.5GiB"
             m = re.search(r"Total Memory:\s*([0-9.]+)\s*([A-Za-z]+)", line)
             if not m:
                 continue
@@ -127,32 +102,77 @@ def detect_docker_allocated_ram_gib() -> Tuple[Optional[float], str]:
     return None, f"Could not detect Docker memory allocation ({err or 'no details'})"
 
 
-def select_context_size_tokens(docker_ram_gib: Optional[float]) -> Tuple[int, str]:
+def calculate_optimal_context_size(
+    model,
+    docker_ram_gb: float,
+    hw_info: hardware.HardwareInfo
+) -> Tuple[int, str]:
     """
-    Select context size tokens based on Docker allocated RAM.
-
-    Mapping (per requirements):
-    - 8-11GB   ->  8,192
-    - 12-15GB  -> 16,384
-    - 16-23GB  -> 24,576
-    - 24-31GB  -> 32,768
-    - 32GB+    -> 49,152
-
-    Default: 32,768 if detection fails.
+    Calculate optimal context size with model awareness.
+    
+    Formula: (docker_ram - model_ram - overhead) * 0.6 / tokens_per_gb
+    - Reserve 2GB for system overhead and KV cache base
+    - Use only 60% of remaining RAM for context (40% safety margin)
+    - Cap at model's max context_length
+    - Minimum 8192 tokens for functionality
+    
+    Args:
+        model: RecommendedModel with ram_gb and context_length
+        docker_ram_gb: Docker allocated RAM in GB
+        hw_info: Hardware information
+    
+    Returns:
+        Tuple of (context_tokens, reason_string)
     """
-    if docker_ram_gib is None:
-        return 32768, "Docker RAM detection failed; defaulting to 32,768 tokens (safe default)"
-
-    # Use conservative banding for fractional/edge values: round down to safest matching tier.
-    if docker_ram_gib < 12:
-        return 8192, f"Docker RAM ~{docker_ram_gib:.1f}GiB (<12GiB); selecting 8,192 tokens"
-    if docker_ram_gib < 16:
-        return 16384, f"Docker RAM ~{docker_ram_gib:.1f}GiB (12-15GiB); selecting 16,384 tokens"
-    if docker_ram_gib < 24:
-        return 24576, f"Docker RAM ~{docker_ram_gib:.1f}GiB (16-23GiB); selecting 24,576 tokens"
-    if docker_ram_gib < 32:
-        return 32768, f"Docker RAM ~{docker_ram_gib:.1f}GiB (24-31GiB); selecting 32,768 tokens"
-    return 49152, f"Docker RAM ~{docker_ram_gib:.1f}GiB (32GiB+); selecting 49,152 tokens"
+    from .model_selector import RecommendedModel
+    
+    model_ram_gb = model.ram_gb if hasattr(model, 'ram_gb') else 16.0
+    model_max_context = model.context_length if hasattr(model, 'context_length') else 131072
+    
+    # Safety check: Docker must have enough RAM for model + overhead
+    system_overhead_gb = 2.0  # Reserve for system, KV cache base, etc.
+    min_required_ram = model_ram_gb + system_overhead_gb
+    
+    if docker_ram_gb < min_required_ram:
+        # Docker doesn't have enough RAM - use absolute minimum
+        context_tokens = 8192
+        reason = (
+            f"WARNING: Docker RAM ({docker_ram_gb:.1f}GB) is insufficient for model ({model_ram_gb:.1f}GB) + overhead. "
+            f"Using minimum 8,192 tokens. Consider increasing Docker Desktop memory allocation to at least {min_required_ram:.0f}GB."
+        )
+        return min(context_tokens, model_max_context), reason
+    
+    # Available RAM after model weights and system overhead
+    available_ram_gb = docker_ram_gb - model_ram_gb - system_overhead_gb
+    
+    if available_ram_gb < 1.0:
+        # Very constrained - use minimum
+        context_tokens = 8192
+        reason = (
+            f"Docker RAM ({docker_ram_gb:.1f}GB) - model ({model_ram_gb:.1f}GB) - overhead ({system_overhead_gb:.1f}GB) = "
+            f"{available_ram_gb:.1f}GB available; using minimum 8,192 tokens"
+        )
+        return min(context_tokens, model_max_context), reason
+    
+    # Estimate: ~1GB RAM per 8K tokens for KV cache
+    # Use only 60% of available RAM for context (40% safety margin for peak usage)
+    tokens_per_gb = 8192
+    usable_ram_for_context = available_ram_gb * 0.6  # More conservative: 60% instead of 80%
+    calculated_tokens = int(usable_ram_for_context * tokens_per_gb)
+    
+    # Cap at model's maximum context length
+    context_tokens = min(calculated_tokens, model_max_context)
+    
+    # Ensure minimum for functionality
+    context_tokens = max(context_tokens, 8192)
+    
+    reason = (
+        f"Docker RAM ({docker_ram_gb:.1f}GB) - model ({model_ram_gb:.1f}GB) - overhead ({system_overhead_gb:.1f}GB) = "
+        f"{available_ram_gb:.1f}GB available; calculated {calculated_tokens:,} tokens (60% of available), "
+        f"capped at model max ({model_max_context:,}) = {context_tokens:,} tokens"
+    )
+    
+    return context_tokens, reason
 
 
 def configure_docker_model_context(model_name: str, context_tokens: int) -> bool:
@@ -169,11 +189,7 @@ def configure_docker_model_context(model_name: str, context_tokens: int) -> bool
 
 
 def configure_model_runner_restart_policy() -> bool:
-    """
-    Configure Docker Model Runner container(s) to auto-start on reboot.
-
-    Applies: docker update --restart unless-stopped <container>
-    """
+    """Configure Docker Model Runner container(s) to auto-start on reboot."""
     code, stdout, stderr = utils.run_command(["docker", "ps", "-a", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}"], timeout=10)
     if code != 0:
         ui.print_warning(f"Could not list containers to set restart policy: {stderr.strip()}")
@@ -191,8 +207,6 @@ def configure_model_runner_restart_policy() -> bool:
 
     if not candidates:
         ui.print_warning("Could not find a Docker Model Runner container to set restart policy on.")
-        ui.print_info("Once DMR has started at least once, re-run this script or run:")
-        print(ui.colorize("    docker ps -a | grep -i model-runner", ui.Colors.CYAN))
         return False
 
     ok_any = False
@@ -209,40 +223,23 @@ def configure_model_runner_restart_policy() -> bool:
 def apply_dmr_runtime_settings(
     model_names: List[str],
     hw_info: hardware.HardwareInfo,
-    also_configure_model: str = "gpt-oss:20B-UD-Q6_K_XL",
+    context_tokens: int,
 ) -> None:
-    """
-    Apply runtime settings to Docker Model Runner:
-    - Configure per-model context size (docker model configure --context-size=...)
-    - Configure container restart policy (--restart unless-stopped)
-    """
+    """Apply runtime settings to Docker Model Runner."""
     ui.print_subheader("Configuring Docker Model Runner Runtime")
 
-    # Validate Docker daemon is running before issuing changes
+    # Validate Docker daemon is running
     code, _, stderr = utils.run_command(["docker", "info"], timeout=10)
     if code != 0:
         ui.print_warning("Docker daemon is not running; skipping DMR runtime configuration.")
-        ui.print_info("Start Docker Desktop and re-run to apply context sizing + auto-start settings.")
         return
 
-    # Determine context tokens (prefer values computed earlier)
-    context_tokens = hw_info.dmr_context_size_tokens if hw_info and hw_info.dmr_context_size_tokens else 0
-    reason = hw_info.dmr_context_reason if hw_info else ""
-    if context_tokens <= 0:
-        docker_ram_gib, ram_reason = detect_docker_allocated_ram_gib()
-        context_tokens, ctx_reason = select_context_size_tokens(docker_ram_gib)
-        reason = f"{ctx_reason}. {ram_reason}"
+    ui.print_info(f"Configuring DMR context-size={context_tokens}")
 
-    ui.print_info(f"Configuring DMR context-size={context_tokens} ({reason or 'dynamic sizing'})")
-
-    # Configure restart policy so the model runner comes back after reboot
+    # Configure restart policy
     configure_model_runner_restart_policy()
 
-    # Configure requested default model explicitly (even if user didn't select it)
-    if also_configure_model:
-        configure_docker_model_context(also_configure_model, context_tokens)
-
-    # Configure selected/pulled models (dedupe)
+    # Configure selected/pulled models
     seen: set[str] = set()
     for name in model_names:
         n = (name or "").strip()
@@ -256,12 +253,10 @@ def check_docker() -> Tuple[bool, str]:
     """Check if Docker is installed and running."""
     ui.print_subheader("Checking Docker Installation")
 
-    # Check if docker command exists
     if not shutil.which("docker"):
         ui.print_error("Docker not found in PATH")
         return False, ""
 
-    # Check docker version
     code, stdout, stderr = utils.run_command(["docker", "--version"])
     if code != 0:
         ui.print_error(f"Failed to get Docker version: {stderr}")
@@ -270,7 +265,6 @@ def check_docker() -> Tuple[bool, str]:
     version = stdout.strip()
     ui.print_info(f"Docker version: {version}")
 
-    # Check if Docker daemon is running
     code, stdout, stderr = utils.run_command(["docker", "info"])
     if code != 0:
         ui.print_error("Docker daemon is not running")
@@ -282,25 +276,14 @@ def check_docker() -> Tuple[bool, str]:
 
 
 def check_docker_model_runner_status() -> Tuple[bool, str]:
-    """
-    Simple check if Docker Model Runner is available (no side effects).
-
-    This is a quiet check suitable for the uninstaller that doesn't print
-    anything or require hardware info.
-
-    Returns:
-        Tuple of (is_available, message)
-    """
-    # Check if docker command exists
+    """Simple check if Docker Model Runner is available (no side effects)."""
     if not shutil.which("docker"):
         return False, "Docker not found"
 
-    # Check if Docker daemon is running
     code, _, _ = utils.run_command(["docker", "info"], timeout=5)
     if code != 0:
         return False, "Docker daemon not running"
 
-    # Check Docker Model Runner
     code, stdout, stderr = utils.run_command(["docker", "model", "list"], timeout=5)
 
     if code == 0:
@@ -314,11 +297,7 @@ def check_docker_model_runner_status() -> Tuple[bool, str]:
 
 
 def fetch_available_models_from_api(endpoint: str) -> List[str]:
-    """
-    Fetch list of available models from Docker Model Runner API.
-    According to docs: https://docs.docker.com/ai/model-runner/api-reference/
-    The API exposes OpenAI-compatible endpoints including /models
-    """
+    """Fetch list of available models from Docker Model Runner API."""
     available_models = []
     try:
         api_url = f"{endpoint}/models"
@@ -341,49 +320,30 @@ def fetch_available_models_from_api(endpoint: str) -> List[str]:
 
 def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
     """Check if Docker Model Runner is available."""
-    # Input validation
     if not hw_info:
         raise ValueError("hw_info is required")
 
     ui.print_subheader("Checking Docker Model Runner (DMR)")
 
-    # Port conflict detection (localhost:12434)
     ok_port, port_msg = check_dmr_port_conflict()
     if ok_port:
         ui.print_info(port_msg)
     else:
         ui.print_warning(port_msg)
-        ui.print_warning("Docker Model Runner may not be able to start until this port conflict is resolved.")
-        ui.print_info("If you need DMR on 12434, stop the conflicting service or change its port.")
 
-    # Docker Model Runner was introduced in Docker Desktop 4.40+
-    # It uses the 'docker model' command namespace
-    # Docs: https://docs.docker.com/ai/model-runner/
     code, stdout, stderr = utils.run_command(["docker", "model", "list"])
 
     if code == 0:
         hw_info.docker_model_runner_available = True
         ui.print_success("Docker Model Runner is available and running")
 
-        # Dynamic context sizing based on Docker RAM allocation
-        docker_ram_gib, ram_reason = detect_docker_allocated_ram_gib()
-        if docker_ram_gib is not None:
-            hw_info.docker_allocated_ram_gib = docker_ram_gib
-        context_tokens, ctx_reason = select_context_size_tokens(docker_ram_gib)
-        hw_info.dmr_context_size_tokens = context_tokens
-        hw_info.dmr_context_reason = f"{ctx_reason}. {ram_reason}"
-
-        ui.print_info(f"Selected contextLength={context_tokens} tokens ({ctx_reason})")
-        ui.print_info("If you want a larger context window, increase Docker Desktop → Resources → Memory.")
-
         # Determine the API endpoint
-        # Try the standard localhost endpoint first
         hw_info.dmr_api_endpoint = DMR_API_BASE
 
         # Check if we can reach the API
         api_reachable = False
         available_api_models = []
-        for endpoint in [DMR_API_BASE, DMR_SOCKET_ENDPOINT, "http://localhost:8080/v1"]:
+        for endpoint in [DMR_API_BASE, DMR_SOCKET_ENDPOINT]:
             try:
                 req = urllib.request.Request(f"{endpoint}/models", method="GET")
                 req.add_header("Content-Type", "application/json")
@@ -392,7 +352,6 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
                         hw_info.dmr_api_endpoint = endpoint
                         api_reachable = True
                         ui.print_info(f"API endpoint: {endpoint}")
-                        # Fetch available models from API
                         available_api_models = fetch_available_models_from_api(endpoint)
                         if available_api_models:
                             ui.print_info(f"Found {len(available_api_models)} model(s) via API")
@@ -404,15 +363,12 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
             ui.print_info(f"API endpoint (default): {hw_info.dmr_api_endpoint}")
             ui.print_warning("Could not verify API endpoint - it may start when a model runs")
 
-        # Store available models for later verification
         hw_info.available_api_models = available_api_models
-
-        # Store empty list - we only support fixed models (GPT-OSS and nomic-embed-text)
         hw_info.available_docker_hub_models = []
 
         # Check for existing models
         lines = stdout.strip().split("\n")
-        if len(lines) > 1:  # Has models (first line is header)
+        if len(lines) > 1:
             ui.print_info("Installed models:")
             for line in lines[1:]:
                 if line.strip():
@@ -422,13 +378,11 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
         else:
             ui.print_info("No models installed yet")
 
-        # Show Apple Silicon optimization status
         if hw_info.has_apple_silicon:
             ui.print_success("Metal GPU acceleration enabled for Apple Silicon")
 
         return True
 
-    # Check if it's just not enabled or not installed
     error_lower = stderr.lower()
     if "unknown command" in error_lower or "docker model" in error_lower or "not found" in error_lower:
         ui.print_warning("Docker Model Runner is not enabled")
@@ -465,12 +419,7 @@ def check_docker_model_runner(hw_info: hardware.HardwareInfo) -> bool:
 
 
 def get_docker_memory_allocation() -> Optional[float]:
-    """
-    Get Docker memory allocation in GB.
-
-    Returns:
-        Memory allocation in GB as float, or None if unable to detect
-    """
+    """Get Docker memory allocation in GB."""
     try:
         code, stdout, _ = utils.run_command(
             ["docker", "info", "--format", "{{.MemTotal}}"],
@@ -478,7 +427,6 @@ def get_docker_memory_allocation() -> Optional[float]:
             clean_env=True
         )
         if code == 0 and stdout.strip():
-            # Docker returns memory in bytes
             mem_bytes = int(stdout.strip())
             mem_gb = mem_bytes / (1024 ** 3)
             return mem_gb
@@ -488,12 +436,7 @@ def get_docker_memory_allocation() -> Optional[float]:
 
 
 def get_docker_cpu_allocation() -> Optional[int]:
-    """
-    Get Docker CPU allocation.
-
-    Returns:
-        Number of CPUs allocated to Docker, or None if unable to detect
-    """
+    """Get Docker CPU allocation."""
     try:
         code, stdout, _ = utils.run_command(
             ["docker", "info", "--format", "{{.NCPU}}"],
@@ -508,244 +451,12 @@ def get_docker_cpu_allocation() -> Optional[int]:
     return None
 
 
-# =============================================================================
-# VPN Resilience Functions
-# =============================================================================
-
-def setup_vpn_resilient_environment() -> None:
-    """
-    Configure environment variables for VPN resilience.
-    
-    VPNs (especially corporate VPNs) can break localhost connections by:
-    - Modifying DNS resolution
-    - Changing routing tables
-    - Intercepting connections via proxy
-    
-    This function sets environment variables to bypass these issues.
-    """
-    import os
-    
-    # Prevent proxy interception of local connections
-    os.environ['NO_PROXY'] = VPN_RESILIENT_ENV['NO_PROXY']
-    
-    # Remove SSH_AUTH_SOCK which can cause HTTPS corruption with some Go HTTP clients
-    os.environ.pop('SSH_AUTH_SOCK', None)
-
-
-def verify_model_server(retry_on_failure: bool = True, max_retries: int = 3) -> bool:
-    """
-    Verify that the Docker Model Runner server is accessible and restart if needed.
-    
-    This function is VPN-resilient - it uses curl with -k flag to handle
-    corporate SSL interception and tests the 127.0.0.1 endpoint.
-    
-    Args:
-        retry_on_failure: If True, attempt to restart the service on failure
-        max_retries: Maximum number of restart attempts
-    
-    Returns:
-        True if server is accessible, False otherwise
-    """
-    import subprocess
-    import time
-    
-    # Test the models endpoint (OpenAI-compatible)
-    api_url = f"{DMR_API_BASE}/models"
-    
-    # Use curl -k to handle corporate SSL interception
-    def check_server() -> bool:
-        try:
-            result = subprocess.run(
-                ["curl", "-k", "-s", "-f", "--connect-timeout", "5", api_url],
-                capture_output=True,
-                timeout=10
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return False
-    
-    # First check
-    if check_server():
-        return True
-    
-    if not retry_on_failure:
-        return False
-    
-    # Server not responding, try to restart Docker Model Runner containers
-    ui.print_warning("Docker Model Runner not responding, attempting restart...")
-    
-    for attempt in range(max_retries):
-        ui.print_info(f"Restart attempt {attempt + 1}/{max_retries}...")
-        
-        # Try to restart model-runner containers
-        if restart_model_runner_containers():
-            # Wait for service to be ready
-            time.sleep(5)
-            
-            if check_server():
-                ui.print_success("Docker Model Runner is now accessible")
-                return True
-        
-        if attempt < max_retries - 1:
-            time.sleep(3)  # Wait before next attempt
-    
-    ui.print_error("Failed to restore Docker Model Runner connectivity")
-    ui.print_info("Please check Docker Desktop is running and Model Runner is enabled")
-    return False
-
-
-def restart_model_runner_containers() -> bool:
-    """
-    Restart Docker Model Runner containers.
-    
-    Returns:
-        True if restart was attempted, False on error
-    """
-    import subprocess
-    
-    # Find model-runner containers
-    code, stdout, _ = utils.run_command(
-        ["docker", "ps", "-a", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}"],
-        timeout=10
-    )
-    
-    if code != 0:
-        return False
-    
-    restarted = False
-    for line in (stdout or "").splitlines():
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        cid, name, image = parts[0].strip(), parts[1].strip(), parts[2].strip()
-        hay = f"{name} {image}".lower()
-        if "model-runner" in hay or "modelrunner" in hay:
-            # Restart the container
-            restart_code, _, _ = utils.run_command(
-                ["docker", "restart", cid],
-                timeout=30
-            )
-            if restart_code == 0:
-                ui.print_info(f"Restarted container: {name}")
-                restarted = True
-    
-    return restarted
-
-
-def update_shell_profile_for_vpn() -> bool:
-    """
-    Update ~/.zshrc with VPN-resilient environment variables.
-    
-    Appends the following if not already present:
-    - export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"
-    - unset SSH_AUTH_SOCK
-    
-    Returns:
-        True if profile was updated or already configured, False on error
-    """
-    import shutil
-    from pathlib import Path
-    
-    zshrc_path = Path.home() / ".zshrc"
-    
-    # VPN-resilient shell configuration block
-    vpn_config_marker = "# Docker Model Runner VPN Resilience Configuration"
-    vpn_config_block = f'''
-{vpn_config_marker}
-# Prevent VPN proxy from intercepting local connections
-export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"
-# Prevent SSH_AUTH_SOCK from corrupting HTTPS connections
-unset SSH_AUTH_SOCK
-# End Docker Model Runner VPN Resilience Configuration
-'''
-    
-    try:
-        # Check if already configured
-        if zshrc_path.exists():
-            current_content = zshrc_path.read_text()
-            if vpn_config_marker in current_content:
-                ui.print_info("VPN resilience already configured in ~/.zshrc")
-                return True
-        else:
-            current_content = ""
-        
-        # Backup existing .zshrc
-        if zshrc_path.exists():
-            backup_path = zshrc_path.with_suffix(".zshrc.backup")
-            shutil.copy(zshrc_path, backup_path)
-            ui.print_info(f"Backed up existing .zshrc to {backup_path}")
-        
-        # Append VPN configuration
-        with open(zshrc_path, "a") as f:
-            f.write(vpn_config_block)
-        
-        ui.print_success("Updated ~/.zshrc with VPN-resilient configuration")
-        ui.print_info("Run 'source ~/.zshrc' or open a new terminal to apply changes")
-        return True
-        
-    except (OSError, IOError, PermissionError) as e:
-        ui.print_warning(f"Could not update ~/.zshrc: {e}")
-        ui.print_info("You can manually add the following to your shell profile:")
-        ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1,host.docker.internal"')
-        ui.print_info('  unset SSH_AUTH_SOCK')
-        return False
-
-
-def get_vpn_resilient_api_base() -> str:
-    """
-    Get the VPN-resilient API base URL.
-    
-    Returns:
-        The API base URL using 127.0.0.1 instead of localhost
-    """
-    return DMR_API_BASE
-
-
-def get_docker_run_args_for_vpn_resilience() -> List[str]:
-    """
-    Get Docker run arguments for VPN-resilient container configuration.
-    
-    Docker Desktop Mac runs containers in a VM, so we cannot use --network host.
-    Instead, we must use explicit port binding to 127.0.0.1.
-    
-    Returns:
-        List of Docker run arguments for VPN resilience
-    """
-    # Port binding to 127.0.0.1 (not localhost) for VPN resilience
-    # This ensures the port is bound to the loopback interface directly
-    args = [
-        "-p", f"127.0.0.1:11434:11434",
-        # Environment variables inside the container
-        "-e", f"OLLAMA_HOST={DOCKER_CONTAINER_ENV['OLLAMA_HOST']}",
-        "-e", f"NO_PROXY={DOCKER_CONTAINER_ENV['NO_PROXY']}",
-        # Health check using curl
-        "--health-cmd", "curl -f http://localhost:11434/api/version || exit 1",
-        "--health-interval", "30s",
-        "--health-timeout", "10s",
-        "--health-retries", "3",
-        # Auto-restart for VPN connect/disconnect resilience
-        "--restart", "always",
-    ]
-    return args
-
-
 def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, bool]:
     """
     Validate Docker resource allocation (memory and CPU).
 
-    Checks:
-    - Docker memory allocation vs system RAM
-    - Recommends: Total RAM - 8GB (for macOS + React Native app)
-    - Minimum acceptable: 8GB after allocation (16GB total system RAM minimum)
-    - Warns if allocation is too high (within 7GB of total system RAM)
-
-    Args:
-        hw_info: Hardware information containing system RAM
-
     Returns:
-        Tuple of (is_acceptable, should_continue):
-        - is_acceptable: True if resources meet minimum requirements
-        - should_continue: True if user wants to proceed (or resources are acceptable)
+        Tuple of (is_acceptable, should_continue)
     """
     ui.print_subheader("Validating Docker Resource Allocation")
 
@@ -753,7 +464,6 @@ def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, boo
     docker_mem_gb = get_docker_memory_allocation()
     docker_cpu = get_docker_cpu_allocation()
 
-    # Display current allocation
     if docker_mem_gb is not None:
         ui.print_info(f"Docker Memory Allocation: {docker_mem_gb:.1f}GB")
     else:
@@ -761,20 +471,24 @@ def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, boo
 
     if docker_cpu is not None:
         ui.print_info(f"Docker CPU Allocation: {docker_cpu} cores")
-    else:
-        ui.print_info("Could not detect Docker CPU allocation")
 
     ui.print_info(f"System RAM: {system_ram_gb:.1f}GB")
     print()
 
-    # Calculate recommendations
-    recommended_mem_gb = max(0, system_ram_gb - 8.0)  # Reserve 8GB for macOS + React Native app
-    minimum_system_ram = 16.0  # Minimum total system RAM
-    minimum_available = 8.0  # Minimum available after Docker allocation
+    # Block systems with 16GB or less (should have been caught earlier, but double-check)
+    minimum_system_ram = 24.0
+    if system_ram_gb < minimum_system_ram:
+        ui.print_error(f"System RAM ({system_ram_gb:.1f}GB) is below minimum ({minimum_system_ram:.0f}GB)")
+        ui.print_error("This setup requires at least 24GB total system RAM")
+        ui.print_error("GPT-OSS 20B needs 16GB + overhead, which is not feasible on 16GB systems")
+        print()
+        return False, False
+    
+    # Standard calculation for 24GB+ systems
+    recommended_mem_gb = max(0, system_ram_gb - 8.0)
+    minimum_available = 8.0
 
-    # Determine CPU recommendation based on system
     if hw_info.cpu_cores > 0:
-        # Recommend 6-10 CPUs depending on system
         if hw_info.cpu_cores >= 10:
             recommended_cpu = 10
         elif hw_info.cpu_cores >= 8:
@@ -784,16 +498,7 @@ def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, boo
     else:
         recommended_cpu = 6
 
-    # Check if system RAM meets minimum
-    if system_ram_gb < minimum_system_ram:
-        ui.print_error(f"System RAM ({system_ram_gb:.1f}GB) is below minimum ({minimum_system_ram:.0f}GB)")
-        ui.print_error("This setup requires at least 16GB total system RAM")
-        print()
-        if not ui.prompt_yes_no("Continue anyway? (Not recommended)", default=False):
-            return False, False
-        return False, True
 
-    # If we couldn't detect Docker memory, warn but allow continuation
     if docker_mem_gb is None:
         ui.print_warning("Could not verify Docker memory allocation")
         ui.print_info("Please verify Docker Desktop settings manually")
@@ -806,28 +511,21 @@ def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, boo
             return True, True
         return False, False
 
-    # Calculate available RAM after Docker allocation
     available_after_docker = system_ram_gb - docker_mem_gb
 
-    # Check if allocation is too high (within 7GB of total system RAM)
     if available_after_docker < 7.0:
         ui.print_warning("Docker memory allocation is very high")
-        ui.print_warning(f"Only {available_after_docker:.1f}GB will remain for macOS and your React app")
-        ui.print_warning("This may starve the system and cause performance issues")
+        ui.print_warning(f"Only {available_after_docker:.1f}GB will remain for system")
         print()
 
-    # Check if below minimum available
     is_below_minimum = available_after_docker < minimum_available
-
-    # Check if significantly different from recommendation
     mem_diff = abs(docker_mem_gb - recommended_mem_gb)
-    is_suboptimal = mem_diff > 2.0 or is_below_minimum  # More than 2GB difference or below minimum
+    is_suboptimal = mem_diff > 2.0 or is_below_minimum
 
     if is_suboptimal:
         ui.print_warning("Docker resource allocation is suboptimal")
         print()
 
-        # Show current vs recommended
         print(ui.colorize("Current Configuration:", ui.Colors.BOLD))
         print(f"  Memory: {docker_mem_gb:.1f}GB allocated")
         print(f"  Available for system/apps: {available_after_docker:.1f}GB")
@@ -841,27 +539,16 @@ def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, boo
         print(f"  CPUs: {recommended_cpu} cores")
         print()
 
-        # Explanation
-        ui.print_info("Why these settings?")
-        ui.print_info("  • We need ~8GB reserved for macOS system operations")
-        ui.print_info("  • Your React app also needs memory to run")
-        ui.print_info("  • Too much Docker memory can starve the system")
-        print()
-
-        # Instructions
-        ui.print_info(ui.colorize("How to adjust:", ui.Colors.BOLD))
+        ui.print_info("How to adjust:")
         ui.print_info("  1. Open Docker Desktop")
         ui.print_info("  2. Click the ⚙️ Settings icon (top right)")
         ui.print_info("  3. Go to 'Resources' → 'Advanced'")
-        ui.print_info("  4. Adjust the following:")
-        print(ui.colorize(f"     • Memory: Set to {recommended_mem_gb:.1f}GB", ui.Colors.CYAN))
-        print(ui.colorize(f"     • CPUs: Set to {recommended_cpu} cores", ui.Colors.CYAN))
+        ui.print_info("  4. Adjust Memory and CPUs")
         ui.print_info("  5. Click 'Apply & restart'")
         print()
 
         if is_below_minimum:
             ui.print_error(f"Available RAM ({available_after_docker:.1f}GB) is below minimum ({minimum_available:.0f}GB)")
-            ui.print_error("This may cause system instability and app crashes")
             print()
             if not ui.prompt_yes_no("Continue anyway? (Not recommended)", default=False):
                 return False, False
@@ -871,7 +558,6 @@ def validate_docker_resources(hw_info: hardware.HardwareInfo) -> Tuple[bool, boo
                 return False, False
             return False, True
     else:
-        # Resources are acceptable
         ui.print_success("Docker resource allocation looks good")
         if docker_cpu is not None and docker_cpu < recommended_cpu:
             ui.print_info(f"Note: Consider increasing CPU allocation to {recommended_cpu} cores for better performance")
