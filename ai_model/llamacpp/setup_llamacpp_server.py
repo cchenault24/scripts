@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Llama.cpp Server Setup Script for Enterprise Environments
+Llama.cpp Server Setup Script for macOS Apple Silicon
 
-Deploys and manages llama.cpp server for macOS Apple Silicon with GPT-OSS 20B model.
+Deploys and manages llama.cpp server for macOS Apple Silicon (M1-M5) with GPT-OSS 20B model.
+
+This script is macOS-only and requires Apple Silicon.
 
 Features:
-- Automatic binary download and installation
+- Automatic binary download and installation (or build from source)
 - Model download with verification
 - Dynamic context sizing with fallback
 - VPN-resilient configuration (127.0.0.1)
