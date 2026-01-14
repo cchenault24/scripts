@@ -557,6 +557,17 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         return False, model_path
     
     # Try using HuggingFace CLI first (best for authentication)
+    # Install CLI if huggingface_hub is available but CLI is not
+    if not shutil.which("huggingface-cli") and utils.ensure_huggingface_hub_installed():
+        try:
+            import huggingface_hub
+            # The CLI should be available if huggingface_hub is installed
+            # Check again after import
+            if not shutil.which("huggingface-cli"):
+                ui.print_info("HuggingFace CLI not found, will use Python library instead")
+        except ImportError:
+            pass
+    
     if shutil.which("huggingface-cli"):
         ui.print_info(f"Downloading {filename} using HuggingFace CLI...")
         ui.print_warning("This may take a while (model is ~12-18GB)")
