@@ -612,6 +612,16 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             
             model_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Configure SSL context for corporate environments
+            import ssl
+            ssl_context = utils.get_unverified_ssl_context()
+            
+            # Set environment variable for huggingface_hub to use unverified SSL
+            # This is needed for corporate proxies with self-signed certificates
+            import os
+            os.environ['CURL_CA_BUNDLE'] = ''
+            os.environ['REQUESTS_CA_BUNDLE'] = ''
+            
             # Try to download with token if available, otherwise use anonymous
             try:
                 # Check if user is logged in
@@ -624,12 +634,11 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             
             # Use hf_hub_download with progress tracking
             # token=None allows anonymous access for public repos
+            # Remove deprecated arguments
             downloaded_path = huggingface_hub.hf_hub_download(
                 repo_id="microsoft/gpt-oss-20b-gguf",
                 filename=filename,
                 local_dir=str(model_path.parent),
-                local_dir_use_symlinks=False,
-                resume_download=True,
                 token=None  # Use None for anonymous, or auto-detect if logged in
             )
             
@@ -652,7 +661,7 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
                 ui.print_info(f"Downloaded to: {downloaded_path}")
                 return False, model_path
         except huggingface_hub.utils.HfHubHTTPError as e:
-            if e.response.status_code == 401:
+            if hasattr(e, 'response') and e.response and e.response.status_code == 401:
                 ui.print_warning("Authentication required for this model")
                 ui.print_info("You can log in with: huggingface-cli login")
                 ui.print_info("Or install huggingface-cli: pip install --user huggingface_hub[cli]")
@@ -660,13 +669,18 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             else:
                 ui.print_warning(f"Download with huggingface_hub failed: {e}")
                 ui.print_info("Trying direct download...")
-        except ImportError as e:
-            # huggingface_hub not available, try direct download
-            ui.print_warning(f"huggingface_hub import failed: {e}")
+        except (ImportError, AttributeError) as e:
+            # huggingface_hub not available or version issue, try direct download
+            ui.print_warning(f"huggingface_hub issue: {e}")
             ui.print_info("Trying direct download...")
         except Exception as e:
-            ui.print_warning(f"Download with huggingface_hub failed: {e}")
-            ui.print_info("Trying direct download...")
+            error_msg = str(e)
+            if "SSL" in error_msg or "certificate" in error_msg.lower():
+                ui.print_warning("SSL certificate verification failed (corporate proxy detected)")
+                ui.print_info("Trying direct download with SSL verification disabled...")
+            else:
+                ui.print_warning(f"Download with huggingface_hub failed: {e}")
+                ui.print_info("Trying direct download...")
     else:
         ui.print_warning("Could not install huggingface_hub, trying direct download...")
     
