@@ -94,12 +94,19 @@ def install() -> int:
     # Check system requirements and detect hardware
     print()
     ui.print_subheader("System Check")
-    meets_requirements, message = check_system_requirements()
-    if not meets_requirements:
-        ui.print_error(message)
+    
+    # detect_hardware() prints hardware info and returns HardwareInfo object
+    hw_info = hardware.detect_hardware()
+    
+    # Now check requirements using the detected hardware
+    if not hw_info.has_apple_silicon:
+        ui.print_error("This script requires Apple Silicon (M1-M5)")
         return 1
     
-    hw_info = hardware.detect_hardware()
+    if hw_info.ram_gb < 16:
+        ui.print_error(f"Insufficient RAM: {hw_info.ram_gb:.1f}GB (minimum 16GB required)")
+        return 1
+    
     ui.print_success("System requirements met")
     
     # Check if server is already running

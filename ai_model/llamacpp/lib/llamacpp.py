@@ -663,34 +663,30 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
             os.environ['REQUESTS_CA_BUNDLE'] = ''
             os.environ['PYTHONHTTPSVERIFY'] = '0'
             
+            # Fix certifi issue - ensure certifi is available and working
+            try:
+                import certifi
+                # Some versions of certifi don't have 'where', use alternative
+                try:
+                    cert_path = certifi.where()
+                except AttributeError:
+                    # Older certifi version, try to find certs
+                    try:
+                        cert_path = certifi.__file__.replace('__init__.py', 'cacert.pem')
+                    except Exception:
+                        cert_path = None
+                
+                if cert_path:
+                    os.environ['REQUESTS_CA_BUNDLE'] = cert_path
+                    os.environ['SSL_CERT_FILE'] = cert_path
+            except ImportError:
+                # certifi not available, that's okay for unverified SSL
+                pass
+            
             # Configure requests/urllib3 to skip SSL verification
             try:
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            except ImportError:
-                pass
-            
-            # Monkey-patch requests to use unverified SSL context
-            try:
-                import requests
-                from requests.adapters import HTTPAdapter
-                from urllib3.util.ssl_ import create_urllib3_context
-                
-                # Create a custom adapter that uses unverified SSL
-                class UnverifiedHTTPAdapter(HTTPAdapter):
-                    def init_poolmanager(self, *args, **kwargs):
-                        kwargs['ssl_context'] = utils.get_unverified_ssl_context()
-                        return super().init_poolmanager(*args, **kwargs)
-                
-                # Patch huggingface_hub's session if possible
-                try:
-                    huggingface_hub.utils._http_backend.HF_HUB_HTTP_CLIENT = requests.Session()
-                    adapter = UnverifiedHTTPAdapter()
-                    huggingface_hub.utils._http_backend.HF_HUB_HTTP_CLIENT.mount('https://', adapter)
-                    huggingface_hub.utils._http_backend.HF_HUB_HTTP_CLIENT.mount('http://', adapter)
-                except (AttributeError, ImportError):
-                    # If we can't patch it directly, at least set verify=False in requests calls
-                    pass
             except ImportError:
                 pass
             
