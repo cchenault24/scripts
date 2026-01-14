@@ -339,110 +339,110 @@ def build_from_source() -> Tuple[bool, Path]:
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_path = Path(tmpdir) / "llama.cpp"
             build_path = repo_path / "build"
-        
-        # Clone repository
-        code, stdout, stderr = utils.run_command(
-            ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
-            timeout=300
-        )
-        
-        if code != 0:
-            ui.print_error(f"Failed to clone repository: {stderr}")
-            return False, get_binary_path()
-        
-        ui.print_success("Repository cloned")
-        ui.print_info("Configuring build with CMake...")
-        
-        # Create build directory
-        build_path.mkdir(parents=True, exist_ok=True)
-        
-        # Configure with CMake - enable server target
-        cmake_args = [
-            "cmake", "..",
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DBUILD_SHARED_LIBS=OFF",
-            "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
-        ]
-        
-        code, stdout, stderr = utils.run_command(
-            cmake_args,
-            timeout=300,
-            cwd=str(build_path)
-        )
-        
-        if code != 0:
-            ui.print_error(f"CMake configuration failed: {stderr}")
-            ui.print_info("Configuration output:")
-            ui.print_info(stdout[-500:] if stdout else "No output")
-            return False, get_binary_path()
-        
-        ui.print_success("CMake configuration complete")
-        
-        ui.print_info("Building server (this may take 5-10 minutes)...")
-        ui.print_info("Progress:")
-        
-        # Try different target names
-        target_names = ["server", "llama-server"]
-        build_success = False
-        
-        for target_name in target_names:
-            build_cmd = ["cmake", "--build", ".", "--target", target_name]
             
+            # Clone repository
             code, stdout, stderr = utils.run_command(
-                build_cmd,
-                timeout=900,  # 15 minutes for build
-                cwd=str(build_path),
-                show_progress=True
-            )
-            
-            if code == 0:
-                build_success = True
-                print()  # New line after progress output
-                ui.print_success(f"Successfully built target: {target_name}")
-                break
-        
-        if not build_success:
-            # Try building all targets (might build server as part of all)
-            print()  # New line
-            ui.print_warning("Building with specific target failed, trying to build all targets...")
-            build_cmd = ["cmake", "--build", "."]
-            
-            code, stdout, stderr = utils.run_command(
-                build_cmd,
-                timeout=900,
-                cwd=str(build_path),
-                show_progress=True
+                ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
+                timeout=300
             )
             
             if code != 0:
-                print()  # New line
-                ui.print_error(f"Build failed: {stderr}")
+                ui.print_error(f"Failed to clone repository: {stderr}")
                 return False, get_binary_path()
-        
-        # Find the built binary (macOS locations)
-        possible_locations = [
-            build_path / "bin" / "server",
-            build_path / "bin" / "llama-server",
-            build_path / "server",
-            build_path / "llama-server",
-        ]
-        
-        built_binary = None
-        for location in possible_locations:
-            if location.exists():
-                built_binary = location
-                break
-        
-        if not built_binary:
-            ui.print_error("Build succeeded but binary not found in expected locations")
-            ui.print_info("Searched in:")
-            for loc in possible_locations:
-                ui.print_info(f"  {loc}")
-            return False, get_binary_path()
-        
-        binary_path = get_binary_path()
-        binary_path.parent.mkdir(parents=True, exist_ok=True)
-        
+            
+            ui.print_success("Repository cloned")
+            ui.print_info("Configuring build with CMake...")
+            
+            # Create build directory
+            build_path.mkdir(parents=True, exist_ok=True)
+            
+            # Configure with CMake - enable server target
+            cmake_args = [
+                "cmake", "..",
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DBUILD_SHARED_LIBS=OFF",
+                "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
+            ]
+            
+            code, stdout, stderr = utils.run_command(
+                cmake_args,
+                timeout=300,
+                cwd=str(build_path)
+            )
+            
+            if code != 0:
+                ui.print_error(f"CMake configuration failed: {stderr}")
+                ui.print_info("Configuration output:")
+                ui.print_info(stdout[-500:] if stdout else "No output")
+                return False, get_binary_path()
+            
+            ui.print_success("CMake configuration complete")
+            
+            ui.print_info("Building server (this may take 5-10 minutes)...")
+            ui.print_info("Progress:")
+            
+            # Try different target names
+            target_names = ["server", "llama-server"]
+            build_success = False
+            
+            for target_name in target_names:
+                build_cmd = ["cmake", "--build", ".", "--target", target_name]
+                
+                code, stdout, stderr = utils.run_command(
+                    build_cmd,
+                    timeout=900,  # 15 minutes for build
+                    cwd=str(build_path),
+                    show_progress=True
+                )
+                
+                if code == 0:
+                    build_success = True
+                    print()  # New line after progress output
+                    ui.print_success(f"Successfully built target: {target_name}")
+                    break
+            
+            if not build_success:
+                # Try building all targets (might build server as part of all)
+                print()  # New line
+                ui.print_warning("Building with specific target failed, trying to build all targets...")
+                build_cmd = ["cmake", "--build", "."]
+                
+                code, stdout, stderr = utils.run_command(
+                    build_cmd,
+                    timeout=900,
+                    cwd=str(build_path),
+                    show_progress=True
+                )
+                
+                if code != 0:
+                    print()  # New line
+                    ui.print_error(f"Build failed: {stderr}")
+                    return False, get_binary_path()
+            
+            # Find the built binary (macOS locations)
+            possible_locations = [
+                build_path / "bin" / "server",
+                build_path / "bin" / "llama-server",
+                build_path / "server",
+                build_path / "llama-server",
+            ]
+            
+            built_binary = None
+            for location in possible_locations:
+                if location.exists():
+                    built_binary = location
+                    break
+            
+            if not built_binary:
+                ui.print_error("Build succeeded but binary not found in expected locations")
+                ui.print_info("Searched in:")
+                for loc in possible_locations:
+                    ui.print_info(f"  {loc}")
+                return False, get_binary_path()
+            
+            binary_path = get_binary_path()
+            binary_path.parent.mkdir(parents=True, exist_ok=True)
+            
             try:
                 shutil.copy2(built_binary, binary_path)
                 binary_path.chmod(0o755)
