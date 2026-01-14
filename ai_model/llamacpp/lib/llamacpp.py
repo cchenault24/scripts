@@ -344,11 +344,12 @@ def build_from_source() -> Tuple[bool, Path]:
         # Create build directory
         build_path.mkdir(parents=True, exist_ok=True)
         
-        # Configure with CMake
+        # Configure with CMake - enable server target
         cmake_args = [
             "cmake", "..",
             "-DCMAKE_BUILD_TYPE=Release",
             "-DBUILD_SHARED_LIBS=OFF",
+            "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
         ]
         
         code, stdout, stderr = utils.run_command(
@@ -359,31 +360,80 @@ def build_from_source() -> Tuple[bool, Path]:
         
         if code != 0:
             ui.print_error(f"CMake configuration failed: {stderr}")
+            ui.print_info("Configuration output:")
+            ui.print_info(stdout[-500:] if stdout else "No output")
             ui.print_info("You may need to install build dependencies:")
             ui.print_info("  brew install cmake")
             return False, get_binary_path()
         
-        ui.print_info("Building server (this may take a few minutes)...")
-        
-        # Build server target
+        # Check what targets are available (for debugging)
         code, stdout, stderr = utils.run_command(
-            ["cmake", "--build", ".", "--config", "Release", "--target", "server"],
-            timeout=900,  # 15 minutes for build
+            ["cmake", "--build", ".", "--target", "help"],
+            timeout=30,
             cwd=str(build_path)
         )
         
-        if code != 0:
-            ui.print_error(f"Build failed: {stderr}")
-            ui.print_info("Build output:")
-            ui.print_info(stdout[-500:] if stdout else "No output")
-            return False, get_binary_path()
+        # Look for server-related targets in the help output
+        if "server" in stdout.lower() or "llama-server" in stdout.lower():
+            ui.print_info("Server target found in build system")
         
-        # Find the built binary (location varies by platform)
+        ui.print_info("Building server (this may take a few minutes)...")
+        
+        # Build server target (--config is Windows-specific, omit on macOS/Linux)
+        import platform
+        is_windows = platform.system() == "Windows"
+        
+        # Try different target names
+        target_names = ["server", "llama-server"]
+        build_success = False
+        
+        for target_name in target_names:
+            if is_windows:
+                build_cmd = ["cmake", "--build", ".", "--config", "Release", "--target", target_name]
+            else:
+                build_cmd = ["cmake", "--build", ".", "--target", target_name]
+            
+            code, stdout, stderr = utils.run_command(
+                build_cmd,
+                timeout=900,  # 15 minutes for build
+                cwd=str(build_path)
+            )
+            
+            if code == 0:
+                build_success = True
+                ui.print_info(f"Successfully built target: {target_name}")
+                break
+        
+        if not build_success:
+            # Try building all targets (might build server as part of all)
+            ui.print_warning("Building with specific target failed, trying to build all targets...")
+            if is_windows:
+                build_cmd = ["cmake", "--build", ".", "--config", "Release"]
+            else:
+                build_cmd = ["cmake", "--build", "."]
+            
+            code, stdout, stderr = utils.run_command(
+                build_cmd,
+                timeout=900,
+                cwd=str(build_path)
+            )
+            
+            if code != 0:
+                ui.print_error(f"Build failed: {stderr}")
+                ui.print_info("Build output:")
+                ui.print_info(stdout[-1000:] if stdout else "No output")
+                return False, get_binary_path()
+        
+        # Find the built binary (location varies by platform and target name)
         possible_locations = [
             build_path / "bin" / "server",
+            build_path / "bin" / "llama-server",
             build_path / "server",
+            build_path / "llama-server",
             build_path / "bin" / "Release" / "server",
-            build_path / "bin" / "server.exe",  # Windows, but check anyway
+            build_path / "bin" / "Release" / "llama-server",
+            build_path / "bin" / "Debug" / "server",
+            build_path / "bin" / "Debug" / "llama-server",
         ]
         
         built_binary = None
