@@ -54,9 +54,12 @@ def ensure_rich_installed() -> bool:
         return False
 
 
-def ensure_huggingface_hub_installed() -> bool:
+def ensure_huggingface_hub_installed(show_messages: bool = True) -> bool:
     """
     Ensure huggingface_hub is installed, installing it if necessary.
+    
+    Args:
+        show_messages: Whether to show installation status messages
     
     Returns:
         True if huggingface_hub is available (either was already installed or just installed)
@@ -69,8 +72,12 @@ def ensure_huggingface_hub_installed() -> bool:
             import subprocess
             import sys
             
-            from . import ui
-            ui.print_info("Installing huggingface_hub...")
+            if show_messages:
+                try:
+                    from . import ui
+                    ui.print_info("Installing huggingface_hub...")
+                except ImportError:
+                    print("Installing huggingface_hub...")
             
             code, stdout, stderr = run_command(
                 [sys.executable, "-m", "pip", "install", "huggingface_hub>=0.20.0", "--quiet"],
@@ -80,16 +87,36 @@ def ensure_huggingface_hub_installed() -> bool:
             if code == 0:
                 try:
                     import huggingface_hub
-                    ui.print_success("huggingface_hub installed")
+                    if show_messages:
+                        try:
+                            from . import ui
+                            ui.print_success("huggingface_hub installed")
+                        except ImportError:
+                            pass
                     return True
                 except ImportError:
-                    ui.print_warning("huggingface_hub installed but import failed")
+                    if show_messages:
+                        try:
+                            from . import ui
+                            ui.print_warning("huggingface_hub installed but import failed")
+                        except ImportError:
+                            pass
                     return False
             else:
-                ui.print_warning(f"Failed to install huggingface_hub: {stderr}")
+                if show_messages:
+                    try:
+                        from . import ui
+                        ui.print_warning(f"Failed to install huggingface_hub: {stderr}")
+                    except ImportError:
+                        pass
                 return False
         except Exception as e:
-            ui.print_warning(f"Error installing huggingface_hub: {e}")
+            if show_messages:
+                try:
+                    from . import ui
+                    ui.print_warning(f"Error installing huggingface_hub: {e}")
+                except ImportError:
+                    pass
             return False
 
 
