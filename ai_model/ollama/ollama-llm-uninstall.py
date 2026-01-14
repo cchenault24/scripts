@@ -48,6 +48,7 @@ from lib import config
 from lib import uninstaller
 from lib import ollama
 from lib import utils
+from lib import openwebui
 
 # Module logger
 _logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class SystemInfo:
     vscode_extension: bool
     intellij_plugin: bool
     ollama_installed_by_script: bool  # True if we installed it during uninstall
+    openwebui_status: Dict[str, Any]  # Open WebUI container status
 
 
 @dataclass
@@ -84,6 +86,9 @@ class UninstallChoices:
     uninstall_ollama: bool
     remove_vscode: bool
     remove_intellij: bool
+    remove_openwebui: bool
+    remove_openwebui_data: bool
+    remove_openwebui_image: bool
 
 
 @dataclass
@@ -98,6 +103,9 @@ class UninstallResults:
     intellij_removed: bool
     temp_files_removed: int
     errors: List[str]
+    openwebui_container_removed: bool
+    openwebui_data_removed: bool
+    openwebui_image_removed: bool
 
 
 def load_manifest() -> dict[str, Any] | None:
@@ -301,6 +309,9 @@ def gather_system_info(args: Any) -> SystemInfo:
     vscode_extension = uninstaller.check_vscode_extension_installed()
     intellij_plugin, _ = uninstaller.check_intellij_plugin_installed()
     
+    # Check Open WebUI status
+    openwebui_status = openwebui.get_openwebui_status()
+    
     return SystemInfo(
         manifest=manifest,
         ollama_installed=ollama_ok,
@@ -317,7 +328,8 @@ def gather_system_info(args: Any) -> SystemInfo:
         orphaned_files=orphaned_files,
         vscode_extension=vscode_extension,
         intellij_plugin=intellij_plugin,
-        ollama_installed_by_script=ollama_installed_by_script
+        ollama_installed_by_script=ollama_installed_by_script,
+        openwebui_status=openwebui_status
     )
 
 
@@ -358,6 +370,11 @@ def display_system_scan(info: SystemInfo) -> None:
     if info.intellij_plugin:
         ui.print_info("✓ IntelliJ plugin installed")
     
+    # Open WebUI
+    if info.openwebui_status.get("container_exists"):
+        status_str = "running" if info.openwebui_status.get("container_running") else "stopped"
+        ui.print_info(f"✓ Open WebUI container ({status_str})")
+    
     print()
 
 
@@ -375,7 +392,10 @@ def prompt_all_choices(info: SystemInfo, args: Any) -> UninstallChoices:
         remove_autostart=False,
         uninstall_ollama=False,
         remove_vscode=False,
-        remove_intellij=False
+        remove_intellij=False,
+        remove_openwebui=False,
+        remove_openwebui_data=False,
+        remove_openwebui_image=False
     )
     
     ui.print_subheader("Uninstall Configuration")
@@ -470,6 +490,28 @@ def prompt_all_choices(info: SystemInfo, args: Any) -> UninstallChoices:
                 default=False
             )
     
+    # Open WebUI
+    if info.openwebui_status.get("container_exists"):
+        print()
+        status_str = "running" if info.openwebui_status.get("container_running") else "stopped"
+        ui.print_info(f"Open WebUI container is {status_str}")
+        
+        choices.remove_openwebui = ui.prompt_yes_no(
+            "Remove Open WebUI container?",
+            default=True
+        )
+        
+        if choices.remove_openwebui:
+            choices.remove_openwebui_data = ui.prompt_yes_no(
+                "Also remove Open WebUI data (chat history, settings)?",
+                default=False
+            )
+            
+            choices.remove_openwebui_image = ui.prompt_yes_no(
+                "Remove Docker image to free disk space (~2GB)?",
+                default=False
+            )
+    
     # Uninstall Ollama completely
     if info.ollama_installed:
         print()
@@ -501,6 +543,12 @@ def show_plan_summary(info: SystemInfo, choices: UninstallChoices) -> None:
         ui.print_info("• Remove VS Code extension")
     if choices.remove_intellij:
         ui.print_info("• Remove IntelliJ plugin")
+    if choices.remove_openwebui:
+        ui.print_info("• Remove Open WebUI container")
+        if choices.remove_openwebui_data:
+            ui.print_info("  • Also remove Open WebUI data")
+        if choices.remove_openwebui_image:
+            ui.print_info("  • Also remove Docker image")
     if choices.uninstall_ollama:
         ui.print_info("• Uninstall Ollama completely")
     
@@ -510,6 +558,7 @@ def show_plan_summary(info: SystemInfo, choices: UninstallChoices) -> None:
         choices.remove_autostart,
         choices.remove_vscode,
         choices.remove_intellij,
+        choices.remove_openwebui,
         choices.uninstall_ollama
     ]):
         ui.print_info("• No actions selected")
@@ -532,7 +581,10 @@ def execute_uninstall(info: SystemInfo, choices: UninstallChoices) -> UninstallR
         vscode_removed=False,
         intellij_removed=False,
         temp_files_removed=0,
-        errors=[]
+        errors=[],
+        openwebui_container_removed=False,
+        openwebui_data_removed=False,
+        openwebui_image_removed=False
     )
     
     # Remove models
@@ -611,6 +663,18 @@ def execute_uninstall(info: SystemInfo, choices: UninstallChoices) -> UninstallR
     if choices.remove_intellij:
         ui.print_subheader("Removing IntelliJ Plugin")
         results.intellij_removed = uninstaller.uninstall_intellij_plugin()
+        print()
+    
+    # Remove Open WebUI
+    if choices.remove_openwebui:
+        ui.print_subheader("Removing Open WebUI")
+        openwebui_results = openwebui.uninstall_openwebui(
+            remove_data=choices.remove_openwebui_data,
+            remove_image=choices.remove_openwebui_image
+        )
+        results.openwebui_container_removed = openwebui_results.get("container_removed", False)
+        results.openwebui_data_removed = openwebui_results.get("data_removed", False)
+        results.openwebui_image_removed = openwebui_results.get("image_removed", False)
         print()
     
     # Uninstall Ollama
@@ -724,6 +788,12 @@ def print_accurate_summary(results: UninstallResults, info: SystemInfo) -> None:
         ui.print_success("✓ Removed IntelliJ plugin")
     if results.ollama_uninstalled:
         ui.print_success("✓ Uninstalled Ollama completely")
+    if results.openwebui_container_removed:
+        ui.print_success("✓ Removed Open WebUI container")
+    if results.openwebui_data_removed:
+        ui.print_success("✓ Removed Open WebUI data")
+    if results.openwebui_image_removed:
+        ui.print_success("✓ Removed Open WebUI Docker image")
     if results.temp_files_removed > 0:
         ui.print_info(f"✓ Cleaned {results.temp_files_removed} temporary file(s)")
     

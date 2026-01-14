@@ -1216,7 +1216,8 @@ def create_installation_manifest(
     created_files: List[Path],
     hw_info: 'hardware.HardwareInfo',
     target_ide: List[str],
-    pre_existing_models: List[str]
+    pre_existing_models: List[str],
+    openwebui_info: Optional[Dict[str, Any]] = None
 ) -> Path:
     """
     Create manifest of what was installed for uninstaller.
@@ -1282,7 +1283,7 @@ def create_installation_manifest(
     }
     
     manifest = {
-        "version": "2.0",
+        "version": "2.1",
         "timestamp": _get_utc_timestamp(),
         "installer_version": INSTALLER_VERSION,
         "hardware_snapshot": {
@@ -1301,7 +1302,8 @@ def create_installation_manifest(
             "cache_dirs": [str(continue_dir / "cache")],
             "ide_extensions": [f"{ide}:Continue.continue" for ide in target_ide],
             "ollama_available": getattr(hw_info, 'ollama_available', False),
-            "target_ides": target_ide
+            "target_ides": target_ide,
+            "openwebui": openwebui_info
         }
     }
     
