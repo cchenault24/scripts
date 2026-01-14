@@ -145,6 +145,8 @@ def run_command(
             
             # Show progress with Rich if available, otherwise show real-time output
             if RICH_AVAILABLE:
+                import re
+                
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -164,19 +166,28 @@ def run_command(
                     TimeElapsedColumn(),
                     transient=True,
                 ) as progress:
-                    task = progress.add_task("Building...", total=None)
+                    task = progress.add_task("Building...", total=100)
                     
                     for line in process.stdout:
                         line = line.rstrip()
                         if line:
-                            # Update progress description with last line of output
-                            if "[" in line and "]" in line:
-                                # Extract percentage or status from CMake output
-                                progress.update(task, description=f"Building... {line[:60]}")
+                            # Extract percentage from CMake output (e.g., "[ 31%] Building...")
+                            percent_match = re.search(r'\[\s*(\d+)%\]', line)
+                            if percent_match:
+                                percent = int(percent_match.group(1))
+                                progress.update(task, completed=percent)
+                            
+                            # Update description with current build step (truncate long lines)
+                            if len(line) > 60:
+                                description = line[:57] + "..."
+                            else:
+                                description = line
+                            progress.update(task, description=description)
+                            
                             stdout_lines.append(line)
                     
                     process.wait()
-                    progress.update(task, completed=True)
+                    progress.update(task, completed=100)
                 
                 stdout = "\n".join(stdout_lines)
                 return process.returncode, stdout, ""
