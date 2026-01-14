@@ -42,7 +42,8 @@ def run_command(
     capture: bool = True, 
     timeout: int = 300,
     clean_env: bool = False,
-    cwd: Optional[str] = None
+    cwd: Optional[str] = None,
+    show_progress: bool = False
 ) -> Tuple[int, str, str]:
     """
     Run a shell command and return the result.
@@ -53,6 +54,7 @@ def run_command(
         timeout: Maximum time to wait in seconds (default: 300)
         clean_env: If True, remove SSH_AUTH_SOCK from environment
         cwd: Working directory for command (default: None)
+        show_progress: If True, show real-time output (default: False)
     
     Returns:
         Tuple of (returncode, stdout, stderr)
@@ -63,15 +65,38 @@ def run_command(
         else:
             env = None
         
-        result = subprocess.run(
-            cmd,
-            capture_output=capture,
-            text=True,
-            timeout=timeout,
-            env=env,
-            cwd=cwd
-        )
-        return result.returncode, result.stdout or "", result.stderr or ""
+        if show_progress:
+            # Show real-time output
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+                cwd=cwd,
+                bufsize=1
+            )
+            
+            stdout_lines = []
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    print(f"  {line}")
+                    stdout_lines.append(line)
+            
+            process.wait()
+            stdout = "\n".join(stdout_lines)
+            return process.returncode, stdout, ""
+        else:
+            result = subprocess.run(
+                cmd,
+                capture_output=capture,
+                text=True,
+                timeout=timeout,
+                env=env,
+                cwd=cwd
+            )
+            return result.returncode, result.stdout or "", result.stderr or ""
     except subprocess.TimeoutExpired:
         return -1, "", "Command timed out"
     except FileNotFoundError:

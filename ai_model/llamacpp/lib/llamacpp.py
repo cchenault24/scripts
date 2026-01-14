@@ -331,52 +331,54 @@ def build_from_source() -> Tuple[bool, Path]:
             ui.print_error("cmake is required but not found and Homebrew is not available")
             return False, get_binary_path()
     
-    ui.print_info("Cloning llama.cpp repository...")
-    
-    import tempfile
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir) / "llama.cpp"
-        build_path = repo_path / "build"
+        ui.print_info("Cloning llama.cpp repository...")
         
-        # Clone repository
-        code, stdout, stderr = utils.run_command(
-            ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
-            timeout=300
-        )
+        import tempfile
         
-        if code != 0:
-            ui.print_error(f"Failed to clone repository: {stderr}")
-            return False, get_binary_path()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_path = Path(tmpdir) / "llama.cpp"
+            build_path = repo_path / "build"
+            
+            # Clone repository
+            code, stdout, stderr = utils.run_command(
+                ["git", "clone", "--depth", "1", "https://github.com/ggerganov/llama.cpp.git", str(repo_path)],
+                timeout=300
+            )
+            
+            if code != 0:
+                ui.print_error(f"Failed to clone repository: {stderr}")
+                return False, get_binary_path()
+            
+            ui.print_success("Repository cloned")
+            ui.print_info("Configuring build with CMake...")
+            
+            # Create build directory
+            build_path.mkdir(parents=True, exist_ok=True)
+            
+            # Configure with CMake - enable server target
+            cmake_args = [
+                "cmake", "..",
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DBUILD_SHARED_LIBS=OFF",
+                "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
+            ]
+            
+            code, stdout, stderr = utils.run_command(
+                cmake_args,
+                timeout=300,
+                cwd=str(build_path)
+            )
+            
+            if code != 0:
+                ui.print_error(f"CMake configuration failed: {stderr}")
+                ui.print_info("Configuration output:")
+                ui.print_info(stdout[-500:] if stdout else "No output")
+                return False, get_binary_path()
+            
+            ui.print_success("CMake configuration complete")
         
-        ui.print_info("Configuring build with CMake...")
-        
-        # Create build directory
-        build_path.mkdir(parents=True, exist_ok=True)
-        
-        # Configure with CMake - enable server target
-        cmake_args = [
-            "cmake", "..",
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DBUILD_SHARED_LIBS=OFF",
-            "-DLLAMA_BUILD_SERVER=ON",  # Explicitly enable server
-        ]
-        
-        code, stdout, stderr = utils.run_command(
-            cmake_args,
-            timeout=300,
-            cwd=str(build_path)
-        )
-        
-        if code != 0:
-            ui.print_error(f"CMake configuration failed: {stderr}")
-            ui.print_info("Configuration output:")
-            ui.print_info(stdout[-500:] if stdout else "No output")
-            ui.print_info("You may need to install build dependencies:")
-            ui.print_info("  brew install cmake")
-            return False, get_binary_path()
-        
-        ui.print_info("Building server (this may take a few minutes)...")
+        ui.print_info("Building server (this may take 5-10 minutes)...")
+        ui.print_info("Progress:")
         
         # Try different target names
         target_names = ["server", "llama-server"]
@@ -388,29 +390,32 @@ def build_from_source() -> Tuple[bool, Path]:
             code, stdout, stderr = utils.run_command(
                 build_cmd,
                 timeout=900,  # 15 minutes for build
-                cwd=str(build_path)
+                cwd=str(build_path),
+                show_progress=True
             )
             
             if code == 0:
                 build_success = True
-                ui.print_info(f"Successfully built target: {target_name}")
+                print()  # New line after progress output
+                ui.print_success(f"Successfully built target: {target_name}")
                 break
         
         if not build_success:
             # Try building all targets (might build server as part of all)
+            print()  # New line
             ui.print_warning("Building with specific target failed, trying to build all targets...")
             build_cmd = ["cmake", "--build", "."]
             
             code, stdout, stderr = utils.run_command(
                 build_cmd,
                 timeout=900,
-                cwd=str(build_path)
+                cwd=str(build_path),
+                show_progress=True
             )
             
             if code != 0:
+                print()  # New line
                 ui.print_error(f"Build failed: {stderr}")
-                ui.print_info("Build output:")
-                ui.print_info(stdout[-1000:] if stdout else "No output")
                 return False, get_binary_path()
         
         # Find the built binary (macOS locations)
