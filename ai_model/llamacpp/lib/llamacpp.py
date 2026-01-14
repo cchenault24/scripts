@@ -890,20 +890,6 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
         return False, model_path
     
     return False, model_path
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            ui.print_error("Authentication required. Please install huggingface_hub:")
-            ui.print_info("  pip install huggingface_hub")
-            ui.print_info("")
-            ui.print_info("Or download manually from:")
-            ui.print_info(f"  https://huggingface.co/microsoft/gpt-oss-20b-gguf/tree/main")
-            ui.print_info(f"  Place {filename} at: {model_path}")
-        else:
-            ui.print_error(f"Download failed: HTTP {e.code}")
-        return False, model_path
-    except Exception as e:
-        ui.print_error(f"Download failed: {e}")
-        return False, model_path
 
 
 def calculate_optimal_context_size(hw_info: hardware.HardwareInfo, quantization: str = DEFAULT_QUANTIZATION) -> Tuple[int, str]:
