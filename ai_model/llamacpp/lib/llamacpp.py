@@ -337,8 +337,8 @@ def build_from_source() -> Tuple[bool, Path]:
         import tempfile
         
         with tempfile.TemporaryDirectory() as tmpdir:
-        repo_path = Path(tmpdir) / "llama.cpp"
-        build_path = repo_path / "build"
+            repo_path = Path(tmpdir) / "llama.cpp"
+            build_path = repo_path / "build"
         
         # Clone repository
         code, stdout, stderr = utils.run_command(
