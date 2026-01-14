@@ -308,34 +308,35 @@ def build_from_source() -> Tuple[bool, Path]:
     Returns:
         Tuple of (success, binary_path)
     """
-    ui.print_info("Building llama.cpp server from source...")
-    
-    # Automatically install missing dependencies
-    if not shutil.which("git"):
-        if shutil.which("brew"):
-            success, message = install_git()
-            if not success:
-                ui.print_error(f"Failed to install git: {message}")
+    try:
+        ui.print_info("Building llama.cpp server from source...")
+        
+        # Automatically install missing dependencies
+        if not shutil.which("git"):
+            if shutil.which("brew"):
+                success, message = install_git()
+                if not success:
+                    ui.print_error(f"Failed to install git: {message}")
+                    return False, get_binary_path()
+            else:
+                ui.print_error("git is required but not found and Homebrew is not available")
                 return False, get_binary_path()
-        else:
-            ui.print_error("git is required but not found and Homebrew is not available")
-            return False, get_binary_path()
-    
-    if not shutil.which("cmake"):
-        if shutil.which("brew"):
-            success, message = install_cmake()
-            if not success:
-                ui.print_error(f"Failed to install cmake: {message}")
+        
+        if not shutil.which("cmake"):
+            if shutil.which("brew"):
+                success, message = install_cmake()
+                if not success:
+                    ui.print_error(f"Failed to install cmake: {message}")
+                    return False, get_binary_path()
+            else:
+                ui.print_error("cmake is required but not found and Homebrew is not available")
                 return False, get_binary_path()
-        else:
-            ui.print_error("cmake is required but not found and Homebrew is not available")
-            return False, get_binary_path()
-    
-    ui.print_info("Cloning llama.cpp repository...")
-    
-    import tempfile
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
+        
+        ui.print_info("Cloning llama.cpp repository...")
+        
+        import tempfile
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
         repo_path = Path(tmpdir) / "llama.cpp"
         build_path = repo_path / "build"
         
@@ -442,14 +443,19 @@ def build_from_source() -> Tuple[bool, Path]:
         binary_path = get_binary_path()
         binary_path.parent.mkdir(parents=True, exist_ok=True)
         
-        try:
-            shutil.copy2(built_binary, binary_path)
-            binary_path.chmod(0o755)
-            ui.print_success(f"Binary built and installed at {binary_path}")
-            return True, binary_path
-        except Exception as e:
-            ui.print_error(f"Failed to copy binary: {e}")
-            return False, binary_path
+            try:
+                shutil.copy2(built_binary, binary_path)
+                binary_path.chmod(0o755)
+                ui.print_success(f"Binary built and installed at {binary_path}")
+                return True, binary_path
+            except Exception as e:
+                ui.print_error(f"Failed to copy binary: {e}")
+                return False, binary_path
+    except Exception as e:
+        ui.print_error(f"Unexpected error during build: {e}")
+        import traceback
+        ui.print_info(traceback.format_exc())
+        return False, get_binary_path()
 
 
 def install_binary() -> Tuple[bool, Path]:
