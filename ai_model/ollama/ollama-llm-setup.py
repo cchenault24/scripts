@@ -55,6 +55,14 @@ from lib import ui
 from lib import model_selector
 from lib import validator
 
+# =============================================================================
+# VPN Resilience: Configure environment at startup
+# =============================================================================
+# VPNs (especially corporate VPNs) can break localhost connections by modifying
+# DNS resolution and routing tables. Using 127.0.0.1 instead of localhost and
+# setting NO_PROXY ensures the model server remains accessible.
+ollama.setup_vpn_resilient_environment()
+
 # Module logger
 _logger = logging.getLogger(__name__)
 
@@ -325,6 +333,24 @@ def main() -> int:
                 ui.print_info("Skipping auto-start setup")
                 ui.print_info("Remember to run 'ollama serve' after each reboot")
                 ui.print_info("Or set it up later with: brew services start ollama")
+        
+        # Step 16: Configure shell profile for VPN resilience
+        print()
+        ui.print_subheader("VPN Resilience Configuration")
+        ui.print_info("Corporate VPNs can break localhost connections by modifying DNS/routing")
+        ui.print_info("Adding environment variables to ~/.zshrc for permanent VPN resilience")
+        print()
+        
+        if ui.prompt_yes_no("Configure shell profile for VPN resilience?", default=True):
+            if ollama.update_shell_profile_for_vpn():
+                ui.print_success("VPN resilience configured successfully")
+            else:
+                ui.print_warning("Could not update shell profile automatically")
+        else:
+            ui.print_info("Skipping shell profile update")
+            ui.print_info("You can manually add these to your ~/.zshrc if needed:")
+            ui.print_info('  export OLLAMA_HOST="127.0.0.1:11434"')
+            ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1"')
     
     print()
     return 0

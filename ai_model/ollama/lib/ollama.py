@@ -27,10 +27,18 @@ LAUNCH_AGENT_PLIST = f"{LAUNCH_AGENT_LABEL}.plist"
 
 # Ollama API configuration
 # Ollama exposes an OpenAI-compatible API endpoint
-OLLAMA_API_HOST = "localhost"
+# IMPORTANT: Use 127.0.0.1 instead of localhost for VPN resilience
+# VPNs can modify DNS/routing and break localhost resolution
+OLLAMA_API_HOST = "127.0.0.1"  # Use IP address for VPN resilience
 OLLAMA_API_PORT = 11434  # Default Ollama port
 OLLAMA_API_BASE = f"http://{OLLAMA_API_HOST}:{OLLAMA_API_PORT}"
 OLLAMA_OPENAI_ENDPOINT = f"{OLLAMA_API_BASE}/v1"  # OpenAI-compatible endpoint
+
+# VPN-resilient environment variables
+VPN_RESILIENT_ENV = {
+    "OLLAMA_HOST": f"{OLLAMA_API_HOST}:{OLLAMA_API_PORT}",
+    "NO_PROXY": "localhost,127.0.0.1,::1",
+}
 
 
 def get_installation_instructions() -> str:
@@ -410,8 +418,13 @@ def start_ollama_service() -> bool:
             ui.print_info("  Or download from: https://ollama.com/download")
             return False
         
-        # Create clean environment without SSH_AUTH_SOCK to prevent Go HTTP client issues
+        # Create VPN-resilient environment
+        # - Remove SSH_AUTH_SOCK to prevent Go HTTP client issues
+        # - Set OLLAMA_HOST to use 127.0.0.1 instead of localhost
+        # - Set NO_PROXY to prevent VPN proxy interception
         clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
+        clean_env['OLLAMA_HOST'] = VPN_RESILIENT_ENV['OLLAMA_HOST']
+        clean_env['NO_PROXY'] = VPN_RESILIENT_ENV['NO_PROXY']
         
         # Start ollama serve in background
         process = subprocess.Popen(
@@ -584,6 +597,11 @@ def setup_ollama_autostart_macos() -> bool:
     This is more reliable than Homebrew services and works regardless
     of how Ollama was installed.
     
+    VPN Resilience:
+    - Configures OLLAMA_HOST=127.0.0.1:11434 to bypass DNS resolution
+    - Sets NO_PROXY to prevent VPN from intercepting local connections
+    - Uses KeepAlive=true for automatic restart on failure
+    
     Returns:
         True if setup successful, False otherwise
     """
@@ -600,6 +618,7 @@ def setup_ollama_autostart_macos() -> bool:
     # Make path absolute
     ollama_path = os.path.abspath(ollama_path)
     
+    # VPN-resilient plist with EnvironmentVariables for OLLAMA_HOST and NO_PROXY
     plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -616,13 +635,9 @@ def setup_ollama_autostart_macos() -> bool:
     <key>RunAtLoad</key>
     <true/>
     
+    <!-- VPN Resilience: KeepAlive ensures Ollama restarts on VPN connect/disconnect -->
     <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-        <key>Crashed</key>
-        <true/>
-    </dict>
+    <true/>
     
     <key>StandardOutPath</key>
     <string>/tmp/ollama.log</string>
@@ -630,10 +645,17 @@ def setup_ollama_autostart_macos() -> bool:
     <key>StandardErrorPath</key>
     <string>/tmp/ollama.error.log</string>
     
+    <!-- VPN Resilience: Environment variables to bypass DNS/proxy issues -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <!-- Use 127.0.0.1 instead of localhost to bypass VPN DNS modifications -->
+        <key>OLLAMA_HOST</key>
+        <string>{OLLAMA_API_HOST}:{OLLAMA_API_PORT}</string>
+        <!-- Prevent VPN from intercepting local connections -->
+        <key>NO_PROXY</key>
+        <string>localhost,127.0.0.1,::1</string>
     </dict>
     
     <key>ProcessType</key>
@@ -1195,3 +1217,158 @@ def remove_ollama() -> Tuple[bool, List[str]]:
     
     success = len(errors) == 0
     return success, errors
+
+
+# =============================================================================
+# VPN Resilience Functions
+# =============================================================================
+
+def setup_vpn_resilient_environment() -> None:
+    """
+    Configure environment variables for VPN resilience.
+    
+    VPNs (especially corporate VPNs) can break localhost connections by:
+    - Modifying DNS resolution
+    - Changing routing tables
+    - Intercepting connections via proxy
+    
+    This function sets environment variables to bypass these issues.
+    """
+    # Use 127.0.0.1 instead of localhost to bypass DNS
+    os.environ['OLLAMA_HOST'] = VPN_RESILIENT_ENV['OLLAMA_HOST']
+    
+    # Prevent proxy interception of local connections
+    os.environ['NO_PROXY'] = VPN_RESILIENT_ENV['NO_PROXY']
+    
+    # Remove SSH_AUTH_SOCK which can cause HTTPS corruption with some Go HTTP clients
+    os.environ.pop('SSH_AUTH_SOCK', None)
+
+
+def verify_model_server(retry_on_failure: bool = True, max_retries: int = 3) -> bool:
+    """
+    Verify that the Ollama model server is accessible and restart if needed.
+    
+    This function is VPN-resilient - it uses curl with -k flag to handle
+    corporate SSL interception and tests the 127.0.0.1 endpoint.
+    
+    Args:
+        retry_on_failure: If True, attempt to restart the service on failure
+        max_retries: Maximum number of restart attempts
+    
+    Returns:
+        True if server is accessible, False otherwise
+    """
+    import subprocess
+    
+    api_url = f"{OLLAMA_API_BASE}/api/version"
+    
+    # Use curl -k to handle corporate SSL interception
+    def check_server() -> bool:
+        try:
+            result = subprocess.run(
+                ["curl", "-k", "-s", "-f", "--connect-timeout", "5", api_url],
+                capture_output=True,
+                timeout=10
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return False
+    
+    # First check
+    if check_server():
+        return True
+    
+    if not retry_on_failure:
+        return False
+    
+    # Server not responding, try to restart
+    ui.print_warning("Ollama model server not responding, attempting restart...")
+    
+    for attempt in range(max_retries):
+        ui.print_info(f"Restart attempt {attempt + 1}/{max_retries}...")
+        
+        # Try to restart the service
+        if restart_ollama_service():
+            # Wait for service to be ready
+            time.sleep(3)
+            
+            if check_server():
+                ui.print_success("Ollama model server is now accessible")
+                return True
+        
+        if attempt < max_retries - 1:
+            time.sleep(2)  # Wait before next attempt
+    
+    ui.print_error("Failed to restore Ollama model server connectivity")
+    ui.print_info("Please check Ollama logs: /tmp/ollama.log and /tmp/ollama.error.log")
+    return False
+
+
+def update_shell_profile_for_vpn() -> bool:
+    """
+    Update ~/.zshrc with VPN-resilient environment variables.
+    
+    Appends the following if not already present:
+    - export OLLAMA_HOST="127.0.0.1:11434"
+    - export NO_PROXY="localhost,127.0.0.1,::1"
+    - unset SSH_AUTH_SOCK
+    
+    Returns:
+        True if profile was updated or already configured, False on error
+    """
+    zshrc_path = Path.home() / ".zshrc"
+    
+    # VPN-resilient shell configuration block
+    vpn_config_marker = "# Ollama VPN Resilience Configuration"
+    vpn_config_block = f'''
+{vpn_config_marker}
+# Use IP address instead of localhost to bypass VPN DNS modifications
+export OLLAMA_HOST="127.0.0.1:11434"
+# Prevent VPN proxy from intercepting local connections
+export NO_PROXY="localhost,127.0.0.1,::1"
+# Prevent SSH_AUTH_SOCK from corrupting HTTPS connections
+unset SSH_AUTH_SOCK
+# End Ollama VPN Resilience Configuration
+'''
+    
+    try:
+        # Check if already configured
+        if zshrc_path.exists():
+            current_content = zshrc_path.read_text()
+            if vpn_config_marker in current_content:
+                ui.print_info("VPN resilience already configured in ~/.zshrc")
+                return True
+        else:
+            current_content = ""
+        
+        # Backup existing .zshrc
+        if zshrc_path.exists():
+            backup_path = zshrc_path.with_suffix(".zshrc.backup")
+            shutil.copy(zshrc_path, backup_path)
+            ui.print_info(f"Backed up existing .zshrc to {backup_path}")
+        
+        # Append VPN configuration
+        with open(zshrc_path, "a") as f:
+            f.write(vpn_config_block)
+        
+        ui.print_success("Updated ~/.zshrc with VPN-resilient configuration")
+        ui.print_info("Run 'source ~/.zshrc' or open a new terminal to apply changes")
+        return True
+        
+    except (OSError, IOError, PermissionError) as e:
+        ui.print_warning(f"Could not update ~/.zshrc: {e}")
+        ui.print_info("You can manually add the following to your shell profile:")
+        ui.print_info('  export OLLAMA_HOST="127.0.0.1:11434"')
+        ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1"')
+        ui.print_info('  unset SSH_AUTH_SOCK')
+        return False
+
+
+def get_vpn_resilient_api_base() -> str:
+    """
+    Get the VPN-resilient API base URL.
+    
+    Returns:
+        The API base URL using 127.0.0.1 instead of localhost
+    """
+    return OLLAMA_API_BASE
