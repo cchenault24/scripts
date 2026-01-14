@@ -664,28 +664,69 @@ def download_model(quantization: str = DEFAULT_QUANTIZATION) -> Tuple[bool, Path
                 # No token, will try anonymous access
                 ui.print_info("Downloading as anonymous user (public models only)")
             
+            # Try to download using requests directly if SSL issues persist
+            # This gives us full control over SSL verification
+            try:
+                import requests
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.retry import Retry
+                
+                # Create a session with SSL verification disabled
+                session = requests.Session()
+                session.verify = False
+                
+                # Disable SSL warnings
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                
+                # Get the download URL
+                file_url = f"https://huggingface.co/microsoft/gpt-oss-20b-gguf/resolve/main/{filename}"
+                
+                ui.print_info("Downloading with SSL verification disabled (corporate proxy)...")
+                
+                # Download with progress
+                response = session.get(file_url, stream=True, timeout=3600)
+                response.raise_for_status()
+                
+                total_size = int(response.headers.get('Content-Length', 0))
+                downloaded = 0
+                
+                with open(model_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                mb_downloaded = downloaded / (1024 * 1024)
+                                mb_total = total_size / (1024 * 1024)
+                                print(f"\r  Progress: {percent:.1f}% ({mb_downloaded:.1f}MB / {mb_total:.1f}MB)", end='', flush=True)
+                
+                print()  # New line after progress
+                
+                if model_path.exists() and model_path.stat().st_size > 0:
+                    ui.print_success(f"Model downloaded to {model_path}")
+                    return True, model_path
+                else:
+                    ui.print_error("Download completed but file is empty or missing")
+                    return False, model_path
+                    
+            except ImportError:
+                # requests not available, try huggingface_hub
+                ui.print_info("requests not available, using huggingface_hub...")
+            except Exception as e:
+                ui.print_warning(f"Direct download with requests failed: {e}")
+                ui.print_info("Trying huggingface_hub...")
+            
+            # Fallback to huggingface_hub if requests method failed
             # Use hf_hub_download with progress tracking
             # token=None allows anonymous access for public repos
-            # Remove deprecated arguments
-            # Try to configure SSL verification bypass
-            try:
-                # Try downloading with verify=False if possible
-                downloaded_path = huggingface_hub.hf_hub_download(
-                    repo_id="microsoft/gpt-oss-20b-gguf",
-                    filename=filename,
-                    local_dir=str(model_path.parent),
-                    token=None,  # Use None for anonymous, or auto-detect if logged in
-                    # Note: huggingface_hub doesn't directly support verify=False,
-                    # but environment variables should handle it
-                )
-            except Exception as e:
-                # If it still fails, try with a workaround
-                if "SSL" in str(e) or "certificate" in str(e).lower():
-                    ui.print_warning("SSL verification issue persists, trying alternative method...")
-                    # Try using requests directly as fallback
-                    raise
-                else:
-                    raise
+            downloaded_path = huggingface_hub.hf_hub_download(
+                repo_id="microsoft/gpt-oss-20b-gguf",
+                filename=filename,
+                local_dir=str(model_path.parent),
+                token=None  # Use None for anonymous, or auto-detect if logged in
+            )
             
             # Move file to expected location if needed
             downloaded_path_obj = Path(downloaded_path)
