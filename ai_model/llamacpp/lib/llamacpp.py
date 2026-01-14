@@ -257,6 +257,29 @@ def check_existing_binary() -> Optional[Path]:
     return None
 
 
+def install_cmake() -> Tuple[bool, str]:
+    """
+    Attempt to install CMake via Homebrew.
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    if not shutil.which("brew"):
+        return False, "Homebrew not found. Please install Homebrew first: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    
+    ui.print_info("Installing CMake via Homebrew...")
+    code, stdout, stderr = utils.run_command(
+        ["brew", "install", "cmake"],
+        timeout=600
+    )
+    
+    if code == 0:
+        ui.print_success("CMake installed successfully")
+        return True, "installed"
+    else:
+        return False, f"Installation failed: {stderr}"
+
+
 def build_from_source() -> Tuple[bool, Path]:
     """
     Attempt to build llama.cpp server from source using CMake.
@@ -269,13 +292,34 @@ def build_from_source() -> Tuple[bool, Path]:
     # Check for required tools
     if not shutil.which("git"):
         ui.print_error("git is required to build from source")
-        ui.print_info("Install with: brew install git")
-        return False, get_binary_path()
+        if shutil.which("brew"):
+            if ui.prompt_yes_no("Install git via Homebrew?", default=True):
+                code, _, stderr = utils.run_command(["brew", "install", "git"], timeout=300)
+                if code != 0:
+                    ui.print_error(f"Failed to install git: {stderr}")
+                    return False, get_binary_path()
+            else:
+                ui.print_info("Install with: brew install git")
+                return False, get_binary_path()
+        else:
+            ui.print_info("Install with: brew install git")
+            return False, get_binary_path()
     
     if not shutil.which("cmake"):
-        ui.print_error("cmake is required to build from source")
-        ui.print_info("Install with: brew install cmake")
-        return False, get_binary_path()
+        ui.print_warning("cmake is required to build from source")
+        if shutil.which("brew"):
+            if ui.prompt_yes_no("Install cmake via Homebrew automatically?", default=True):
+                success, message = install_cmake()
+                if not success:
+                    ui.print_error(message)
+                    return False, get_binary_path()
+            else:
+                ui.print_info("Install with: brew install cmake")
+                return False, get_binary_path()
+        else:
+            ui.print_error("Homebrew not found. Please install CMake manually:")
+            ui.print_info("  brew install cmake")
+            return False, get_binary_path()
     
     ui.print_info("Cloning llama.cpp repository...")
     
