@@ -182,6 +182,55 @@ class TestConfiguration(unittest.TestCase):
         self.assertIn("127.0.0.1", openwebui.LINUX_OPENWEBUI_ENV["OLLAMA_BASE_URL"])
 
 
+class TestRAGConfiguration(unittest.TestCase):
+    """Test RAG-specific configuration."""
+    
+    def test_rag_embedding_engine(self):
+        """Test RAG embedding engine is set to Ollama."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["RAG_EMBEDDING_ENGINE"], "ollama")
+    
+    def test_rag_embedding_model(self):
+        """Test RAG uses nomic-embed-text model."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["RAG_EMBEDDING_MODEL"], "nomic-embed-text")
+    
+    def test_rag_embedding_auto_update(self):
+        """Test RAG embedding model auto-update is enabled."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["RAG_EMBEDDING_MODEL_AUTO_UPDATE"], "true")
+    
+    def test_rag_chunk_size(self):
+        """Test RAG chunk size is configured."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["CHUNK_SIZE"], "1500")
+    
+    def test_rag_chunk_overlap(self):
+        """Test RAG chunk overlap is configured."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["CHUNK_OVERLAP"], "200")
+    
+    def test_rag_top_k(self):
+        """Test RAG top-k results is configured."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["RAG_TOP_K"], "5")
+    
+    def test_rag_relevance_threshold(self):
+        """Test RAG relevance threshold is configured."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["RAG_RELEVANCE_THRESHOLD"], "0.0")
+    
+    def test_rag_ollama_base_url(self):
+        """Test RAG Ollama base URL is configured."""
+        self.assertIn("host.docker.internal", openwebui.OPENWEBUI_ENV["RAG_OLLAMA_BASE_URL"])
+        self.assertIn("11434", openwebui.OPENWEBUI_ENV["RAG_OLLAMA_BASE_URL"])
+    
+    def test_rag_embedding_batch_size(self):
+        """Test RAG embedding batch size is configured."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["RAG_EMBEDDING_BATCH_SIZE"], "256")
+    
+    def test_linux_rag_ollama_url(self):
+        """Test Linux RAG uses localhost for Ollama."""
+        self.assertIn("127.0.0.1", openwebui.LINUX_OPENWEBUI_ENV["RAG_OLLAMA_BASE_URL"])
+    
+    def test_pdf_extract_images_disabled(self):
+        """Test PDF image extraction is disabled for performance."""
+        self.assertEqual(openwebui.OPENWEBUI_ENV["PDF_EXTRACT_IMAGES"], "false")
+
+
 class TestManifestEntry(unittest.TestCase):
     """Test manifest entry generation."""
     

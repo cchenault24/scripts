@@ -63,12 +63,51 @@ OPENWEBUI_ENV = {
     # Disable external connections
     "ENABLE_SIGNUP": "false",  # Single user mode
     "WEBUI_AUTH": "false",  # No authentication for local use
-    # Local RAG configuration (uses local embeddings)
+    
+    # =========================================================================
+    # RAG (Retrieval-Augmented Generation) Configuration
+    # Reference: https://docs.openwebui.com/tutorials/tips/rag-tutorial
+    # =========================================================================
+    
+    # Embedding Engine - Use local Ollama for 100% offline operation
     "RAG_EMBEDDING_ENGINE": "ollama",
     "RAG_EMBEDDING_MODEL": "nomic-embed-text",
-    # Disable web search and external features
+    "RAG_EMBEDDING_MODEL_AUTO_UPDATE": "true",
+    "RAG_EMBEDDING_BATCH_SIZE": "256",  # Batch size for embedding generation
+    
+    # Ollama embedding endpoint (required for Ollama embedding engine)
+    "RAG_OLLAMA_BASE_URL": f"http://{OLLAMA_HOST_DOCKER}:{OLLAMA_PORT}",
+    
+    # Chunk Configuration - Optimized for code and documentation
+    # Larger chunks for better context, with overlap to maintain continuity
+    "CHUNK_SIZE": "1500",  # Characters per chunk (good balance for code)
+    "CHUNK_OVERLAP": "200",  # Overlap between chunks for context continuity
+    
+    # Retrieval Configuration
+    "RAG_TOP_K": "5",  # Number of relevant chunks to retrieve
+    "RAG_RELEVANCE_THRESHOLD": "0.0",  # Minimum relevance (0.0 = return all top_k)
+    
+    # Reranking - Use local Ollama model for reranking results
+    "RAG_RERANKING_MODEL_AUTO_UPDATE": "true",
+    
+    # Document Processing
+    "PDF_EXTRACT_IMAGES": "false",  # Disable image extraction for speed
+    "CONTENT_EXTRACTION_ENGINE": "",  # Use default (Tika not needed for local)
+    
+    # RAG Template - How retrieved context is injected into prompts
+    # Uses default template which works well with most models
+    
+    # Vector Database - Uses built-in ChromaDB (no external DB needed)
+    # Data persisted in the Docker volume
+    
+    # =========================================================================
+    # End RAG Configuration
+    # =========================================================================
+    
+    # Disable web search and external features (100% local)
     "ENABLE_RAG_WEB_SEARCH": "false",
     "ENABLE_IMAGE_GENERATION": "false",
+    
     # Performance optimizations
     "ENABLE_OLLAMA_API": "true",
     "OLLAMA_API_BASE_URL": f"http://{OLLAMA_HOST_DOCKER}:{OLLAMA_PORT}/api",
@@ -79,6 +118,7 @@ LINUX_OPENWEBUI_ENV = {
     **OPENWEBUI_ENV,
     "OLLAMA_BASE_URL": f"http://127.0.0.1:{OLLAMA_PORT}",
     "OLLAMA_API_BASE_URL": f"http://127.0.0.1:{OLLAMA_PORT}/api",
+    "RAG_OLLAMA_BASE_URL": f"http://127.0.0.1:{OLLAMA_PORT}",
 }
 
 
@@ -577,9 +617,15 @@ def setup_openwebui(
     ui.print_info("Configuration:")
     print(f"  • Port: {port}")
     print(f"  • Ollama connection: {OPENWEBUI_ENV['OLLAMA_BASE_URL']}")
-    print(f"  • Embedding model: {OPENWEBUI_ENV['RAG_EMBEDDING_MODEL']}")
     print(f"  • Privacy mode: Enabled (no telemetry)")
     print(f"  • Auto-restart: Enabled")
+    print()
+    ui.print_info("RAG (Document Q&A) Configuration:")
+    print(f"  • Embedding model: {OPENWEBUI_ENV['RAG_EMBEDDING_MODEL']} (local)")
+    print(f"  • Chunk size: {OPENWEBUI_ENV['CHUNK_SIZE']} chars")
+    print(f"  • Chunk overlap: {OPENWEBUI_ENV['CHUNK_OVERLAP']} chars")
+    print(f"  • Top-K results: {OPENWEBUI_ENV['RAG_TOP_K']}")
+    print(f"  • Vector DB: ChromaDB (built-in, persisted)")
     print()
     
     if create_openwebui_container(port=port, hw_info=hw_info):
@@ -638,17 +684,63 @@ def show_openwebui_next_steps(url: str, model_name: str = "gpt-oss:20b") -> None
     print()
     print("  • 💬 Chat with GPT-OSS 20B (matches o3-mini performance)")
     print("  • 📁 Upload files for analysis (stays local)")
-    print("  • 🔍 RAG: Index documents for Q&A")
+    print("  • 🔍 RAG: Index documents for Q&A (see below)")
     print("  • 💾 Conversation history (stored locally)")
     print("  • 🎨 Multiple chat sessions")
     print()
     
-    print(ui.colorize("Privacy & Security:", ui.Colors.GREEN))
+    # RAG Documentation Section
+    print(ui.colorize("━" * 60, ui.Colors.DIM))
+    print(ui.colorize("📚 RAG (Retrieval-Augmented Generation) Guide:", ui.Colors.YELLOW + ui.Colors.BOLD))
+    print()
+    print(ui.colorize("  What is RAG?", ui.Colors.BLUE))
+    print("    RAG lets you chat with your documents. Upload PDFs, code files,")
+    print("    or text documents and ask questions about their content.")
+    print("    The AI retrieves relevant sections and answers based on them.")
+    print()
+    
+    print(ui.colorize("  How to use RAG:", ui.Colors.BLUE))
+    print()
+    print("  1️⃣  Create a Knowledge Base:")
+    print("      • Click 'Workspace' → 'Knowledge' in the sidebar")
+    print("      • Click '+ Create Knowledge' button")
+    print("      • Give it a name (e.g., 'Project Docs')")
+    print()
+    print("  2️⃣  Add Documents:")
+    print("      • Click on your knowledge base")
+    print("      • Drag & drop files or click to upload")
+    print("      • Supported: PDF, TXT, MD, DOCX, code files")
+    print("      • Documents are chunked and embedded locally")
+    print()
+    print("  3️⃣  Chat with Documents:")
+    print("      • Start a new chat")
+    print("      • Click the '#' icon to select your knowledge base")
+    print("      • Ask questions about your documents!")
+    print()
+    
+    print(ui.colorize("  RAG Configuration (pre-configured):", ui.Colors.BLUE))
+    print(f"    • Embedding model: nomic-embed-text (local Ollama)")
+    print(f"    • Chunk size: {OPENWEBUI_ENV['CHUNK_SIZE']} characters")
+    print(f"    • Chunk overlap: {OPENWEBUI_ENV['CHUNK_OVERLAP']} characters")
+    print(f"    • Top-K results: {OPENWEBUI_ENV['RAG_TOP_K']} chunks retrieved")
+    print(f"    • Vector DB: ChromaDB (built-in, no setup needed)")
+    print()
+    
+    print(ui.colorize("  Pro tips:", ui.Colors.GREEN))
+    print("    • Smaller, focused documents work better than huge files")
+    print("    • Use descriptive filenames for better organization")
+    print("    • You can create multiple knowledge bases for different topics")
+    print("    • Adjust settings in Admin Panel → Settings → Documents if needed")
+    print()
+    
+    print(ui.colorize("━" * 60, ui.Colors.DIM))
+    print(ui.colorize("Privacy & Security:", ui.Colors.GREEN + ui.Colors.BOLD))
     print()
     print("  • ✅ 100% local - no data sent to external servers")
     print("  • ✅ Telemetry disabled")
     print("  • ✅ Works offline after initial setup")
     print("  • ✅ All data stored in Docker volume on your machine")
+    print("  • ✅ Embeddings generated locally with nomic-embed-text")
     print()
     
     print(ui.colorize("Container management:", ui.Colors.BLUE))
@@ -657,6 +749,12 @@ def show_openwebui_next_steps(url: str, model_name: str = "gpt-oss:20b") -> None
     print("  Start:   docker start open-webui-local")
     print("  Logs:    docker logs open-webui-local")
     print("  Remove:  docker rm -f open-webui-local")
+    print()
+    
+    print(ui.colorize("Documentation:", ui.Colors.BLUE))
+    print()
+    print("  • Open WebUI Docs: https://docs.openwebui.com")
+    print("  • RAG Tutorial: https://docs.openwebui.com/tutorials/tips/rag-tutorial")
     print()
     
     print(ui.colorize("━" * 60, ui.Colors.DIM))
