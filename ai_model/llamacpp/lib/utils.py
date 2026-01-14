@@ -35,18 +35,18 @@ def ensure_rich_installed() -> bool:
         import subprocess
         import sys
         
-            # Try with --user first (safer for externally-managed environments)
+        # Try with --user first (safer for externally-managed environments)
+        code, _, stderr = run_command(
+            [sys.executable, "-m", "pip", "install", "--user", "rich>=13.0.0"],
+            timeout=120
+        )
+        
+        # If --user fails, try with --break-system-packages as fallback
+        if code != 0 and "externally-managed-environment" in stderr:
             code, _, stderr = run_command(
-                [sys.executable, "-m", "pip", "install", "--user", "rich>=13.0.0"],
+                [sys.executable, "-m", "pip", "install", "--break-system-packages", "rich>=13.0.0"],
                 timeout=120
             )
-            
-            # If --user fails, try with --break-system-packages as fallback
-            if code != 0 and "externally-managed-environment" in stderr:
-                code, _, stderr = run_command(
-                    [sys.executable, "-m", "pip", "install", "--break-system-packages", "rich>=13.0.0"],
-                    timeout=120
-                )
         
         if code == 0:
             # Try importing again
