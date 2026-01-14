@@ -31,7 +31,7 @@ import logging
 import platform
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 # Add llamacpp directory to path
 script_path = Path(__file__).resolve() if __file__ else Path(sys.argv[0]).resolve()
@@ -54,9 +54,12 @@ llamacpp.setup_vpn_resilient_environment()
 _logger = logging.getLogger(__name__)
 
 
-def check_system_requirements() -> Tuple[bool, str]:
+def check_system_requirements(hw_info: Optional[hardware.HardwareInfo] = None) -> Tuple[bool, str]:
     """
     Check if system meets requirements (macOS only).
+    
+    Args:
+        hw_info: Optional HardwareInfo object (to avoid duplicate detection)
     
     Returns:
         Tuple of (meets_requirements, message)
@@ -64,7 +67,8 @@ def check_system_requirements() -> Tuple[bool, str]:
     if platform.system() != "Darwin":
         return False, "This script requires macOS (Apple Silicon)"
     
-    hw_info = hardware.detect_hardware()
+    if hw_info is None:
+        hw_info = hardware.detect_hardware()
     
     if not hw_info.has_apple_silicon:
         return False, "This script requires Apple Silicon (M1-M5)"
@@ -98,16 +102,13 @@ def install() -> int:
     # detect_hardware() prints hardware info and returns HardwareInfo object
     hw_info = hardware.detect_hardware()
     
-    # Now check requirements using the detected hardware
-    if not hw_info.has_apple_silicon:
-        ui.print_error("This script requires Apple Silicon (M1-M5)")
+    # Check requirements using the detected hardware (without calling detect_hardware again)
+    meets_requirements, message = check_system_requirements(hw_info)
+    if not meets_requirements:
+        ui.print_error(message)
         return 1
     
-    if hw_info.ram_gb < 16:
-        ui.print_error(f"Insufficient RAM: {hw_info.ram_gb:.1f}GB (minimum 16GB required)")
-        return 1
-    
-    ui.print_success("System requirements met")
+    ui.print_success(message)
     
     # Check if server is already running
     is_healthy, _ = llamacpp.check_server_health()
