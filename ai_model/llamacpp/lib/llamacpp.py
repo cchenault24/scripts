@@ -542,25 +542,35 @@ def find_ollama_model() -> Optional[Path]:
     if not shutil.which("ollama"):
         return None
     
-    # Try to find Ollama model storage location
-    # Ollama stores models in ~/.ollama/models/
-    ollama_models_dir = Path.home() / ".ollama" / "models"
-    
-    if not ollama_models_dir.exists():
+    # Check if Ollama has the model by listing models
+    code, stdout, _ = utils.run_command(["ollama", "list"], timeout=10)
+    if code != 0:
         return None
     
-    # Look for GPT-OSS 20B model files
-    # Ollama model names might be: gpt-oss-20b, gpt-oss:20b, etc.
-    model_patterns = [
-        "gpt-oss-20b*",
-        "gpt-oss:20b*",
-        "*gpt-oss*20b*",
-    ]
+    # Check if any GPT-OSS model is listed
+    if "gpt-oss" not in stdout.lower() and "gpt-oss-20b" not in stdout.lower():
+        return None
     
-    for pattern in model_patterns:
-        for model_file in ollama_models_dir.rglob(pattern):
-            if model_file.suffix == ".gguf" or "q4" in model_file.name.lower():
-                return model_file
+    # Ollama stores models in ~/.ollama/models/blobs/ with hash-based names
+    # The actual GGUF files are in the blobs directory
+    ollama_blobs_dir = Path.home() / ".ollama" / "models" / "blobs"
+    
+    if not ollama_blobs_dir.exists():
+        return None
+    
+    # Look for large GGUF files (GPT-OSS 20B should be 10GB+)
+    # We'll find the largest file that's likely the model
+    large_files = []
+    for blob_file in ollama_blobs_dir.iterdir():
+        if blob_file.is_file():
+            size_gb = blob_file.stat().st_size / (1024 ** 3)
+            if size_gb > 10:  # GPT-OSS 20B should be at least 10GB
+                large_files.append((blob_file, size_gb))
+    
+    if large_files:
+        # Return the largest file (most likely the model)
+        largest = max(large_files, key=lambda x: x[1])
+        return largest[0]
     
     return None
 
@@ -603,12 +613,18 @@ def download_model_via_ollama(quantization: str = DEFAULT_QUANTIZATION) -> Tuple
             ui.print_success(f"Successfully pulled {model_name}")
             break
         else:
-            ui.print_warning(f"Failed to pull {model_name}: {stderr}")
+            if "not found" not in stderr.lower():
+                ui.print_warning(f"Failed to pull {model_name}: {stderr}")
     
     if not pulled_model:
         ui.print_error("Could not pull model via Ollama")
-        ui.print_info("Available models might have different names")
+        ui.print_info("Try pulling manually with: ollama pull gpt-oss-20b")
+        ui.print_info("Or check available models with: ollama list")
         return False, model_path
+    
+    # Wait a moment for Ollama to finish processing
+    import time
+    time.sleep(2)
     
     # Find the downloaded model file
     ui.print_info("Locating downloaded model file...")
@@ -616,16 +632,33 @@ def download_model_via_ollama(quantization: str = DEFAULT_QUANTIZATION) -> Tuple
     
     if not ollama_model_file:
         ui.print_warning("Model pulled but GGUF file not found in Ollama storage")
-        ui.print_info("Ollama models are typically stored in ~/.ollama/models/")
+        ui.print_info("Ollama models are stored in ~/.ollama/models/blobs/")
+        ui.print_info("You may need to wait a moment for the file to appear")
         return False, model_path
     
     ui.print_info(f"Found model file at: {ollama_model_file}")
+    ui.print_info(f"File size: {ollama_model_file.stat().st_size / (1024**3):.1f} GB")
     ui.print_info("Copying to llama.cpp model directory...")
     
     # Copy to our model directory
     model_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copy2(ollama_model_file, model_path)
+        # Show progress for large file copy
+        total_size = ollama_model_file.stat().st_size
+        copied = 0
+        
+        with open(ollama_model_file, 'rb') as src, open(model_path, 'wb') as dst:
+            while True:
+                chunk = src.read(8192 * 1024)  # 8MB chunks
+                if not chunk:
+                    break
+                dst.write(chunk)
+                copied += len(chunk)
+                if total_size > 0:
+                    percent = (copied / total_size) * 100
+                    print(f"\r  Progress: {percent:.1f}%", end='', flush=True)
+        
+        print()  # New line
         ui.print_success(f"Model copied to {model_path}")
         return True, model_path
     except Exception as e:
