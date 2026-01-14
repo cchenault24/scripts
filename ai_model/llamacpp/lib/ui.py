@@ -119,7 +119,7 @@ def print_step(step: int, total: int, text: str) -> None:
 
 def clear_screen() -> None:
     """Clear the terminal screen."""
-    os.system("cls" if platform.system() == "Windows" else "clear")
+    os.system("clear")
 
 
 def prompt_yes_no(question: str, default: bool = True) -> bool:

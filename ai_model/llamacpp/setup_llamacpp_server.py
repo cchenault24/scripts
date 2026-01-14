@@ -51,13 +51,13 @@ _logger = logging.getLogger(__name__)
 
 def check_system_requirements() -> Tuple[bool, str]:
     """
-    Check if system meets requirements.
+    Check if system meets requirements (macOS only).
     
     Returns:
         Tuple of (meets_requirements, message)
     """
     if platform.system() != "Darwin":
-        return False, "This script requires macOS"
+        return False, "This script requires macOS (Apple Silicon)"
     
     hw_info = hardware.detect_hardware()
     

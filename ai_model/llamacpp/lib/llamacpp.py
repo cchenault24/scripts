@@ -1,13 +1,14 @@
 """
-Llama.cpp server management.
+Llama.cpp server management for macOS Apple Silicon.
 
 Provides functions to download, install, configure, and manage llama.cpp server
-for macOS Apple Silicon systems with GPT-OSS 20B model.
+for macOS Apple Silicon (M1-M5) systems with GPT-OSS 20B model.
+
+This module is macOS-only and requires Apple Silicon.
 """
 
 import json
 import os
-import platform
 import plistlib
 import shutil
 import subprocess
@@ -379,19 +380,12 @@ def build_from_source() -> Tuple[bool, Path]:
         
         ui.print_info("Building server (this may take a few minutes)...")
         
-        # Build server target (--config is Windows-specific, omit on macOS/Linux)
-        import platform
-        is_windows = platform.system() == "Windows"
-        
         # Try different target names
         target_names = ["server", "llama-server"]
         build_success = False
         
         for target_name in target_names:
-            if is_windows:
-                build_cmd = ["cmake", "--build", ".", "--config", "Release", "--target", target_name]
-            else:
-                build_cmd = ["cmake", "--build", ".", "--target", target_name]
+            build_cmd = ["cmake", "--build", ".", "--target", target_name]
             
             code, stdout, stderr = utils.run_command(
                 build_cmd,
@@ -407,10 +401,7 @@ def build_from_source() -> Tuple[bool, Path]:
         if not build_success:
             # Try building all targets (might build server as part of all)
             ui.print_warning("Building with specific target failed, trying to build all targets...")
-            if is_windows:
-                build_cmd = ["cmake", "--build", ".", "--config", "Release"]
-            else:
-                build_cmd = ["cmake", "--build", "."]
+            build_cmd = ["cmake", "--build", "."]
             
             code, stdout, stderr = utils.run_command(
                 build_cmd,
@@ -424,16 +415,12 @@ def build_from_source() -> Tuple[bool, Path]:
                 ui.print_info(stdout[-1000:] if stdout else "No output")
                 return False, get_binary_path()
         
-        # Find the built binary (location varies by platform and target name)
+        # Find the built binary (macOS locations)
         possible_locations = [
             build_path / "bin" / "server",
             build_path / "bin" / "llama-server",
             build_path / "server",
             build_path / "llama-server",
-            build_path / "bin" / "Release" / "server",
-            build_path / "bin" / "Release" / "llama-server",
-            build_path / "bin" / "Debug" / "server",
-            build_path / "bin" / "Debug" / "llama-server",
         ]
         
         built_binary = None
