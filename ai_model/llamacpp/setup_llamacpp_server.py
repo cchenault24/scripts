@@ -88,57 +88,35 @@ def install() -> int:
         ui.print_info("Setup cancelled. Run again when ready!")
         return 0
     
-    # Check system requirements
+    # Check system requirements and detect hardware
     print()
-    ui.print_subheader("Checking System Requirements")
+    ui.print_subheader("System Check")
     meets_requirements, message = check_system_requirements()
     if not meets_requirements:
         ui.print_error(message)
         return 1
     
-    ui.print_success(message)
-    
-    # Detect hardware
-    print()
-    ui.print_subheader("Detecting Hardware")
     hw_info = hardware.detect_hardware()
-    
-    # Check for existing installations
-    print()
-    ui.print_subheader("Checking for Existing Installations")
-    
-    # Check for Ollama conflict
-    code, _, _ = utils.run_command(["which", "ollama"], timeout=5)
-    if code == 0:
-        ui.print_warning("Ollama is installed. Ensure it's not using port 8080.")
+    ui.print_success("System requirements met")
     
     # Check if server is already running
     is_healthy, _ = llamacpp.check_server_health()
     if is_healthy:
-        ui.print_warning("Server is already running")
-        if not ui.prompt_yes_no("Continue with setup anyway?", default=False):
-            return 0
+        ui.print_warning("Server is already running on port 8080")
     
-    # Download binary
+    # Install binary (automatically builds from source if needed)
     print()
-    ui.print_subheader("Installing llama.cpp Server Binary")
+    ui.print_subheader("Installing Server Binary")
     binary_success, binary_path = llamacpp.install_binary()
     if not binary_success:
         ui.print_error("Failed to install binary")
         return 1
     
-    # Select quantization
+    # Select quantization (default to Q4_K_M for best compatibility)
     print()
-    ui.print_subheader("Selecting Model Quantization")
-    quantization_choices = ["Q4_K_M (12GB, recommended)", "Q6_K_XL (15GB)", "Q8_K_XL (18GB)"]
-    quant_idx = ui.prompt_choice(
-        "Select model quantization:",
-        quantization_choices,
-        default=0
-    )
-    quantization_map = ["Q4_K_M", "Q6_K_XL", "Q8_K_XL"]
-    quantization = quantization_map[quant_idx]
-    ui.print_success(f"Selected: {quantization}")
+    ui.print_subheader("Downloading Model")
+    quantization = "Q4_K_M"  # Default to recommended quantization
+    ui.print_info(f"Using quantization: {quantization} (12GB, recommended)")
     
     # Download model
     print()
@@ -189,20 +167,13 @@ def install() -> int:
     
     ui.print_success("Server test successful")
     
-    # Create LaunchAgent
+    # Create LaunchAgent for auto-start
     print()
     ui.print_subheader("Configuring Auto-Start")
-    if ui.prompt_yes_no("Set up auto-start on boot?", default=True):
-        agent_success, plist_path = llamacpp.create_launch_agent(config)
-        if agent_success:
-            if ui.prompt_yes_no("Load LaunchAgent now?", default=True):
-                llamacpp.load_launch_agent(plist_path)
-                ui.print_success("Server will start automatically on boot")
-            else:
-                ui.print_info("LaunchAgent created but not loaded")
-                ui.print_info("Run 'launchctl load ~/Library/LaunchAgents/com.llamacpp.server.plist' to enable")
-        else:
-            ui.print_warning("Could not create LaunchAgent")
+    agent_success, plist_path = llamacpp.create_launch_agent(config)
+    if agent_success:
+        llamacpp.load_launch_agent(plist_path)
+        ui.print_success("Auto-start configured")
     
     # Verify installation
     print()

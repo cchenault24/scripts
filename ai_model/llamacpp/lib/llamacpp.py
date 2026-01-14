@@ -281,6 +281,26 @@ def install_cmake() -> Tuple[bool, str]:
         return False, f"Installation failed: {stderr}"
 
 
+def install_git() -> Tuple[bool, str]:
+    """
+    Attempt to install git via Homebrew.
+    
+    Returns:
+        Tuple of (success, message)
+    """
+    if not shutil.which("brew"):
+        return False, "Homebrew not found"
+    
+    ui.print_info("Installing git via Homebrew...")
+    code, stdout, stderr = utils.run_command(["brew", "install", "git"], timeout=300)
+    
+    if code == 0:
+        ui.print_success("git installed successfully")
+        return True, "installed"
+    else:
+        return False, f"Installation failed: {stderr}"
+
+
 def build_from_source() -> Tuple[bool, Path]:
     """
     Attempt to build llama.cpp server from source using CMake.
@@ -288,38 +308,27 @@ def build_from_source() -> Tuple[bool, Path]:
     Returns:
         Tuple of (success, binary_path)
     """
-    ui.print_subheader("Building llama.cpp Server from Source")
+    ui.print_info("Building llama.cpp server from source...")
     
-    # Check for required tools
+    # Automatically install missing dependencies
     if not shutil.which("git"):
-        ui.print_error("git is required to build from source")
         if shutil.which("brew"):
-            if ui.prompt_yes_no("Install git via Homebrew?", default=True):
-                code, _, stderr = utils.run_command(["brew", "install", "git"], timeout=300)
-                if code != 0:
-                    ui.print_error(f"Failed to install git: {stderr}")
-                    return False, get_binary_path()
-            else:
-                ui.print_info("Install with: brew install git")
+            success, message = install_git()
+            if not success:
+                ui.print_error(f"Failed to install git: {message}")
                 return False, get_binary_path()
         else:
-            ui.print_info("Install with: brew install git")
+            ui.print_error("git is required but not found and Homebrew is not available")
             return False, get_binary_path()
     
     if not shutil.which("cmake"):
-        ui.print_warning("cmake is required to build from source")
         if shutil.which("brew"):
-            if ui.prompt_yes_no("Install cmake via Homebrew automatically?", default=True):
-                success, message = install_cmake()
-                if not success:
-                    ui.print_error(message)
-                    return False, get_binary_path()
-            else:
-                ui.print_info("Install with: brew install cmake")
+            success, message = install_cmake()
+            if not success:
+                ui.print_error(f"Failed to install cmake: {message}")
                 return False, get_binary_path()
         else:
-            ui.print_error("Homebrew not found. Please install CMake manually:")
-            ui.print_info("  brew install cmake")
+            ui.print_error("cmake is required but not found and Homebrew is not available")
             return False, get_binary_path()
     
     ui.print_info("Cloning llama.cpp repository...")
@@ -366,17 +375,6 @@ def build_from_source() -> Tuple[bool, Path]:
             ui.print_info("You may need to install build dependencies:")
             ui.print_info("  brew install cmake")
             return False, get_binary_path()
-        
-        # Check what targets are available (for debugging)
-        code, stdout, stderr = utils.run_command(
-            ["cmake", "--build", ".", "--target", "help"],
-            timeout=30,
-            cwd=str(build_path)
-        )
-        
-        # Look for server-related targets in the help output
-        if "server" in stdout.lower() or "llama-server" in stdout.lower():
-            ui.print_info("Server target found in build system")
         
         ui.print_info("Building server (this may take a few minutes)...")
         
@@ -453,11 +451,10 @@ def install_binary() -> Tuple[bool, Path]:
     """
     Download and install llama.cpp server binary.
     
-    Tries multiple methods:
+    Tries multiple methods automatically:
     1. Check for existing binary
     2. Download from GitHub releases (if available)
-    3. Build from source
-    4. Manual installation instructions
+    3. Build from source automatically
     
     Returns:
         Tuple of (success, binary_path)
@@ -466,66 +463,38 @@ def install_binary() -> Tuple[bool, Path]:
     
     # Check if binary already exists
     if binary_path.exists():
-        ui.print_info(f"Binary already exists at {binary_path}")
+        ui.print_success(f"Binary already exists at {binary_path}")
         return True, binary_path
     
     # Check for existing binary in common locations
     existing = check_existing_binary()
     if existing:
         ui.print_info(f"Found existing binary at {existing}")
-        if ui.prompt_yes_no(f"Use existing binary at {existing}?", default=True):
-            binary_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                shutil.copy2(existing, binary_path)
-                binary_path.chmod(0o755)
-                ui.print_success(f"Binary copied to {binary_path}")
-                return True, binary_path
-            except Exception as e:
-                ui.print_warning(f"Could not copy binary: {e}")
-    
-    ui.print_subheader("Installing llama.cpp Server Binary")
+        binary_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(existing, binary_path)
+            binary_path.chmod(0o755)
+            ui.print_success(f"Using existing binary")
+            return True, binary_path
+        except Exception as e:
+            ui.print_warning(f"Could not copy binary: {e}")
     
     # Try to download from releases
     success, url_or_error = get_latest_release_url()
     if success:
+        ui.print_info("Attempting to download pre-built binary...")
         success, message = download_binary(url_or_error, binary_path)
         if success:
             return True, binary_path
-        ui.print_warning(f"Download failed: {message}")
     
-    # If download failed, try building from source
-    ui.print_info("")
-    ui.print_info("Pre-built binaries are not available.")
-    ui.print_info("Options:")
-    ui.print_info("1. Build from source (automatic)")
-    ui.print_info("2. Build manually and place binary")
-    ui.print_info("")
+    # Automatically build from source
+    ui.print_info("Pre-built binaries not available, building from source...")
+    success, binary_path = build_from_source()
+    if success:
+        return True, binary_path
     
-    if ui.prompt_yes_no("Build from source automatically?", default=True):
-        success, binary_path = build_from_source()
-        if success:
-            return True, binary_path
-    
-    # Provide manual instructions
-    ui.print_info("")
-    ui.print_info("Manual installation instructions:")
-    ui.print_info("1. Clone and build with CMake:")
-    ui.print_info("   git clone https://github.com/ggerganov/llama.cpp.git")
-    ui.print_info("   cd llama.cpp")
-    ui.print_info("   mkdir build && cd build")
-    ui.print_info("   cmake .. -DCMAKE_BUILD_TYPE=Release")
-    ui.print_info("   cmake --build . --config Release --target server")
-    ui.print_info(f"   cp bin/server {binary_path}")
-    ui.print_info("")
-    ui.print_info("2. Or if you already have llama-server built:")
-    ui.print_info(f"   cp /path/to/llama-server {binary_path}")
-    ui.print_info("")
-    
-    if ui.prompt_yes_no("Continue anyway? (You'll need to provide binary manually)", default=False):
-        if binary_path.exists():
-            ui.print_success(f"Found binary at {binary_path}")
-            return True, binary_path
-    
+    ui.print_error("Failed to install binary. Please build manually and place at:")
+    ui.print_info(f"  {binary_path}")
     return False, binary_path
 
 
