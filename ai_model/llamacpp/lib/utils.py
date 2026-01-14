@@ -11,6 +11,12 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+try:
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
 
 # SSL context that skips certificate verification (equivalent to curl -k)
 _UNVERIFIED_SSL_CONTEXT: Optional[ssl.SSLContext] = None
@@ -66,27 +72,65 @@ def run_command(
             env = None
         
         if show_progress:
-            # Show real-time output
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                env=env,
-                cwd=cwd,
-                bufsize=1
-            )
-            
-            stdout_lines = []
-            for line in process.stdout:
-                line = line.rstrip()
-                if line:
-                    print(f"  {line}")
-                    stdout_lines.append(line)
-            
-            process.wait()
-            stdout = "\n".join(stdout_lines)
-            return process.returncode, stdout, ""
+            # Show progress with Rich if available, otherwise show real-time output
+            if RICH_AVAILABLE:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    env=env,
+                    cwd=cwd,
+                    bufsize=1
+                )
+                
+                stdout_lines = []
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TimeElapsedColumn(),
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task("Building...", total=None)
+                    
+                    for line in process.stdout:
+                        line = line.rstrip()
+                        if line:
+                            # Update progress description with last line of output
+                            if "[" in line and "]" in line:
+                                # Extract percentage or status from CMake output
+                                progress.update(task, description=f"Building... {line[:60]}")
+                            stdout_lines.append(line)
+                    
+                    process.wait()
+                    progress.update(task, completed=True)
+                
+                stdout = "\n".join(stdout_lines)
+                return process.returncode, stdout, ""
+            else:
+                # Fallback to simple real-time output
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    env=env,
+                    cwd=cwd,
+                    bufsize=1
+                )
+                
+                stdout_lines = []
+                for line in process.stdout:
+                    line = line.rstrip()
+                    if line:
+                        print(f"  {line}")
+                        stdout_lines.append(line)
+                
+                process.wait()
+                stdout = "\n".join(stdout_lines)
+                return process.returncode, stdout, ""
         else:
             result = subprocess.run(
                 cmd,

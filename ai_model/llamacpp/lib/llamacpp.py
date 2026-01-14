@@ -379,7 +379,6 @@ def build_from_source() -> Tuple[bool, Path]:
             ui.print_success("CMake configuration complete")
             
             ui.print_info("Building server (this may take 5-10 minutes)...")
-            ui.print_info("Progress:")
             
             # Try different target names
             target_names = ["server", "llama-server"]

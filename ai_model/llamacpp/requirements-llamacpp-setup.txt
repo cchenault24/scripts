@@ -1,6 +1,2 @@
 # Requirements for llama.cpp server setup script
-# Only uses Python standard library + requests for downloads
-
-# Note: The script uses urllib from standard library for downloads
-# If you prefer requests, uncomment below:
-# requests>=2.31.0
+rich>=13.0.0
