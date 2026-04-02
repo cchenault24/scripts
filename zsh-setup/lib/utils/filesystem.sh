@@ -16,6 +16,26 @@ fi
 # Filesystem Operations
 #------------------------------------------------------------------------------
 
+#------------------------------------------------------------------------------
+# Function: zsh_setup::utils::filesystem::sanitize_name
+# Description: Sanitizes a name for safe use in file paths and commands
+# Arguments:
+#   $1 - Name to sanitize (string)
+# Returns:
+#   0 on success, outputs sanitized name to stdout
+# Side Effects:
+#   None - pure function
+# Security:
+#   Allows only alphanumeric characters, dash, underscore, and dot
+#   Prevents command injection and path traversal attacks
+#------------------------------------------------------------------------------
+zsh_setup::utils::filesystem::sanitize_name() {
+    local name="$1"
+    # Allow only alphanumeric, dash, underscore, dot
+    # Remove all other characters to prevent injection attacks
+    echo "$name" | tr -cd '[:alnum:]_.-'
+}
+
 # Ensure directory exists
 zsh_setup::utils::filesystem::ensure_dir() {
     local dir="$1"

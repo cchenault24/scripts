@@ -19,6 +19,7 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
         zsh_setup::core::bootstrap::load_module "plugins::resolver" || source "$ZSH_SETUP_ROOT/lib/plugins/resolver.sh"
         zsh_setup::core::bootstrap::load_module "plugins::installer" || source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh"
         zsh_setup::core::bootstrap::load_module "system::package_manager" || source "$ZSH_SETUP_ROOT/lib/system/package_manager.sh"
+        zsh_setup::core::bootstrap::load_module "utils::filesystem" || source "$ZSH_SETUP_ROOT/lib/utils/filesystem.sh"
     else
         source "$ZSH_SETUP_ROOT/lib/core/config.sh"
         source "$ZSH_SETUP_ROOT/lib/core/logger.sh"
@@ -26,6 +27,7 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
         source "$ZSH_SETUP_ROOT/lib/plugins/resolver.sh"
         source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh"
         source "$ZSH_SETUP_ROOT/lib/system/package_manager.sh"
+        source "$ZSH_SETUP_ROOT/lib/utils/filesystem.sh"
     fi
 fi
 
@@ -103,90 +105,64 @@ zsh_setup::plugins::manager::install_list() {
             zsh_setup::core::logger::info "Installing ${#parallel_plugins[@]} plugins in parallel (max $max_parallel concurrent)..."
         fi
         
-        # Create worker script (reusable)
+        # Create worker script (reusable) with secure permissions
         local worker_script=$(mktemp -t zsh_setup_worker.XXXXXX.sh)
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"manager.sh:95\",\"message\":\"Creating worker script\",\"data\":{\"worker_script\":\"$worker_script\",\"plugin_count\":${#parallel_plugins[@]}},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
+        chmod 700 "$worker_script"  # Owner-only read/write/execute
+
+        # Setup cleanup trap for worker script
+        trap 'rm -f "$worker_script"' EXIT INT TERM
+
         cat > "$worker_script" <<'WORKER_EOF'
 #!/usr/bin/env bash
 set +e  # Don't exit on error, we'll handle it
 ZSH_SETUP_ROOT="$1"
 PLUGIN_NAME="$2"
-LOG_FILE="${3:-/tmp/zsh_setup_${PLUGIN_NAME}_$$.log}"
 
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"worker_script:start\",\"message\":\"Worker script started\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"bash_version\":\"$(bash --version | head -1)\",\"script_type\":\"standalone\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
+# Sanitize plugin name for log file fallback
+SAFE_PLUGIN_NAME=$(echo "$PLUGIN_NAME" | tr -cd '[:alnum:]_.-')
+LOG_FILE="${3:-/tmp/zsh_setup_${SAFE_PLUGIN_NAME}_$$.log}"
 
 # Export for subprocesses
 export ZSH_SETUP_ROOT
 
 # Source bootstrap and initialize
 if ! source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh" 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:bootstrap_load\",\"message\":\"Bootstrap load failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     echo "ERROR: Failed to load bootstrap.sh" >> "$LOG_FILE"
     exit 1
 fi
 
 if ! zsh_setup::core::bootstrap::init 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:bootstrap_init\",\"message\":\"Bootstrap init failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     echo "ERROR: Failed to initialize bootstrap" >> "$LOG_FILE"
     exit 1
 fi
 
 # Load required modules
 if ! source "$ZSH_SETUP_ROOT/lib/plugins/registry.sh" 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:registry_load\",\"message\":\"Registry load failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     echo "ERROR: Failed to load registry.sh" >> "$LOG_FILE"
     exit 1
 fi
 
 if ! source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh" 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:installer_load\",\"message\":\"Installer load failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     echo "ERROR: Failed to load installer.sh" >> "$LOG_FILE"
     exit 1
 fi
 
 # Load plugin registry
 if ! zsh_setup::plugins::registry::load 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:registry_load_func\",\"message\":\"Registry load function failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     echo "ERROR: Failed to load plugin registry" >> "$LOG_FILE"
     exit 1
 fi
 
 # Get plugin info
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:before_vars\",\"message\":\"Before variable declarations\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"line\":135},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
 plugin_type=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "type" 2>>"$LOG_FILE")
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:after_first_var\",\"message\":\"After first variable\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"plugin_type\":\"$plugin_type\",\"line\":136},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
 plugin_url=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "url" 2>>"$LOG_FILE")
 
 if [[ -z "$plugin_type" ]]; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"C\",\"location\":\"worker_script:empty_plugin_type\",\"message\":\"Plugin type is empty\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
     echo "ERROR: Could not determine plugin type for $PLUGIN_NAME" >> "$LOG_FILE"
     exit 1
 fi
 
 # Install plugin
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:before_exit_code\",\"message\":\"Before exit_code variable\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"line\":144},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
 exit_code=0
 if [[ "$PLUGIN_NAME" == "powerlevel10k" ]]; then
     if ! zsh_setup::plugins::installer::install_git "$PLUGIN_NAME" "$plugin_url" "theme" >>"$LOG_FILE" 2>&1; then
@@ -198,9 +174,6 @@ else
     fi
 fi
 
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:before_exit\",\"message\":\"Before exit\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"exit_code\":$exit_code},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
 exit $exit_code
 WORKER_EOF
         chmod +x "$worker_script"
@@ -215,8 +188,10 @@ WORKER_EOF
         
         # Install plugins in parallel using background processes
         for plugin in "${parallel_plugins[@]}"; do
-            local log_file="/tmp/zsh_setup_${plugin}_$$.log"
-            
+            # Sanitize plugin name for log file path
+            local safe_plugin=$(zsh_setup::utils::filesystem::sanitize_name "$plugin")
+            local log_file="/tmp/zsh_setup_${safe_plugin}_$$.log"
+
             # Run worker in background
             "$worker_script" "$ZSH_SETUP_ROOT" "$plugin" "$log_file" &
             local pid=$!

@@ -13,6 +13,7 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
     source "$ZSH_SETUP_ROOT/lib/core/errors.sh"
     source "$ZSH_SETUP_ROOT/lib/state/store.sh"
     source "$ZSH_SETUP_ROOT/lib/utils/network.sh"
+    source "$ZSH_SETUP_ROOT/lib/utils/filesystem.sh"
     source "$ZSH_SETUP_ROOT/lib/system/package_manager.sh"
 fi
 
@@ -25,16 +26,23 @@ zsh_setup::plugins::installer::install_git() {
     local plugin_name="$1"
     local plugin_url="$2"
     local plugin_type="${3:-plugin}"
-    
+
+    # Sanitize plugin name for safe filesystem usage
+    local safe_plugin_name=$(zsh_setup::utils::filesystem::sanitize_name "$plugin_name")
+    if [[ -z "$safe_plugin_name" ]]; then
+        zsh_setup::core::logger::error "Invalid plugin name: $plugin_name"
+        return 1
+    fi
+
     local ohmyzsh_dir=$(zsh_setup::core::config::get oh_my_zsh_dir)
     local plugins_dir="$ohmyzsh_dir/custom/plugins"
     local themes_dir="$ohmyzsh_dir/custom/themes"
-    
+
     local plugin_path
     if [[ "$plugin_type" == "theme" ]]; then
-        plugin_path="$themes_dir/$plugin_name"
+        plugin_path="$themes_dir/$safe_plugin_name"
     else
-        plugin_path="$plugins_dir/$plugin_name"
+        plugin_path="$plugins_dir/$safe_plugin_name"
     fi
     
     zsh_setup::core::logger::info "Installing ${plugin_type}: $plugin_name"

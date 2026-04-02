@@ -96,9 +96,19 @@ PYTHON_SCRIPT
 # State File Management
 #------------------------------------------------------------------------------
 
-# Get state file path
+# Get state file path (XDG Base Directory compliant)
 zsh_setup::state::store::_get_state_file() {
-    zsh_setup::core::config::get state_file "/tmp/zsh_setup_state.json"
+    # Use XDG Base Directory specification
+    local default_state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/zsh-setup"
+    local default_state_file="$default_state_dir/state.json"
+
+    # Ensure state directory exists with secure permissions
+    if [[ ! -d "$default_state_dir" ]]; then
+        mkdir -p "$default_state_dir" 2>/dev/null
+        chmod 700 "$default_state_dir" 2>/dev/null
+    fi
+
+    zsh_setup::core::config::get state_file "$default_state_file"
 }
 
 # Initialize state file
@@ -106,7 +116,11 @@ zsh_setup::state::store::init() {
     local script_dir="${1:-}"
     local state_file=$(zsh_setup::state::store::_get_state_file)
     mkdir -p "$(dirname "$state_file")"
-    
+
+    # Create state file with secure permissions (user read/write only)
+    touch "$state_file"
+    chmod 600 "$state_file" 2>/dev/null
+
     cat >"$state_file" <<EOF
 {
   "installed_plugins": [],
