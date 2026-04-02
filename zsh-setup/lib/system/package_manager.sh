@@ -261,6 +261,8 @@ zsh_setup::system::package_manager::install() {
                 ;;
             *)
                 zsh_setup::core::logger::error "No supported package manager found. Cannot install $package_name"
+                zsh_setup::core::logger::info "Supported: Homebrew (macOS), apt, dnf, yum, pacman, zypper"
+                zsh_setup::core::logger::info "Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
                 ;;
         esac
         return 1

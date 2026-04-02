@@ -116,6 +116,7 @@ zsh_setup::plugins::installer::install_git() {
     else
         zsh_setup::state::store::add_failed_plugin "$plugin_name" "git" "Clone failed"
         zsh_setup::core::logger::error "Failed to install ${plugin_type}: $plugin_name"
+        zsh_setup::core::logger::info "Check network connectivity and git configuration. Run with --verbose for details."
         return 1
     fi
 }
@@ -164,6 +165,7 @@ zsh_setup::plugins::installer::install_npm() {
     
     if ! command -v npm &>/dev/null; then
         zsh_setup::core::logger::error "npm is not installed. Cannot install $plugin_name."
+        zsh_setup::core::logger::info "Install Node.js and npm with: brew install node"
         zsh_setup::state::store::add_failed_plugin "$plugin_name" "npm" "npm not installed"
         return 1
     fi
