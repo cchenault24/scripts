@@ -174,11 +174,64 @@ This will:
 - Reset your default shell to Bash (optional)
 - Optionally remove Homebrew packages that were installed as dependencies
 
+## Security
+
+zsh-setup implements multiple security measures to protect your system:
+
+### Input Sanitization
+- All plugin names are sanitized to prevent command injection attacks
+- Special characters like semicolons, pipes, and backticks are removed
+- Path traversal attempts are blocked
+
+### Secure File Handling
+- State files stored in `~/.local/state/zsh-setup/` with 600 permissions
+- Temporary files created with restrictive 700 permissions
+- Cleanup traps ensure no temporary files are left behind
+
+### XDG Compliance
+- State files follow XDG Base Directory specification
+- User-specific permissions prevent unauthorized access
+- Files survive system reboots (not in `/tmp`)
+
+For detailed security information, see [SECURITY.md](./SECURITY.md).
+
+## Testing
+
+The project includes comprehensive test suites:
+
+### Running Tests
+
+```bash
+# Run all tests
+tests/test_runner.sh all
+
+# Run security tests
+tests/test_security.sh
+
+# Run shellcheck linting
+tests/run_shellcheck.sh
+```
+
+### Test Coverage
+- **Security Tests**: 12 tests validating input sanitization and file permissions
+- **State Management**: Tests for JSON parsing and storage
+- **Integration Tests**: End-to-end workflow validation
+
+### Development
+For development guidelines and testing practices, see [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md).
+
 ## Troubleshooting
 
-- **Log Files**: Check the log files in `/tmp/` for detailed installation information
-- **Shell Not Changed**: You may need to log out and log back in for shell changes to take effect
-- **Plugin Installation Failures**: Make sure you have an active internet connection and required dependencies
+- **Log Files**: Check log files (retained on failure) for detailed installation information
+- **Shell Not Changed**: Log out and log back in for shell changes to take effect
+- **Plugin Installation Failures**: Verify internet connection and required dependencies
+- **Permission Issues**: Ensure proper file permissions with `./zsh-setup heal`
+- **State File Missing**: Check `~/.local/state/zsh-setup/state.json`
+
+Run with `--verbose` flag for detailed output:
+```bash
+./zsh-setup install --verbose
+```
 
 ## License
 

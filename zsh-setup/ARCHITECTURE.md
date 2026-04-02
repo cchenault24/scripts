@@ -131,6 +131,52 @@ config::generator
 3. Use state store instead of exported arrays
 4. Follow the module structure for new features
 
+## Security Architecture
+
+### Input Sanitization
+All user-provided input is sanitized before use in file operations or commands:
+
+```bash
+# Plugin names are sanitized to prevent command injection
+zsh_setup::utils::filesystem::sanitize_name "$plugin_name"
+# Removes all characters except: alphanumeric, dash, underscore, dot
+```
+
+### File Permissions
+Secure defaults for all created files and directories:
+
+| Type | Permissions | Reason |
+|------|-------------|--------|
+| State directory | 700 | Owner-only access |
+| State file | 600 | Owner read/write only |
+| Worker scripts | 700 | Owner execute only |
+| Config backups | 644 | Standard read/write |
+
+### State File Location
+State files follow XDG Base Directory specification:
+- Location: `$XDG_STATE_HOME/zsh-setup/state.json`
+- Fallback: `~/.local/state/zsh-setup/state.json`
+- Benefits: Survives reboots, proper permissions, user-specific
+
+### Temporary Files
+Temporary files are created with secure patterns:
+- Use `mktemp` with random suffixes (`.XXXXXX`)
+- Set restrictive permissions immediately after creation
+- Cleanup traps ensure removal on exit/interrupt
+
+### Command Injection Prevention
+- All plugin names sanitized before use in shell commands
+- No direct `eval` of user input
+- Proper quoting in all command constructions
+- Validation before git operations
+
+### Testing
+Security features are validated with comprehensive tests:
+- `tests/test_security.sh` - 12 security-focused tests
+- Input sanitization verification
+- Permission validation
+- Temp file security checks
+
 ## Benefits
 
 1. **Modularity**: Clear separation of concerns
@@ -138,6 +184,32 @@ config::generator
 3. **Maintainability**: Organized codebase with clear dependencies
 4. **Extensibility**: Easy to add new commands and modules
 5. **Namespace Safety**: No function name conflicts
+6. **Security**: Input sanitization and secure file handling
+
+## Testing Guidelines
+
+### Running Tests
+```bash
+# Run all tests
+tests/test_runner.sh all
+
+# Run security tests
+tests/test_security.sh
+
+# Run shellcheck
+tests/run_shellcheck.sh
+```
+
+### Writing Tests
+1. Use test_helpers.sh for consistency
+2. Test both success and failure cases
+3. Clean up test artifacts
+4. Mock external dependencies when possible
+
+### Test Coverage
+- Security features: input sanitization, permissions, temp files
+- State management: JSON parsing, file operations
+- Bootstrap: module loading, dependency resolution
 
 ## Future Enhancements
 
@@ -146,3 +218,4 @@ config::generator
 - Configuration file validation
 - Performance monitoring dashboard
 - Automated dependency updates
+- Continuous integration with GitHub Actions
