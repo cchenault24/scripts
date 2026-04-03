@@ -451,21 +451,23 @@ zsh_setup::plugins::manager::_show_selection_menu() {
 
     # Use fzf if available, otherwise fallback
     if command -v fzf &>/dev/null; then
-        # Show helpful instructions
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📦 Select Plugins to Install"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "How to use:"
-        echo "  ↑↓     Navigate up/down"
-        echo "  Tab    Select/deselect (you can choose multiple)"
-        echo "  Enter  Confirm selection and continue"
-        echo "  Esc    Cancel"
-        echo ""
-        echo "Tip: You can search by typing to filter plugins"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
+        # Show helpful instructions (redirect to stderr so they don't become part of return value)
+        {
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📦 Select Plugins to Install"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "How to use:"
+            echo "  ↑↓     Navigate up/down"
+            echo "  Tab    Select/deselect (you can choose multiple)"
+            echo "  Enter  Confirm selection and continue"
+            echo "  Esc    Cancel"
+            echo ""
+            echo "Tip: You can search by typing to filter plugins"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+        } >&2
 
         local height=$((${#plugins[@]} + 2))
         height=$((height > 20 ? 20 : height))
@@ -476,23 +478,26 @@ zsh_setup::plugins::manager::_show_selection_menu() {
             --marker="✓"
     else
         # Basic menu (fallback when fzf not available)
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📦 Select Plugins to Install"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "How to select:"
-        echo "  • Enter plugin numbers separated by commas (e.g., 1,3,5)"
-        echo "  • Or type 'all' to install all plugins"
-        echo ""
-        local i=1
-        for entry in "${plugins[@]}"; do
-            local desc=$(echo "$entry" | cut -d'|' -f1)
-            echo "$i) $desc"
-            ((i++))
-        done
-        echo ""
-        echo -n "Your selection: "
+        # All prompts go to stderr
+        {
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📦 Select Plugins to Install"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "How to select:"
+            echo "  • Enter plugin numbers separated by commas (e.g., 1,3,5)"
+            echo "  • Or type 'all' to install all plugins"
+            echo ""
+            local i=1
+            for entry in "${plugins[@]}"; do
+                local desc=$(echo "$entry" | cut -d'|' -f1)
+                echo "$i) $desc"
+                ((i++))
+            done
+            echo ""
+            echo -n "Your selection: "
+        } >&2
         read -r choice
         if [[ "$choice" == "all" ]]; then
             printf '%s\n' "${plugins[@]}" | cut -d'|' -f1
