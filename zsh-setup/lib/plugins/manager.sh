@@ -406,13 +406,45 @@ zsh_setup::plugins::manager::install_list() {
     local plugins=("$@")
     local total=${#plugins[@]}
 
-    zsh_setup::core::logger::info "Installing $total plugins..."
+    if [[ $total -eq 0 ]]; then
+        zsh_setup::core::logger::info "No plugins to install."
+        return 0
+    fi
+
+    zsh_setup::core::logger::info "Checking $total plugins..."
+
+    # Pre-check: Separate already-installed from needs-install
+    local already_installed=()
+    local needs_install=()
+
+    for plugin in "${plugins[@]}"; do
+        local plugin_type=$(zsh_setup::plugins::registry::get "$plugin" "type")
+        local plugin_url=$(zsh_setup::plugins::registry::get "$plugin" "url")
+
+        if zsh_setup::plugins::installer::is_installed "$plugin" "$plugin_type" "$plugin_url"; then
+            already_installed+=("$plugin")
+        else
+            needs_install+=("$plugin")
+        fi
+    done
+
+    # Show summary
+    if [[ ${#already_installed[@]} -gt 0 ]]; then
+        zsh_setup::core::logger::info "Already installed (${#already_installed[@]}): ${already_installed[*]}"
+    fi
+
+    if [[ ${#needs_install[@]} -eq 0 ]]; then
+        zsh_setup::core::logger::success "All $total plugins already installed. Nothing to do."
+        return 0
+    fi
+
+    zsh_setup::core::logger::info "Installing ${#needs_install[@]} new plugins..."
 
     # Separate by installation method
     local brew_plugins=()
     local parallel_plugins=()
 
-    for plugin in "${plugins[@]}"; do
+    for plugin in "${needs_install[@]}"; do
         local plugin_type=$(zsh_setup::plugins::registry::get "$plugin" "type")
 
         if [[ "$plugin_type" == "brew" ]]; then
