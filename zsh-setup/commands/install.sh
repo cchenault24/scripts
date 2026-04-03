@@ -159,6 +159,11 @@ zsh_setup::commands::install::execute() {
 # Backup configuration
 zsh_setup::commands::install::_backup_config() {
     zsh_setup::core::bootstrap::load_module config::backup
+
+    # First, extract any custom configurations to .zshrc.local
+    zsh_setup::config::backup::extract_custom_configs
+
+    # Then backup the existing .zshrc
     zsh_setup::config::backup::backup_zshrc
 }
 
