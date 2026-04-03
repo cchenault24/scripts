@@ -53,6 +53,15 @@ The scripts can install and configure many popular Zsh plugins including:
 - Curl
 - Homebrew (optional, for macOS)
 
+## Quick Links
+
+- 📥 **[Installation Guide](#installation)** - Get started
+- 🔄 **[Restore/Undo Guide](./RESTORE.md)** - Rollback or restore from backup
+- ⚙️ **[Custom Configs Guide](./CUSTOM_CONFIGS.md)** - Preserve your customizations
+- 🔒 **[Security Policy](./SECURITY.md)** - Security measures and best practices
+- 🏗️ **[Architecture](./ARCHITECTURE.md)** - Design and code structure
+- 👥 **[Development Guide](./docs/DEVELOPMENT.md)** - Contributing and development
+
 ## Installation
 
 1. Clone this repository:
@@ -86,6 +95,8 @@ The scripts can install and configure many popular Zsh plugins including:
    ```bash
    zsh-setup install
    ```
+
+> **💡 Tip**: Your existing `.zshrc` will be backed up to `~/.zsh_backup/` and custom configs automatically preserved in `~/.zshrc.local`. See the **[Restore Guide](./RESTORE.md)** for rollback options.
 
 ## Usage
 
@@ -185,7 +196,9 @@ Dependencies are defined in `plugin_dependencies.conf` using this format:
 plugin_name=dependency1,dependency2,...
 ```
 
-## Uninstallation
+## Uninstallation & Restoration
+
+### Full Uninstall
 
 If you want to revert all changes and remove the Zsh configuration:
 
@@ -194,11 +207,28 @@ If you want to revert all changes and remove the Zsh configuration:
 ```
 
 This will:
-
 - Remove Oh My Zsh and all installed plugins
 - Delete Zsh configuration files
+- Restore your original `.zshrc` from backup
 - Reset your default shell to Bash (optional)
 - Optionally remove Homebrew packages that were installed as dependencies
+
+### Restore from Backup
+
+If you just want to restore your previous configuration without full uninstall:
+
+```bash
+# List available backups
+ls -la ~/.zsh_backup/
+
+# Restore specific backup
+cp ~/.zsh_backup/.zshrc.YYYYMMDD_HHMMSS ~/.zshrc
+
+# Reload shell
+source ~/.zshrc
+```
+
+📄 **[Complete Restore & Undo Guide](./RESTORE.md)** - Detailed restoration instructions for all scenarios
 
 ## Security
 
