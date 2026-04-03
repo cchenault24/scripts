@@ -32,10 +32,13 @@ Automates the setup of a powerful Zsh environment with Oh My Zsh, plugins, and s
 
 - One-command setup for Zsh and Oh My Zsh
 - Plugin selector for autocomplete, syntax highlighting, navigation, and more
-- Auto-generated `.zshrc` file
+- **Custom config preservation** - `.zshrc.local` support keeps your customizations safe
+- Auto-generated `.zshrc` file with security hardening
+- Comprehensive test suite and security measures
 - Clean uninstallation with backup options
 
 📄 [Read the full Zsh Setup Scripts README](./zsh-setup/README.md)
+📄 [Custom Configuration Guide](./zsh-setup/CUSTOM_CONFIGS.md)
 
 ### 3. Home Network Monitor
 
