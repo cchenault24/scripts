@@ -152,6 +152,7 @@ zsh_setup::core::logger::init() {
         echo "Script version: $version"
         echo "=================================="
     } >"$log_file"
-    
-    zsh_setup::core::logger::info "Log file initialized at $log_file"
+
+    # Only show log file initialization in verbose mode
+    zsh_setup::core::logger::debug "Log file initialized at $log_file"
 }

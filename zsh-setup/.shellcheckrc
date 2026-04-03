@@ -1,0 +1,29 @@
+# shellcheck configuration for zsh-setup project
+
+# Enable all optional checks
+enable=all
+
+# Disable specific checks that don't apply to this project
+
+# SC1090: Can't follow non-constant source
+# We use dynamic sourcing based on ZSH_SETUP_ROOT
+disable=SC1090
+
+# SC1091: Not following sourced files
+# We have conditional sourcing that shellcheck can't always resolve
+disable=SC1091
+
+# SC2034: Variable appears unused
+# Some variables are used by sourced scripts or exported for subprocesses
+disable=SC2034
+
+# SC2155: Declare and assign separately to avoid masking return values
+# We use this pattern intentionally in some places for conciseness
+disable=SC2155
+
+# Set shell dialect to bash
+shell=bash
+
+# External sources (for -x flag)
+# These help shellcheck understand our module structure
+external-sources=true

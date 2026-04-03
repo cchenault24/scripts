@@ -119,13 +119,8 @@ zsh_setup::system::package_manager::install() {
     local description="${2:-Installing $package_name}"
     local pm=$(zsh_setup::system::package_manager::detect)
     
-    # Check if already installed
+    # Check if already installed (silent - pre-check already reported this)
     if zsh_setup::system::package_manager::is_installed "$package_name"; then
-        if declare -f zsh_setup::core::progress::status_line &>/dev/null; then
-            zsh_setup::core::progress::status_line "✅ $package_name is already installed ($(zsh_setup::system::package_manager::get_name))"
-        else
-            zsh_setup::core::logger::info "✅ $package_name is already installed ($(zsh_setup::system::package_manager::get_name))"
-        fi
         return 0
     fi
     
@@ -261,6 +256,8 @@ zsh_setup::system::package_manager::install() {
                 ;;
             *)
                 zsh_setup::core::logger::error "No supported package manager found. Cannot install $package_name"
+                zsh_setup::core::logger::info "Supported: Homebrew (macOS), apt, dnf, yum, pacman, zypper"
+                zsh_setup::core::logger::info "Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
                 ;;
         esac
         return 1

@@ -255,6 +255,18 @@ zsh_setup::config::generator::_generate_footer() {
 
 source $ZSH/oh-my-zsh.sh
 
+#------------------------------------------------------------------------------
+# User Custom Configurations
+#------------------------------------------------------------------------------
+# This section is preserved across zsh-setup updates
+# Add your custom aliases, functions, and settings below
+# Or place them in ~/.zshrc.local (recommended)
+
+# Source local configuration file if it exists
+if [[ -f "$HOME/.zshrc.local" ]]; then
+    source "$HOME/.zshrc.local"
+fi
+
 EOF
 }
 

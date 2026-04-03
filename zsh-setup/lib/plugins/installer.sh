@@ -13,8 +13,55 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
     source "$ZSH_SETUP_ROOT/lib/core/errors.sh"
     source "$ZSH_SETUP_ROOT/lib/state/store.sh"
     source "$ZSH_SETUP_ROOT/lib/utils/network.sh"
+    source "$ZSH_SETUP_ROOT/lib/utils/filesystem.sh"
     source "$ZSH_SETUP_ROOT/lib/system/package_manager.sh"
 fi
+
+#------------------------------------------------------------------------------
+# Installation Status Checking
+#------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# Function: zsh_setup::plugins::installer::is_installed
+# Description: Checks if a plugin is already installed
+# Arguments:
+#   $1 - Plugin name
+#   $2 - Plugin type (git, brew, omz)
+# Returns:
+#   0 if installed, 1 if not installed
+#------------------------------------------------------------------------------
+zsh_setup::plugins::installer::is_installed() {
+    local plugin_name="$1"
+    local plugin_type="$2"
+
+    case "$plugin_type" in
+        git|theme)
+            local ohmyzsh_dir=$(zsh_setup::core::config::get oh_my_zsh_dir)
+            local safe_plugin_name=$(zsh_setup::utils::filesystem::sanitize_name "$plugin_name")
+
+            # Check in both plugins and themes directories
+            if [[ -d "$ohmyzsh_dir/custom/plugins/$safe_plugin_name/.git" ]] || \
+               [[ -d "$ohmyzsh_dir/custom/themes/$safe_plugin_name/.git" ]]; then
+                return 0
+            fi
+            return 1
+            ;;
+        brew)
+            local package_name="${3:-$plugin_name}"
+            local mapped_package=$(zsh_setup::system::package_manager::map_plugin_to_package "$package_name")
+            zsh_setup::system::package_manager::is_installed "$mapped_package"
+            return $?
+            ;;
+        omz)
+            local ohmyzsh_dir=$(zsh_setup::core::config::get oh_my_zsh_dir)
+            [[ -d "$ohmyzsh_dir/plugins/$plugin_name" ]]
+            return $?
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
 
 #------------------------------------------------------------------------------
 # Installation Methods
@@ -25,16 +72,23 @@ zsh_setup::plugins::installer::install_git() {
     local plugin_name="$1"
     local plugin_url="$2"
     local plugin_type="${3:-plugin}"
-    
+
+    # Sanitize plugin name for safe filesystem usage
+    local safe_plugin_name=$(zsh_setup::utils::filesystem::sanitize_name "$plugin_name")
+    if [[ -z "$safe_plugin_name" ]]; then
+        zsh_setup::core::logger::error "Invalid plugin name: $plugin_name"
+        return 1
+    fi
+
     local ohmyzsh_dir=$(zsh_setup::core::config::get oh_my_zsh_dir)
     local plugins_dir="$ohmyzsh_dir/custom/plugins"
     local themes_dir="$ohmyzsh_dir/custom/themes"
-    
+
     local plugin_path
     if [[ "$plugin_type" == "theme" ]]; then
-        plugin_path="$themes_dir/$plugin_name"
+        plugin_path="$themes_dir/$safe_plugin_name"
     else
-        plugin_path="$plugins_dir/$plugin_name"
+        plugin_path="$plugins_dir/$safe_plugin_name"
     fi
     
     zsh_setup::core::logger::info "Installing ${plugin_type}: $plugin_name"
@@ -108,6 +162,7 @@ zsh_setup::plugins::installer::install_git() {
     else
         zsh_setup::state::store::add_failed_plugin "$plugin_name" "git" "Clone failed"
         zsh_setup::core::logger::error "Failed to install ${plugin_type}: $plugin_name"
+        zsh_setup::core::logger::info "Check network connectivity and git configuration. Run with --verbose for details."
         return 1
     fi
 }
@@ -116,14 +171,23 @@ zsh_setup::plugins::installer::install_git() {
 zsh_setup::plugins::installer::install_brew() {
     local plugin_name="$1"
     local package_name="${2:-$plugin_name}"
-    
+
     # Use package manager integration
     local mapped_package=$(zsh_setup::system::package_manager::map_plugin_to_package "$package_name")
-    
+
+    # Check if already installed
+    if zsh_setup::system::package_manager::is_installed "$mapped_package"; then
+        local version=$(zsh_setup::system::package_manager::get_version "$mapped_package")
+        zsh_setup::state::store::add_plugin "$plugin_name" "brew" "$version"
+        # Already installed - silent success (message already shown by pre-check)
+        return 0
+    fi
+
+    # Actually install the package
     if zsh_setup::system::package_manager::install "$mapped_package" "Installing $plugin_name via Homebrew"; then
         local version=$(zsh_setup::system::package_manager::get_version "$mapped_package")
         zsh_setup::state::store::add_plugin "$plugin_name" "brew" "$version"
-        zsh_setup::core::logger::success "Successfully installed $plugin_name via Homebrew"
+        # Don't log here - package_manager already logged success
         return 0
     else
         zsh_setup::state::store::add_failed_plugin "$plugin_name" "brew" "Installation failed"
@@ -156,6 +220,7 @@ zsh_setup::plugins::installer::install_npm() {
     
     if ! command -v npm &>/dev/null; then
         zsh_setup::core::logger::error "npm is not installed. Cannot install $plugin_name."
+        zsh_setup::core::logger::info "Install Node.js and npm with: brew install node"
         zsh_setup::state::store::add_failed_plugin "$plugin_name" "npm" "npm not installed"
         return 1
     fi

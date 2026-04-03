@@ -72,7 +72,7 @@ zsh_setup::plugins::registry::load() {
     
     # Load plugins
     if [[ -f "$plugins_file" ]]; then
-        zsh_setup::core::logger::info "Loading plugin configurations from $plugins_file"
+        zsh_setup::core::logger::debug "Loading plugin configurations from $plugins_file"
         while IFS='|' read -r name type url description; do
             [[ -z "$name" || "$name" =~ ^# ]] && continue
             name=$(echo "$name" | xargs)
@@ -94,7 +94,7 @@ zsh_setup::plugins::registry::load() {
     
     # Load dependencies
     if [[ -f "$deps_file" ]]; then
-        zsh_setup::core::logger::info "Loading plugin dependencies from $deps_file"
+        zsh_setup::core::logger::debug "Loading plugin dependencies from $deps_file"
         while IFS='=' read -r plugin_name deps; do
             [[ -z "$plugin_name" || "$plugin_name" =~ ^# ]] && continue
             plugin_name=$(echo "$plugin_name" | xargs)

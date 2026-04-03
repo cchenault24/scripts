@@ -19,6 +19,7 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
         zsh_setup::core::bootstrap::load_module "plugins::resolver" || source "$ZSH_SETUP_ROOT/lib/plugins/resolver.sh"
         zsh_setup::core::bootstrap::load_module "plugins::installer" || source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh"
         zsh_setup::core::bootstrap::load_module "system::package_manager" || source "$ZSH_SETUP_ROOT/lib/system/package_manager.sh"
+        zsh_setup::core::bootstrap::load_module "utils::filesystem" || source "$ZSH_SETUP_ROOT/lib/utils/filesystem.sh"
     else
         source "$ZSH_SETUP_ROOT/lib/core/config.sh"
         source "$ZSH_SETUP_ROOT/lib/core/logger.sh"
@@ -26,12 +27,340 @@ if [[ -n "${ZSH_SETUP_ROOT:-}" ]]; then
         source "$ZSH_SETUP_ROOT/lib/plugins/resolver.sh"
         source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh"
         source "$ZSH_SETUP_ROOT/lib/system/package_manager.sh"
+        source "$ZSH_SETUP_ROOT/lib/utils/filesystem.sh"
     fi
 fi
 
 #------------------------------------------------------------------------------
 # Plugin Installation
 #------------------------------------------------------------------------------
+
+#------------------------------------------------------------------------------
+# Function: zsh_setup::plugins::manager::_create_worker_script
+# Description: Creates a background worker script for parallel plugin installation
+# Arguments:
+#   None (uses globals from parent function)
+# Returns:
+#   Outputs worker script path to stdout
+# Side Effects:
+#   Creates temporary file, sets up cleanup trap
+#------------------------------------------------------------------------------
+zsh_setup::plugins::manager::_create_worker_script() {
+    # Create worker script (reusable) with secure permissions
+    local worker_script=$(mktemp -t zsh_setup_worker.XXXXXX.sh)
+    chmod 700 "$worker_script"  # Owner-only read/write/execute
+
+    # Setup cleanup trap for worker script
+    trap 'rm -f "$worker_script"' EXIT INT TERM
+
+    cat > "$worker_script" <<'WORKER_EOF'
+#!/usr/bin/env bash
+set +e  # Don't exit on error, we'll handle it
+ZSH_SETUP_ROOT="$1"
+PLUGIN_NAME="$2"
+
+# Sanitize plugin name for log file fallback
+SAFE_PLUGIN_NAME=$(echo "$PLUGIN_NAME" | tr -cd '[:alnum:]_.-')
+LOG_FILE="${3:-/tmp/zsh_setup_${SAFE_PLUGIN_NAME}_$$.log}"
+
+# Redirect all output to log file (worker script runs silently)
+exec 1>>"$LOG_FILE" 2>&1
+
+# Export for subprocesses
+export ZSH_SETUP_ROOT
+
+# Suppress verbose output in worker
+export QUIET_MODE=true
+
+# Source bootstrap and initialize
+if ! source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh"; then
+    echo "ERROR: Failed to load bootstrap.sh"
+    exit 1
+fi
+
+if ! zsh_setup::core::bootstrap::init; then
+    echo "ERROR: Failed to initialize bootstrap"
+    exit 1
+fi
+
+# Load required modules
+if ! source "$ZSH_SETUP_ROOT/lib/plugins/registry.sh"; then
+    echo "ERROR: Failed to load registry.sh"
+    exit 1
+fi
+
+if ! source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh"; then
+    echo "ERROR: Failed to load installer.sh"
+    exit 1
+fi
+
+# Load plugin registry
+if ! zsh_setup::plugins::registry::load; then
+    echo "ERROR: Failed to load plugin registry"
+    exit 1
+fi
+
+# Get plugin info
+plugin_type=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "type")
+plugin_url=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "url")
+
+if [[ -z "$plugin_type" ]]; then
+    echo "ERROR: Could not determine plugin type for $PLUGIN_NAME"
+    exit 1
+fi
+
+# Install plugin
+exit_code=0
+if [[ "$PLUGIN_NAME" == "powerlevel10k" ]]; then
+    if ! zsh_setup::plugins::installer::install_git "$PLUGIN_NAME" "$plugin_url" "theme"; then
+        exit_code=1
+    fi
+else
+    if ! zsh_setup::plugins::installer::install "$PLUGIN_NAME" "$plugin_type" "$plugin_url"; then
+        exit_code=1
+    fi
+fi
+
+exit $exit_code
+WORKER_EOF
+    chmod +x "$worker_script"
+    echo "$worker_script"
+}
+
+#------------------------------------------------------------------------------
+# Function: zsh_setup::plugins::manager::_wait_for_worker
+# Description: Waits for a background worker to finish and processes results
+# Arguments:
+#   $1 - PID of finished worker
+#   $2 - Name of plugin being installed
+#   $3 - Log file path
+#   $4 - Current completed count (reference variable name)
+#   $5 - Current failed count (reference variable name)
+#   $6 - Failed plugins array (reference variable name)
+#   $7 - Total plugin count
+# Returns:
+#   0 on success, 1 on failure
+#------------------------------------------------------------------------------
+zsh_setup::plugins::manager::_wait_for_worker() {
+    local pid="$1"
+    local plugin="$2"
+    local log_file="$3"
+    local completed_var="$4"
+    local failed_var="$5"
+    local failed_plugins_var="$6"
+    local total="$7"
+
+    wait "$pid"
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
+        eval "$completed_var=\$((\$$completed_var + 1))"
+        local completed=$(eval echo "\$$completed_var")
+        if declare -f zsh_setup::core::progress::bar_increment &>/dev/null; then
+            zsh_setup::core::progress::bar_increment 1 "✓ $plugin installed"
+        else
+            zsh_setup::core::logger::info "[$completed/$total] ✓ $plugin installed"
+        fi
+        rm -f "$log_file"
+    else
+        eval "$failed_var=\$((\$$failed_var + 1))"
+        eval "$failed_plugins_var+=('$plugin')"
+        local completed=$(eval echo "\$$completed_var")
+        if declare -f zsh_setup::core::progress::status_line &>/dev/null; then
+            zsh_setup::core::progress::status_line "✗ $plugin failed (check $log_file)"
+        else
+            zsh_setup::core::logger::error "[$completed/$total] ✗ $plugin failed (check $log_file)"
+        fi
+    fi
+
+    return $exit_code
+}
+
+#------------------------------------------------------------------------------
+# Function: zsh_setup::plugins::manager::_install_parallel_plugins
+# Description: Installs plugins in parallel using background workers
+# Arguments:
+#   $@ - Array of plugin names to install
+# Returns:
+#   0 on success, 1 if any plugins failed
+#------------------------------------------------------------------------------
+zsh_setup::plugins::manager::_install_parallel_plugins() {
+    local parallel_plugins=("$@")
+    local max_parallel=$(zsh_setup::core::config::get max_parallel_installs "3")
+    local total=${#parallel_plugins[@]}
+
+    # Load progress module
+    if [[ -n "${ZSH_SETUP_ROOT:-}" ]] && [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
+        source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
+    fi
+
+    # Initialize progress bar
+    if declare -f zsh_setup::core::progress::bar_init &>/dev/null; then
+        zsh_setup::core::progress::bar_init "$total" "Installing plugins"
+    else
+        zsh_setup::core::logger::info "Installing ${#parallel_plugins[@]} plugins in parallel (max $max_parallel concurrent)..."
+    fi
+
+    # Create worker script
+    local worker_script=$(zsh_setup::plugins::manager::_create_worker_script)
+
+    # Track progress and errors
+    local completed=0
+    local failed=0
+    local failed_plugins=()
+    local pids=()
+    local plugins_by_pid=""  # Format: "pid:plugin:log|pid:plugin:log|..."
+
+    # Install plugins in parallel using background processes
+    for plugin in "${parallel_plugins[@]}"; do
+        # Sanitize plugin name for log file path
+        local safe_plugin=$(zsh_setup::utils::filesystem::sanitize_name "$plugin")
+        local log_file="/tmp/zsh_setup_${safe_plugin}_$$.log"
+
+        # Run worker in background
+        "$worker_script" "$ZSH_SETUP_ROOT" "$plugin" "$log_file" &
+        local pid=$!
+        pids+=("$pid")
+        if [[ -z "$plugins_by_pid" ]]; then
+            plugins_by_pid="${pid}:${plugin}:${log_file}"
+        else
+            plugins_by_pid="${plugins_by_pid}|${pid}:${plugin}:${log_file}"
+        fi
+
+        # Limit concurrent jobs - wait for one to finish if we're at max
+        while [[ ${#pids[@]} -ge $max_parallel ]]; do
+            # Check which processes have finished
+            local finished_pid=""
+            local finished_idx=-1
+            local idx=0
+            for pid in "${pids[@]}"; do
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    finished_pid="$pid"
+                    finished_idx=$idx
+                    break
+                fi
+                ((idx++))
+            done
+
+            if [[ -n "$finished_pid" ]]; then
+                # Extract plugin and log from plugins_by_pid
+                local plugin=""
+                local log_file=""
+                local remaining_info=""
+                for entry in $(echo "$plugins_by_pid" | tr '|' ' '); do
+                    IFS=':' read -r entry_pid entry_plugin entry_log <<< "$entry"
+                    if [[ "$entry_pid" == "$finished_pid" ]]; then
+                        plugin="$entry_plugin"
+                        log_file="$entry_log"
+                    else
+                        if [[ -z "$remaining_info" ]]; then
+                            remaining_info="$entry"
+                        else
+                            remaining_info="${remaining_info}|${entry}"
+                        fi
+                    fi
+                done
+                plugins_by_pid="$remaining_info"
+
+                # Wait for worker and process result
+                zsh_setup::plugins::manager::_wait_for_worker "$finished_pid" "$plugin" "$log_file" \
+                    completed failed failed_plugins "$total"
+
+                # Remove from pids array
+                local new_pids=()
+                for p in "${pids[@]}"; do
+                    [[ "$p" != "$finished_pid" ]] && new_pids+=("$p")
+                done
+                pids=("${new_pids[@]}")
+                break
+            else
+                # No process finished yet, wait a bit
+                sleep 0.2
+            fi
+        done
+    done
+
+    # Wait for all remaining processes
+    for pid in "${pids[@]}"; do
+        # Extract plugin and log from plugins_by_pid
+        local plugin=""
+        local log_file=""
+        for entry in $(echo "$plugins_by_pid" | tr '|' ' '); do
+            IFS=':' read -r entry_pid entry_plugin entry_log <<< "$entry"
+            if [[ "$entry_pid" == "$pid" ]]; then
+                plugin="$entry_plugin"
+                log_file="$entry_log"
+                break
+            fi
+        done
+
+        # Wait for worker and process result
+        zsh_setup::plugins::manager::_wait_for_worker "$pid" "$plugin" "$log_file" \
+            completed failed failed_plugins "$total"
+    done
+
+    # Cleanup and report
+    rm -f "$worker_script"
+
+    # Complete progress bar if it was initialized
+    if declare -f zsh_setup::core::progress::bar_complete &>/dev/null && [[ -n "${ZSH_SETUP_PROGRESS_TOTAL:-}" ]]; then
+        if [[ $failed -eq 0 ]]; then
+            zsh_setup::core::progress::bar_complete "All plugins installed"
+        fi
+    fi
+
+    if [[ $failed -gt 0 ]]; then
+        zsh_setup::core::logger::warn "Installation complete: $completed succeeded, $failed failed"
+        zsh_setup::core::logger::info "Failed plugins: ${failed_plugins[*]}"
+        return 1
+    else
+        zsh_setup::core::logger::success "All $completed plugins installed successfully"
+        return 0
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Function: zsh_setup::plugins::manager::_install_brew_plugins
+# Description: Installs Homebrew plugins sequentially
+# Arguments:
+#   $@ - Array of Homebrew plugin names to install
+# Returns:
+#   0 on success
+#------------------------------------------------------------------------------
+zsh_setup::plugins::manager::_install_brew_plugins() {
+    local brew_plugins=("$@")
+    local brew_total=${#brew_plugins[@]}
+    local brew_completed=0
+
+    # Load progress module if not already loaded
+    if [[ -n "${ZSH_SETUP_ROOT:-}" ]] && [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
+        source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
+    fi
+
+    # Initialize progress bar for brew packages
+    if declare -f zsh_setup::core::progress::bar_init &>/dev/null; then
+        zsh_setup::core::progress::bar_init "$brew_total" "Installing Homebrew packages"
+    else
+        zsh_setup::core::logger::info "Installing ${#brew_plugins[@]} Homebrew packages sequentially..."
+    fi
+
+    for plugin in "${brew_plugins[@]}"; do
+        local plugin_url=$(zsh_setup::plugins::registry::get "$plugin" "url")
+        if zsh_setup::plugins::installer::install_brew "$plugin" "$plugin_url"; then
+            ((brew_completed++))
+            if declare -f zsh_setup::core::progress::bar_increment &>/dev/null; then
+                zsh_setup::core::progress::bar_increment 1 "✓ $plugin installed"
+            fi
+        fi
+    done
+
+    # Complete progress bar
+    if declare -f zsh_setup::core::progress::bar_complete &>/dev/null && [[ -n "${ZSH_SETUP_PROGRESS_TOTAL:-}" ]]; then
+        zsh_setup::core::progress::bar_complete "Homebrew packages installed"
+    fi
+
+    return 0
+}
 
 # Install plugins interactively
 zsh_setup::plugins::manager::install_interactive() {
@@ -65,328 +394,77 @@ zsh_setup::plugins::manager::install_interactive() {
     zsh_setup::plugins::manager::install_list "${all_plugins[@]}"
 }
 
-# Install a list of plugins
+#------------------------------------------------------------------------------
+# Function: zsh_setup::plugins::manager::install_list
+# Description: Installs a list of plugins, separating by installation method
+# Arguments:
+#   $@ - Array of plugin names to install
+# Returns:
+#   0 on success, 1 if any plugins failed
+#------------------------------------------------------------------------------
 zsh_setup::plugins::manager::install_list() {
     local plugins=("$@")
     local total=${#plugins[@]}
-    
-    zsh_setup::core::logger::info "Installing $total plugins..."
-    
+
+    if [[ $total -eq 0 ]]; then
+        zsh_setup::core::logger::info "No plugins to install."
+        return 0
+    fi
+
+    zsh_setup::core::logger::info "Checking $total plugins..."
+
+    # Pre-check: Separate already-installed from needs-install
+    local already_installed=()
+    local needs_install=()
+
+    for plugin in "${plugins[@]}"; do
+        local plugin_type=$(zsh_setup::plugins::registry::get "$plugin" "type")
+        local plugin_url=$(zsh_setup::plugins::registry::get "$plugin" "url")
+
+        if zsh_setup::plugins::installer::is_installed "$plugin" "$plugin_type" "$plugin_url"; then
+            already_installed+=("$plugin")
+        else
+            needs_install+=("$plugin")
+        fi
+    done
+
+    # Show summary
+    if [[ ${#already_installed[@]} -gt 0 ]]; then
+        zsh_setup::core::logger::info "Already installed (${#already_installed[@]}): ${already_installed[*]}"
+    fi
+
+    if [[ ${#needs_install[@]} -eq 0 ]]; then
+        zsh_setup::core::logger::success "All $total plugins already installed. Nothing to do."
+        return 0
+    fi
+
+    zsh_setup::core::logger::info "Installing ${#needs_install[@]} new plugins..."
+
     # Separate by installation method
     local brew_plugins=()
     local parallel_plugins=()
-    
-    for plugin in "${plugins[@]}"; do
+
+    for plugin in "${needs_install[@]}"; do
         local plugin_type=$(zsh_setup::plugins::registry::get "$plugin" "type")
-        
+
         if [[ "$plugin_type" == "brew" ]]; then
             brew_plugins+=("$plugin")
         else
             parallel_plugins+=("$plugin")
         fi
     done
-    
-    # Install parallel plugins
+
+    # Install parallel plugins (git, oh-my-zsh)
     if [[ ${#parallel_plugins[@]} -gt 0 ]]; then
-        local max_parallel=$(zsh_setup::core::config::get max_parallel_installs "3")
-        local total=${#parallel_plugins[@]}
-        
-        # Load progress module
-        if [[ -n "${ZSH_SETUP_ROOT:-}" ]] && [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
-            source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
-        fi
-        
-        # Initialize progress bar
-        if declare -f zsh_setup::core::progress::bar_init &>/dev/null; then
-            zsh_setup::core::progress::bar_init "$total" "Installing plugins"
-        else
-            zsh_setup::core::logger::info "Installing ${#parallel_plugins[@]} plugins in parallel (max $max_parallel concurrent)..."
-        fi
-        
-        # Create worker script (reusable)
-        local worker_script=$(mktemp -t zsh_setup_worker.XXXXXX.sh)
-        # #region agent log
-        echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"manager.sh:95\",\"message\":\"Creating worker script\",\"data\":{\"worker_script\":\"$worker_script\",\"plugin_count\":${#parallel_plugins[@]}},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-        # #endregion
-        cat > "$worker_script" <<'WORKER_EOF'
-#!/usr/bin/env bash
-set +e  # Don't exit on error, we'll handle it
-ZSH_SETUP_ROOT="$1"
-PLUGIN_NAME="$2"
-LOG_FILE="${3:-/tmp/zsh_setup_${PLUGIN_NAME}_$$.log}"
-
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A\",\"location\":\"worker_script:start\",\"message\":\"Worker script started\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"bash_version\":\"$(bash --version | head -1)\",\"script_type\":\"standalone\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
-
-# Export for subprocesses
-export ZSH_SETUP_ROOT
-
-# Source bootstrap and initialize
-if ! source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh" 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:bootstrap_load\",\"message\":\"Bootstrap load failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    echo "ERROR: Failed to load bootstrap.sh" >> "$LOG_FILE"
-    exit 1
-fi
-
-if ! zsh_setup::core::bootstrap::init 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:bootstrap_init\",\"message\":\"Bootstrap init failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    echo "ERROR: Failed to initialize bootstrap" >> "$LOG_FILE"
-    exit 1
-fi
-
-# Load required modules
-if ! source "$ZSH_SETUP_ROOT/lib/plugins/registry.sh" 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:registry_load\",\"message\":\"Registry load failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    echo "ERROR: Failed to load registry.sh" >> "$LOG_FILE"
-    exit 1
-fi
-
-if ! source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh" 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:installer_load\",\"message\":\"Installer load failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    echo "ERROR: Failed to load installer.sh" >> "$LOG_FILE"
-    exit 1
-fi
-
-# Load plugin registry
-if ! zsh_setup::plugins::registry::load 2>>"$LOG_FILE"; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"B\",\"location\":\"worker_script:registry_load_func\",\"message\":\"Registry load function failed\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    echo "ERROR: Failed to load plugin registry" >> "$LOG_FILE"
-    exit 1
-fi
-
-# Get plugin info
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:before_vars\",\"message\":\"Before variable declarations\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"line\":135},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
-plugin_type=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "type" 2>>"$LOG_FILE")
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:after_first_var\",\"message\":\"After first variable\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"plugin_type\":\"$plugin_type\",\"line\":136},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
-plugin_url=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "url" 2>>"$LOG_FILE")
-
-if [[ -z "$plugin_type" ]]; then
-    # #region agent log
-    echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"C\",\"location\":\"worker_script:empty_plugin_type\",\"message\":\"Plugin type is empty\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\"},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-    # #endregion
-    echo "ERROR: Could not determine plugin type for $PLUGIN_NAME" >> "$LOG_FILE"
-    exit 1
-fi
-
-# Install plugin
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:before_exit_code\",\"message\":\"Before exit_code variable\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"line\":144},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
-exit_code=0
-if [[ "$PLUGIN_NAME" == "powerlevel10k" ]]; then
-    if ! zsh_setup::plugins::installer::install_git "$PLUGIN_NAME" "$plugin_url" "theme" >>"$LOG_FILE" 2>&1; then
-        exit_code=1
+        zsh_setup::plugins::manager::_install_parallel_plugins "${parallel_plugins[@]}" || return 1
     fi
-else
-    if ! zsh_setup::plugins::installer::install "$PLUGIN_NAME" "$plugin_type" "$plugin_url" >>"$LOG_FILE" 2>&1; then
-        exit_code=1
-    fi
-fi
 
-# #region agent log
-echo "{\"sessionId\":\"debug-session\",\"runId\":\"post-fix\",\"hypothesisId\":\"A\",\"location\":\"worker_script:before_exit\",\"message\":\"Before exit\",\"data\":{\"plugin_name\":\"$PLUGIN_NAME\",\"exit_code\":$exit_code},\"timestamp\":$(date +%s000)}" >> /Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log 2>/dev/null || true
-# #endregion
-exit $exit_code
-WORKER_EOF
-        chmod +x "$worker_script"
-        
-        # Track progress and errors
-        local completed=0
-        local failed=0
-        local failed_plugins=()
-        local total=${#parallel_plugins[@]}
-        local pids=()
-        local plugins_by_pid=""  # Format: "pid:plugin:log|pid:plugin:log|..."
-        
-        # Install plugins in parallel using background processes
-        for plugin in "${parallel_plugins[@]}"; do
-            local log_file="/tmp/zsh_setup_${plugin}_$$.log"
-            
-            # Run worker in background
-            "$worker_script" "$ZSH_SETUP_ROOT" "$plugin" "$log_file" &
-            local pid=$!
-            pids+=("$pid")
-            if [[ -z "$plugins_by_pid" ]]; then
-                plugins_by_pid="${pid}:${plugin}:${log_file}"
-            else
-                plugins_by_pid="${plugins_by_pid}|${pid}:${plugin}:${log_file}"
-            fi
-            
-            # Limit concurrent jobs - wait for one to finish if we're at max
-            while [[ ${#pids[@]} -ge $max_parallel ]]; do
-                # Check which processes have finished
-                local finished_pid=""
-                local finished_idx=-1
-                local idx=0
-                for pid in "${pids[@]}"; do
-                    if ! kill -0 "$pid" 2>/dev/null; then
-                        finished_pid="$pid"
-                        finished_idx=$idx
-                        break
-                    fi
-                    ((idx++))
-                done
-                
-                if [[ -n "$finished_pid" ]]; then
-                    # Wait for the finished process and get exit code
-                    wait "$finished_pid"
-                    local exit_code=$?
-                    
-                    # Extract plugin and log from plugins_by_pid
-                    local plugin=""
-                    local log_file=""
-                    local remaining_info=""
-                    local found=0
-                    for entry in $(echo "$plugins_by_pid" | tr '|' ' '); do
-                        IFS=':' read -r entry_pid entry_plugin entry_log <<< "$entry"
-                        if [[ "$entry_pid" == "$finished_pid" ]]; then
-                            plugin="$entry_plugin"
-                            log_file="$entry_log"
-                            found=1
-                        else
-                            if [[ -z "$remaining_info" ]]; then
-                                remaining_info="$entry"
-                            else
-                                remaining_info="${remaining_info}|${entry}"
-                            fi
-                        fi
-                    done
-                    plugins_by_pid="$remaining_info"
-                    
-                    if [[ $exit_code -eq 0 ]]; then
-                        ((completed++))
-                        if declare -f zsh_setup::core::progress::bar_increment &>/dev/null; then
-                            zsh_setup::core::progress::bar_increment 1 "✓ $plugin installed"
-                        else
-                            zsh_setup::core::logger::info "[$completed/$total] ✓ $plugin installed"
-                        fi
-                        rm -f "$log_file"
-                    else
-                        ((failed++))
-                        failed_plugins+=("$plugin")
-                        if declare -f zsh_setup::core::progress::status_line &>/dev/null; then
-                            zsh_setup::core::progress::status_line "✗ $plugin failed (check $log_file)"
-                        else
-                            zsh_setup::core::logger::error "[$completed/$total] ✗ $plugin failed (check $log_file)"
-                        fi
-                    fi
-                    
-                    # Remove from pids array
-                    local new_pids=()
-                    for p in "${pids[@]}"; do
-                        [[ "$p" != "$finished_pid" ]] && new_pids+=("$p")
-                    done
-                    pids=("${new_pids[@]}")
-                    break
-                else
-                    # No process finished yet, wait a bit
-                    sleep 0.2
-                fi
-            done
-        done
-        
-        # Wait for all remaining processes
-        for pid in "${pids[@]}"; do
-            wait "$pid"
-            local exit_code=$?
-            
-            # Extract plugin and log from plugins_by_pid
-            local plugin=""
-            local log_file=""
-            for entry in $(echo "$plugins_by_pid" | tr '|' ' '); do
-                IFS=':' read -r entry_pid entry_plugin entry_log <<< "$entry"
-                if [[ "$entry_pid" == "$pid" ]]; then
-                    plugin="$entry_plugin"
-                    log_file="$entry_log"
-                    break
-                fi
-            done
-            
-            if [[ $exit_code -eq 0 ]]; then
-                ((completed++))
-                if declare -f zsh_setup::core::progress::bar_increment &>/dev/null; then
-                    zsh_setup::core::progress::bar_increment 1 "✓ $plugin installed"
-                else
-                    zsh_setup::core::logger::info "[$completed/$total] ✓ $plugin installed"
-                fi
-                rm -f "$log_file"
-            else
-                ((failed++))
-                failed_plugins+=("$plugin")
-                if declare -f zsh_setup::core::progress::status_line &>/dev/null; then
-                    zsh_setup::core::progress::status_line "✗ $plugin failed (check $log_file)"
-                else
-                    zsh_setup::core::logger::error "[$completed/$total] ✗ $plugin failed (check $log_file)"
-                fi
-            fi
-        done
-        
-        # Cleanup and report
-        rm -f "$worker_script"
-        
-        # Complete progress bar if it was initialized
-        if declare -f zsh_setup::core::progress::bar_complete &>/dev/null && [[ -n "${ZSH_SETUP_PROGRESS_TOTAL:-}" ]]; then
-            if [[ $failed -eq 0 ]]; then
-                zsh_setup::core::progress::bar_complete "All plugins installed"
-            fi
-        fi
-        
-        if [[ $failed -gt 0 ]]; then
-            zsh_setup::core::logger::warn "Installation complete: $completed succeeded, $failed failed"
-            zsh_setup::core::logger::info "Failed plugins: ${failed_plugins[*]}"
-            return 1
-        else
-            zsh_setup::core::logger::success "All $completed plugins installed successfully"
-        fi
-    fi
-    
     # Install Homebrew plugins sequentially
     if [[ ${#brew_plugins[@]} -gt 0 ]]; then
-        local brew_total=${#brew_plugins[@]}
-        local brew_completed=0
-        
-        # Load progress module if not already loaded
-        if [[ -n "${ZSH_SETUP_ROOT:-}" ]] && [[ -f "$ZSH_SETUP_ROOT/lib/core/progress.sh" ]]; then
-            source "$ZSH_SETUP_ROOT/lib/core/progress.sh" 2>/dev/null || true
-        fi
-        
-        # Initialize progress bar for brew packages
-        if declare -f zsh_setup::core::progress::bar_init &>/dev/null; then
-            zsh_setup::core::progress::bar_init "$brew_total" "Installing Homebrew packages"
-        else
-            zsh_setup::core::logger::info "Installing ${#brew_plugins[@]} Homebrew packages sequentially..."
-        fi
-        
-        for plugin in "${brew_plugins[@]}"; do
-            local plugin_url=$(zsh_setup::plugins::registry::get "$plugin" "url")
-            if zsh_setup::plugins::installer::install_brew "$plugin" "$plugin_url"; then
-                ((brew_completed++))
-                if declare -f zsh_setup::core::progress::bar_increment &>/dev/null; then
-                    zsh_setup::core::progress::bar_increment 1 "✓ $plugin installed"
-                fi
-            fi
-        done
-        
-        # Complete progress bar
-        if declare -f zsh_setup::core::progress::bar_complete &>/dev/null && [[ -n "${ZSH_SETUP_PROGRESS_TOTAL:-}" ]]; then
-            zsh_setup::core::progress::bar_complete "Homebrew packages installed"
-        fi
+        zsh_setup::plugins::manager::_install_brew_plugins "${brew_plugins[@]}"
     fi
+
+    return 0
 }
 
 # Show plugin selection menu
@@ -394,7 +472,7 @@ zsh_setup::plugins::manager::_show_selection_menu() {
     local plugins=()
     local root="${ZSH_SETUP_ROOT:-}"
     local plugins_file="${root}/plugins.conf"
-    
+
     # Load plugins from config
     if [[ -f "$plugins_file" ]]; then
         while IFS='|' read -r name type url description; do
@@ -402,22 +480,56 @@ zsh_setup::plugins::manager::_show_selection_menu() {
             plugins+=("$description - $name|$name|$type")
         done < "$plugins_file"
     fi
-    
+
     # Use fzf if available, otherwise fallback
     if command -v fzf &>/dev/null; then
+        # Show helpful instructions (redirect to stderr so they don't become part of return value)
+        {
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📦 Select Plugins to Install"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "How to use:"
+            echo "  ↑↓     Navigate up/down"
+            echo "  Tab    Select/deselect (you can choose multiple)"
+            echo "  Enter  Confirm selection and continue"
+            echo "  Esc    Cancel"
+            echo ""
+            echo "Tip: You can search by typing to filter plugins"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+        } >&2
+
         local height=$((${#plugins[@]} + 2))
         height=$((height > 20 ? 20 : height))
-        printf '%s\n' "${plugins[@]}" | cut -d'|' -f1 | fzf --multi --height="$height"
+        printf '%s\n' "${plugins[@]}" | cut -d'|' -f1 | fzf --multi --height="$height" \
+            --header="Select plugins (Tab to select, Enter to confirm)" \
+            --prompt="🔍 Search: " \
+            --pointer="▶" \
+            --marker="✓"
     else
-        # Basic menu
-        echo "Select plugins to install (comma-separated numbers, or 'all'):"
-        local i=1
-        for entry in "${plugins[@]}"; do
-            local desc=$(echo "$entry" | cut -d'|' -f1)
-            echo "$i) $desc"
-            ((i++))
-        done
-        
+        # Basic menu (fallback when fzf not available)
+        # All prompts go to stderr
+        {
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📦 Select Plugins to Install"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "How to select:"
+            echo "  • Enter plugin numbers separated by commas (e.g., 1,3,5)"
+            echo "  • Or type 'all' to install all plugins"
+            echo ""
+            local i=1
+            for entry in "${plugins[@]}"; do
+                local desc=$(echo "$entry" | cut -d'|' -f1)
+                echo "$i) $desc"
+                ((i++))
+            done
+            echo ""
+            echo -n "Your selection: "
+        } >&2
         read -r choice
         if [[ "$choice" == "all" ]]; then
             printf '%s\n' "${plugins[@]}" | cut -d'|' -f1
