@@ -63,54 +63,60 @@ PLUGIN_NAME="$2"
 SAFE_PLUGIN_NAME=$(echo "$PLUGIN_NAME" | tr -cd '[:alnum:]_.-')
 LOG_FILE="${3:-/tmp/zsh_setup_${SAFE_PLUGIN_NAME}_$$.log}"
 
+# Redirect all output to log file (worker script runs silently)
+exec 1>>"$LOG_FILE" 2>&1
+
 # Export for subprocesses
 export ZSH_SETUP_ROOT
 
+# Suppress verbose output in worker
+export QUIET_MODE=true
+
 # Source bootstrap and initialize
-if ! source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh" 2>>"$LOG_FILE"; then
-    echo "ERROR: Failed to load bootstrap.sh" >> "$LOG_FILE"
+if ! source "$ZSH_SETUP_ROOT/lib/core/bootstrap.sh"; then
+    echo "ERROR: Failed to load bootstrap.sh"
     exit 1
 fi
 
-if ! zsh_setup::core::bootstrap::init 2>>"$LOG_FILE"; then
-    echo "ERROR: Failed to initialize bootstrap" >> "$LOG_FILE"
+if ! zsh_setup::core::bootstrap::init; then
+    echo "ERROR: Failed to initialize bootstrap"
     exit 1
 fi
 
 # Load required modules
-if ! source "$ZSH_SETUP_ROOT/lib/plugins/registry.sh" 2>>"$LOG_FILE"; then
-    echo "ERROR: Failed to load registry.sh" >> "$LOG_FILE"
+if ! source "$ZSH_SETUP_ROOT/lib/plugins/registry.sh"; then
+    echo "ERROR: Failed to load registry.sh"
     exit 1
 fi
 
-if ! source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh" 2>>"$LOG_FILE"; then
-    echo "ERROR: Failed to load installer.sh" >> "$LOG_FILE"
+if ! source "$ZSH_SETUP_ROOT/lib/plugins/installer.sh"; then
+    echo "ERROR: Failed to load installer.sh"
     exit 1
 fi
 
 # Load plugin registry
-if ! zsh_setup::plugins::registry::load 2>>"$LOG_FILE"; then
-    echo "ERROR: Failed to load plugin registry" >> "$LOG_FILE"
+if ! zsh_setup::plugins::registry::load; then
+    echo "ERROR: Failed to load plugin registry"
     exit 1
 fi
 
 # Get plugin info
-plugin_type=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "type" 2>>"$LOG_FILE")
-plugin_url=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "url" 2>>"$LOG_FILE")
+plugin_type=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "type")
+plugin_url=$(zsh_setup::plugins::registry::get "$PLUGIN_NAME" "url")
 
 if [[ -z "$plugin_type" ]]; then
-    echo "ERROR: Could not determine plugin type for $PLUGIN_NAME" >> "$LOG_FILE"
+    echo "ERROR: Could not determine plugin type for $PLUGIN_NAME"
     exit 1
 fi
 
 # Install plugin
 exit_code=0
 if [[ "$PLUGIN_NAME" == "powerlevel10k" ]]; then
-    if ! zsh_setup::plugins::installer::install_git "$PLUGIN_NAME" "$plugin_url" "theme" >>"$LOG_FILE" 2>&1; then
+    if ! zsh_setup::plugins::installer::install_git "$PLUGIN_NAME" "$plugin_url" "theme"; then
         exit_code=1
     fi
 else
-    if ! zsh_setup::plugins::installer::install "$PLUGIN_NAME" "$plugin_type" "$plugin_url" >>"$LOG_FILE" 2>&1; then
+    if ! zsh_setup::plugins::installer::install "$PLUGIN_NAME" "$plugin_type" "$plugin_url"; then
         exit_code=1
     fi
 fi
