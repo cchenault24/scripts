@@ -191,9 +191,15 @@ EOF
              [[ "$line" =~ "add-zsh-hook" ]] || \
              [[ "$line" =~ "eval.*init" ]] || \
              [[ "$line" =~ "fpath=" ]] || \
-             [[ "$line" =~ "compinit" ]]; then
+             [[ "$line" =~ ^[[:space:]]*compinit ]]; then
             # Tool setup / lazy loading
-            custom_functions+="$line"$'\n'
+            # Fix compinit to use -u flag if it doesn't have it
+            if [[ "$line" =~ ^[[:space:]]*compinit[[:space:]]*$ ]]; then
+                custom_functions+="# Use -u flag to skip ownership checks (safe when directories are trusted)"$'\n'
+                custom_functions+="compinit -u"$'\n'
+            else
+                custom_functions+="$line"$'\n'
+            fi
         elif [[ "$line" =~ ^[[:space:]]*\[.*\] ]] || \
              [[ "$line" =~ ^[[:space:]]*source[[:space:]] ]] || \
              [[ "$line" =~ ^[[:space:]]*if[[:space:]] ]] || \
