@@ -51,24 +51,30 @@ zsh_setup::config::backup::extract_custom_configs() {
         return 0
     fi
 
-    # Extract custom section (anything after "User Custom Configurations" marker)
+    # Extract custom section (anything after custom configurations marker)
+    # Look for various markers: "User Custom", "Local User Customizations", etc.
     local custom_section=""
     local in_custom_section=false
+    local found_marker=false
 
     while IFS= read -r line; do
-        # Check for custom section marker
-        if [[ "$line" =~ "User Custom Configurations" ]]; then
+        # Check for custom section markers (flexible matching)
+        if [[ "$line" =~ (User.*Custom|Local.*Custom|Custom.*Config) ]] && [[ "$line" =~ ^[[:space:]]*# ]]; then
             in_custom_section=true
+            found_marker=true
             continue
         fi
 
-        # Skip the section header and source statement
+        # Collect content after marker
         if [[ "$in_custom_section" == "true" ]]; then
+            # Skip comment lines, blank lines, and the source statement itself
             if [[ "$line" =~ ^[[:space:]]*#.*$ ]] || \
                [[ "$line" =~ "source.*zshrc.local" ]] || \
+               [[ "$line" =~ ^\[.*zshrc.local.*\] ]] || \
                [[ -z "$line" ]]; then
                 continue
             fi
+            # Add non-empty content
             custom_section+="$line"$'\n'
         fi
     done < "$zshrc_path"
