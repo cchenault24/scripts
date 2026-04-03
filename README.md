@@ -84,8 +84,8 @@ chmod +x mac-cleanup.sh
 ```bash
 git clone https://github.com/yourusername/scripts.git
 cd scripts/zsh-setup
-chmod +x bin/zsh-setup
-./bin/zsh-setup install
+chmod +x zsh-setup
+./zsh-setup install
 ```
 
 ### Home Network Monitor

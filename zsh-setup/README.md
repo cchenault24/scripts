@@ -9,9 +9,13 @@ This project provides a streamlined way to set up a powerful Zsh environment wit
 ## Features
 
 - **Automated Installation**: One-command setup of Zsh, Oh My Zsh, and plugins
+- **Custom Configuration Preservation**: `.zshrc.local` support keeps your customizations safe across updates
 - **Configurable Plugin Selection**: Interactive menu to choose which plugins to install
+- **Security Hardened**: Input sanitization, secure file permissions, XDG-compliant state management
+- **Idempotent**: Safe to run multiple times without losing custom configurations
 - **Smart Configuration**: Generates a comprehensive `.zshrc` based on installed plugins
-- **Backup & Safety**: Automatically backs up existing configurations
+- **Comprehensive Testing**: 12+ security tests, shellcheck integration, CI-ready
+- **Backup & Safety**: Automatically backs up existing configurations with timestamped backups
 - **Clean Uninstallation**: Complete removal option if you want to revert changes
 
 ## Architecture
@@ -124,11 +128,39 @@ Install command options:
 --skip-ohmyzsh      Skip Oh My Zsh installation
 --skip-plugins      Skip plugin installation
 --no-shell-change   Do not change the default shell to Zsh
+--no-privileges     Run without requiring sudo (skips privilege-requiring operations)
 --quiet             Suppress verbose output
 --dry-run           Preview changes without executing
 ```
 
-## Customization
+## Custom Configurations
+
+### Preserving Your Custom Settings
+
+zsh-setup supports a **`.zshrc.local`** file for your custom configurations. This file is **never overwritten** and is automatically sourced by the generated `.zshrc`.
+
+**Quick Start:**
+```bash
+# Option 1: Automatic migration during install
+./zsh-setup install
+# Your custom configs are automatically extracted to ~/.zshrc.local
+
+# Option 2: Manual migration first
+./migrate-custom-configs.sh
+./zsh-setup install
+
+# Option 3: Create manually
+nano ~/.zshrc.local
+# Add your custom aliases, functions, and settings
+```
+
+**Benefits:**
+- ✅ Your customizations survive updates and reinstalls
+- ✅ Clean separation between generated and custom configs
+- ✅ Safe to run `zsh-setup install` multiple times
+- ✅ Automatic backup of existing configurations
+
+📄 **[Complete Custom Configuration Guide](./CUSTOM_CONFIGS.md)**
 
 ### Adding Custom Plugins
 
@@ -158,13 +190,7 @@ plugin_name=dependency1,dependency2,...
 If you want to revert all changes and remove the Zsh configuration:
 
 ```bash
-zsh-setup uninstall
-```
-
-Or using the direct path:
-
-```bash
-./bin/zsh-setup uninstall
+./zsh-setup uninstall
 ```
 
 This will:
@@ -237,9 +263,22 @@ Run with `--verbose` flag for detailed output:
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## Documentation
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Modular architecture and design principles
+- **[SECURITY.md](./SECURITY.md)** - Security policy and threat model
+- **[CUSTOM_CONFIGS.md](./CUSTOM_CONFIGS.md)** - Guide to preserving custom configurations
+- **[docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)** - Development setup and contributing guide
+
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please read [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) for development setup, code standards, and testing guidelines.
+
+Before contributing:
+1. Install shellcheck: `brew install shellcheck`
+2. Run tests: `tests/test_runner.sh all`
+3. Follow code standards and security guidelines
+4. Add tests for new features
 
 ## Acknowledgments
 
