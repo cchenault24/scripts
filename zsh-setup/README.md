@@ -96,6 +96,12 @@ The scripts can install and configure many popular Zsh plugins including:
    zsh-setup install
    ```
 
+   **Interactive Plugin Selection:**
+   - Use **↑↓ arrow keys** to navigate
+   - Press **Tab** to select/deselect multiple plugins
+   - Press **Enter** to confirm and continue
+   - Type to search/filter plugins
+
 > **💡 Tip**: Your existing `.zshrc` will be backed up to `~/.zsh_backup/` and custom configs automatically preserved in `~/.zshrc.local`. See the **[Restore Guide](./RESTORE.md)** for rollback options.
 
 ## Usage

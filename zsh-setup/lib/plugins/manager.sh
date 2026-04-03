@@ -434,7 +434,7 @@ zsh_setup::plugins::manager::_show_selection_menu() {
     local plugins=()
     local root="${ZSH_SETUP_ROOT:-}"
     local plugins_file="${root}/plugins.conf"
-    
+
     # Load plugins from config
     if [[ -f "$plugins_file" ]]; then
         while IFS='|' read -r name type url description; do
@@ -442,22 +442,51 @@ zsh_setup::plugins::manager::_show_selection_menu() {
             plugins+=("$description - $name|$name|$type")
         done < "$plugins_file"
     fi
-    
+
     # Use fzf if available, otherwise fallback
     if command -v fzf &>/dev/null; then
+        # Show helpful instructions
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📦 Select Plugins to Install"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "How to use:"
+        echo "  ↑↓     Navigate up/down"
+        echo "  Tab    Select/deselect (you can choose multiple)"
+        echo "  Enter  Confirm selection and continue"
+        echo "  Esc    Cancel"
+        echo ""
+        echo "Tip: You can search by typing to filter plugins"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+
         local height=$((${#plugins[@]} + 2))
         height=$((height > 20 ? 20 : height))
-        printf '%s\n' "${plugins[@]}" | cut -d'|' -f1 | fzf --multi --height="$height"
+        printf '%s\n' "${plugins[@]}" | cut -d'|' -f1 | fzf --multi --height="$height" \
+            --header="Select plugins (Tab to select, Enter to confirm)" \
+            --prompt="🔍 Search: " \
+            --pointer="▶" \
+            --marker="✓"
     else
-        # Basic menu
-        echo "Select plugins to install (comma-separated numbers, or 'all'):"
+        # Basic menu (fallback when fzf not available)
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📦 Select Plugins to Install"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "How to select:"
+        echo "  • Enter plugin numbers separated by commas (e.g., 1,3,5)"
+        echo "  • Or type 'all' to install all plugins"
+        echo ""
         local i=1
         for entry in "${plugins[@]}"; do
             local desc=$(echo "$entry" | cut -d'|' -f1)
             echo "$i) $desc"
             ((i++))
         done
-        
+        echo ""
+        echo -n "Your selection: "
         read -r choice
         if [[ "$choice" == "all" ]]; then
             printf '%s\n' "${plugins[@]}" | cut -d'|' -f1
