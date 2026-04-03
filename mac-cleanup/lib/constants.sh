@@ -15,14 +15,12 @@ MC_BYTES_PER_TB=1099511627776
 MC_MIN_BACKUP_SIZE=$MC_BYTES_PER_MB  # Skip backup for directories smaller than 1MB
 MC_MIN_DIR_SIZE=4096  # Minimum directory size to consider (4KB overhead)
 
-# Temporary file patterns
+# Temporary file configuration
+# SEC-6: Use mktemp for secure temp file creation instead of predictable patterns
+# No longer using PID-based patterns like "mac-cleanup-$$.tmp"
 MC_TEMP_DIR="/tmp"
 MC_TEMP_PREFIX="mac-cleanup"
-MC_TEMP_OUTPUT_PATTERN="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-$$.tmp"
-MC_TEMP_PROGRESS_PATTERN="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-$$.tmp"
-MC_TEMP_SPACE_PATTERN="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-space-$$.tmp"
-MC_TEMP_SWEEP_PATTERN="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-$$.tmp"
-MC_TEMP_SIZE_PATTERN="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-size-$$.tmp"
+# Note: Individual temp files should be created using create_secure_temp_file() from utils.sh
 
 # Backup directory fallback
 MC_BACKUP_FALLBACK_DIR="${MC_TEMP_DIR}/mac-cleanup-backups"

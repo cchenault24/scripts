@@ -8,6 +8,33 @@ set -euo pipefail  # Exit on error, undefined vars, pipe failures
 # Size calculation cache (associative array)
 typeset -A MC_SIZE_CACHE
 
+# SEC-6: Create secure temporary files using mktemp
+# Usage: create_secure_temp_file "prefix"
+# Returns: Path to newly created temp file with mode 600
+create_secure_temp_file() {
+  local prefix="${1:-mac-cleanup}"
+
+  # Use mktemp with random suffix for secure temp file creation
+  # -t flag adds prefix, XXXXXXXXXX provides 10 random characters
+  local temp_file=""
+  temp_file=$(mktemp -t "${prefix}.XXXXXXXXXX" 2>/dev/null)
+
+  if [[ -z "$temp_file" || ! -f "$temp_file" ]]; then
+    log_message "ERROR" "Failed to create secure temp file with prefix: $prefix"
+    return 1
+  fi
+
+  # Set restrictive permissions (owner read/write only)
+  chmod 600 "$temp_file" 2>/dev/null || {
+    log_message "ERROR" "Failed to set permissions on temp file: $temp_file"
+    rm -f "$temp_file" 2>/dev/null
+    return 1
+  }
+
+  echo "$temp_file"
+  return 0
+}
+
 # Helper function to safely write to progress file with locking (SAFE-7)
 # Phase 4.2: Enhanced with better error handling and cleanup
 _write_progress_file() {
