@@ -508,3 +508,31 @@ def capture_prints(capsys):
         captured = capsys.readouterr()
         return captured.out
     return _get_output
+
+
+@pytest.fixture
+def mock_hw_info():
+    """Mock hardware info for tests (used by new unit tests)."""
+    hw = hardware.HardwareInfo(
+        os_name="Darwin",
+        os_version="14.0",
+        macos_version="14.0",
+        cpu_brand="Apple M1 Max",
+        cpu_arch="arm64",
+        cpu_cores=10,
+        cpu_perf_cores=8,
+        cpu_eff_cores=2,
+        ram_gb=32.0,
+        gpu_name="Apple M1 Max",
+        gpu_vram_gb=0,
+        gpu_cores=32,
+        neural_engine_cores=16,
+        has_nvidia=False,
+        has_apple_silicon=True,
+        apple_chip_model="M1 Max",
+        usable_ram_gb=32.0,
+        ollama_version="0.13.5",
+        ollama_available=True,
+        ollama_api_endpoint="http://localhost:11434/v1"
+    )
+    return hw

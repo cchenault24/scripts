@@ -1,3 +1,4 @@
 # Test dependencies for shared ai_model tests
 pytest>=7.0.0
 pytest-cov>=4.0.0
+pytest-mock>=3.11.1
