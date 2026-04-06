@@ -240,8 +240,9 @@ def download_model_from_hf(
                 return False, "HuggingFace CLI ('hf' command) not found. Install prerequisites first."
 
         # Download with progress and timeout
+        # Note: --local-dir-use-symlinks removed as it's not available in all hf CLI versions
         code, output_lines = utils.stream_command_output(
-            [hf_cli_path, "download", repo_id, filename, "--local-dir-use-symlinks", "False"],
+            [hf_cli_path, "download", repo_id, filename],
             keywords=["Downloading", "Download", "fetching", "%", "MB", "GB", "100%", "done"],
             show_progress=show_progress,
             timeout=TIMEOUT_MODEL_DOWNLOAD
