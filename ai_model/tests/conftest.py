@@ -2,7 +2,7 @@
 Pytest configuration and shared fixtures for ai_model setup tests.
 
 Provides common mocks, fixtures, and utilities used across all test files.
-Supports both ollama and docker backends via parametrization.
+Ollama-only architecture as of v4.1 (Docker backend removed).
 """
 
 import json
@@ -14,34 +14,13 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-# Add backend directories to path for imports
-# Determine which backend to use from environment variable
-_ollama_path = str(Path(__file__).parent.parent / "ollama")
-_docker_path = str(Path(__file__).parent.parent / "docker")
+# Add project root to path for imports (lib/ is at root level as of v4.1)
+_project_root = str(Path(__file__).parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
-# Only add the correct backend path based on TEST_BACKEND env var
-# This prevents import conflicts
-_test_backend = os.environ.get('TEST_BACKEND', '').lower()
-if _test_backend == 'ollama':
-    if _ollama_path not in sys.path:
-        sys.path.insert(0, _ollama_path)
-    # Remove docker path if present
-    if _docker_path in sys.path:
-        sys.path.remove(_docker_path)
-elif _test_backend == 'docker':
-    if _docker_path not in sys.path:
-        sys.path.insert(0, _docker_path)
-    # Remove ollama path if present
-    if _ollama_path in sys.path:
-        sys.path.remove(_ollama_path)
-else:
-    # Both backends - add both (for parametrized tests)
-    if _ollama_path not in sys.path:
-        sys.path.insert(0, _ollama_path)
-    if _docker_path not in sys.path:
-        sys.path.insert(0, _docker_path)
-
-# Hardware will be imported dynamically based on backend_type in fixtures
+# Import from unified lib/ directory
+from lib import hardware
 
 
 # =============================================================================
@@ -49,16 +28,10 @@ else:
 # =============================================================================
 
 def pytest_generate_tests(metafunc):
-    """Generate backend_type parameter based on environment or default to both."""
+    """Generate backend_type parameter (Ollama only as of v4.1)."""
     if "backend_type" in metafunc.fixturenames:
-        import os
-        backend_env = os.environ.get('TEST_BACKEND')
-        if backend_env:
-            # Run only for specified backend
-            metafunc.parametrize("backend_type", [backend_env], indirect=False)
-        else:
-            # Run for both backends
-            metafunc.parametrize("backend_type", ["ollama", "docker"], indirect=False)
+        # Ollama-only architecture (v4.1+)
+        metafunc.parametrize("backend_type", ["ollama"], indirect=False)
 
 
 @pytest.fixture
@@ -69,37 +42,27 @@ def backend_type(request):
 
 @pytest.fixture
 def backend_module(backend_type):
-    """Dynamically import the correct backend module."""
-    if backend_type == "ollama":
-        if _ollama_path not in sys.path:
-            sys.path.insert(0, _ollama_path)
-        from lib import ollama as backend_module
-    else:
-        if _docker_path not in sys.path:
-            sys.path.insert(0, _docker_path)
-        from lib import docker as backend_module
+    """Import Ollama backend module (Docker removed in v4.1)."""
+    from lib import ollama as backend_module
     return backend_module
 
 
 @pytest.fixture
 def model_name_attr(backend_type):
-    """Return the model name attribute for the current backend."""
-    return "ollama_name" if backend_type == "ollama" else "docker_name"
+    """Return the model name attribute (ollama_name only)."""
+    return "ollama_name"
 
 
 @pytest.fixture
 def api_endpoint(backend_type):
-    """Return the API endpoint for the current backend."""
-    if backend_type == "ollama":
-        return "http://localhost:11434/v1"
-    else:
-        return "http://localhost:12434/v1"
+    """Return the API endpoint (Ollama only)."""
+    return "http://localhost:11434/v1"
 
 
 @pytest.fixture
 def setup_script_name(backend_type):
-    """Return the setup script name for the current backend."""
-    return "ollama-llm-setup" if backend_type == "ollama" else "docker-llm-setup"
+    """Return the setup script name (unified as of v4.1)."""
+    return "setup"
 
 
 # =============================================================================
@@ -141,20 +104,13 @@ def _create_hardware_info(ram_gb, tier, backend_type, **kwargs):
         "usable_ram_gb": kwargs.get("usable_ram_gb", ram_gb),
     }
     
-    # Add backend-specific fields
-    if backend_type == "ollama":
-        base_info.update({
-            "ollama_version": kwargs.get("ollama_version", "0.13.5"),
-            "ollama_available": kwargs.get("ollama_available", True),
-            "ollama_api_endpoint": kwargs.get("ollama_api_endpoint", "http://localhost:11434/v1"),
-        })
-    else:
-        base_info.update({
-            "docker_version": kwargs.get("docker_version", "27.0.3"),
-            "docker_model_runner_available": kwargs.get("docker_model_runner_available", True),
-            "dmr_api_endpoint": kwargs.get("dmr_api_endpoint", "http://localhost:12434/v1"),
-        })
-    
+    # Add Ollama-specific fields (Docker removed in v4.1)
+    base_info.update({
+        "ollama_version": kwargs.get("ollama_version", "0.13.5"),
+        "ollama_available": kwargs.get("ollama_available", True),
+        "ollama_api_endpoint": kwargs.get("ollama_api_endpoint", "http://localhost:11434/v1"),
+    })
+
     return hardware.HardwareInfo(**base_info)
 
 
@@ -530,26 +486,19 @@ def mock_ssl_context():
 @pytest.fixture(autouse=True)
 def reset_module_state():
     """Reset any module-level state between tests."""
-    # Reset SSL context singleton
-    # Try both paths
-    for path in [_ollama_path, _docker_path]:
-        if path in sys.path:
-            try:
-                from lib import utils
-                utils._UNVERIFIED_SSL_CONTEXT = None
-                break
-            except ImportError:
-                continue
+    # Reset SSL context singleton (unified lib as of v4.1)
+    try:
+        from lib import utils
+        utils._UNVERIFIED_SSL_CONTEXT = None
+    except ImportError:
+        pass
     yield
     # Cleanup after test
-    for path in [_ollama_path, _docker_path]:
-        if path in sys.path:
-            try:
-                from lib import utils
-                utils._UNVERIFIED_SSL_CONTEXT = None
-                break
-            except ImportError:
-                continue
+    try:
+        from lib import utils
+        utils._UNVERIFIED_SSL_CONTEXT = None
+    except ImportError:
+        pass
 
 
 @pytest.fixture

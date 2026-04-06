@@ -32,61 +32,33 @@ from lib.model_selector import RecommendedModel, ModelRole
 
 @pytest.fixture
 def sample_models(backend_type, model_name_attr):
-    """Sample models for config generation."""
-    if backend_type == "ollama":
-        return [
-            RecommendedModel(
-                name="Qwen2.5 Coder 7B",
-                ollama_name="qwen2.5-coder:7b",
-                ram_gb=5.0,
-                role=ModelRole.CHAT,
-                roles=["chat", "edit"],
-                description="Primary model"
-            ),
-            RecommendedModel(
-                name="StarCoder2 3B",
-                ollama_name="starcoder2:3b",
-                ram_gb=2.0,
-                role=ModelRole.AUTOCOMPLETE,
-                roles=["autocomplete"],
-                description="Autocomplete model"
-            ),
-            RecommendedModel(
-                name="Nomic Embed",
-                ollama_name="nomic-embed-text",
-                ram_gb=0.3,
-                role=ModelRole.EMBED,
-                roles=["embed"],
-                description="Embedding model"
-            ),
-        ]
-    else:  # docker
-        return [
-            RecommendedModel(
-                name="Qwen2.5 Coder 7B",
-                docker_name="ai/qwen2.5-coder:7b",
-                ram_gb=5.0,
-                role=ModelRole.CHAT,
-                roles=["chat", "edit"],
-                description="Primary model"
-            ),
-            RecommendedModel(
-                name="StarCoder2 3B",
-                docker_name="ai/starcoder2:3b",
-                ram_gb=2.0,
-                role=ModelRole.AUTOCOMPLETE,
-                roles=["autocomplete"],
-                description="Autocomplete model"
-            ),
-            RecommendedModel(
-                name="Nomic Embed",
-                docker_name="ai/nomic-embed-text-v1.5",
-                ram_gb=0.3,
-                role=ModelRole.EMBED,
-                roles=["embed"],
-                description="Embedding model"
-            ),
-        ]
+    """Sample models for config generation (Ollama only as of v4.1)."""
+    return [
+        RecommendedModel(
+            name="Qwen2.5 Coder 7B",
+            ollama_name="qwen2.5-coder:7b",
+            ram_gb=5.0,
+            role=ModelRole.CHAT,
+            roles=["chat", "edit"],
+            description="Primary model"
+        ),
+        RecommendedModel(
+            name="StarCoder2 3B",
+            ollama_name="starcoder2:3b",
+            ram_gb=2.0,
+            role=ModelRole.AUTOCOMPLETE,
+            roles=["autocomplete"],
+            description="Autocomplete model"
+        ),
+        RecommendedModel(
+            name="Nomic Embed",
+            ollama_name="nomic-embed-text",
+            ram_gb=0.3,
+            role=ModelRole.EMBED,
+            roles=["embed"],
+            description="Embedding model"
+        ),
+    ]
 
 
 # =============================================================================
