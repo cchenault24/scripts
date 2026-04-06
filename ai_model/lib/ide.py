@@ -1,11 +1,11 @@
 """
-IDE integration functionality for VS Code, Cursor, and IntelliJ IDEA.
+IDE integration functionality for IntelliJ IDEA with OpenCode.
 
 Provides functions to:
-- Auto-detect installed IDEs (VS Code, Cursor, IntelliJ IDEA)
-- Install extensions/plugins
-- Restart IDEs
-- Display next steps
+- Auto-detect IntelliJ IDEA installation
+- Verify OpenCode plugin installation
+- Configure OpenCode for Ollama
+- Display setup instructions
 """
 
 import os
@@ -293,6 +293,78 @@ def install_intellij_plugin(plugin_id: str) -> bool:
         code, stdout, stderr = utils.run_command([idea_path, "--install-plugin", plugin_id], timeout=60)
     
     return code == 0
+
+
+# =============================================================================
+# OPENCODE PLUGIN DETECTION
+# =============================================================================
+
+def get_intellij_config_dir() -> Optional[Path]:
+    """
+    Find IntelliJ IDEA configuration directory.
+
+    Returns:
+        Path to config directory if found, None otherwise.
+    """
+    if platform.system() == "Darwin":
+        # macOS: ~/Library/Application Support/JetBrains/
+        base_dir = Path.home() / "Library/Application Support/JetBrains"
+    elif platform.system() == "Linux":
+        # Linux: ~/.config/JetBrains/
+        base_dir = Path.home() / ".config/JetBrains"
+    elif platform.system() == "Windows":
+        # Windows: %APPDATA%/JetBrains/
+        base_dir = Path(os.environ.get("APPDATA", "")) / "JetBrains"
+    else:
+        return None
+
+    if not base_dir.exists():
+        return None
+
+    # Find most recent IntelliJ directory (e.g., IntelliJIdea2024.3)
+    idea_dirs = sorted(base_dir.glob("IntelliJIdea*"), reverse=True)
+    if idea_dirs:
+        return idea_dirs[0]
+
+    return None
+
+
+def verify_opencode_plugin() -> bool:
+    """
+    Check if OpenCode plugin is installed in IntelliJ IDEA.
+
+    Returns:
+        True if OpenCode plugin is detected, False otherwise.
+    """
+    config_dir = get_intellij_config_dir()
+    if not config_dir:
+        return False
+
+    # Check plugins directory for OpenCode
+    plugins_dir = config_dir / "plugins"
+    if not plugins_dir.exists():
+        return False
+
+    # Look for OpenCode plugin directory
+    # Plugin ID might be "com.opencode" or similar
+    opencode_patterns = [
+        "opencode",
+        "OpenCode",
+        "com.opencode",
+    ]
+
+    for plugin_dir in plugins_dir.iterdir():
+        if plugin_dir.is_dir():
+            dir_name_lower = plugin_dir.name.lower()
+            if any(pattern.lower() in dir_name_lower for pattern in opencode_patterns):
+                return True
+
+    return False
+
+
+def get_opencode_plugin_url() -> str:
+    """Get JetBrains marketplace URL for OpenCode plugin."""
+    return "https://plugins.jetbrains.com/plugin/30681-opencode"
 
 
 def restart_vscode() -> bool:
