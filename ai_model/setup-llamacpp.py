@@ -38,6 +38,7 @@ if str(project_root) not in sys.path:
 # Import refactored modules
 from lib import hardware
 from lib import llamacpp
+from lib import model_catalog
 from lib import opencode
 from lib import opencode_builder
 from lib import prerequisites
@@ -48,58 +49,9 @@ from lib import utils
 _logger = logging.getLogger(__name__)
 
 
-# Model catalog (simplified - should move to YAML config eventually)
-MODELS = {
-    "2b": {
-        "name": "Gemma 4 2B (Efficient)",
-        "hf_repo": "ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
-        "ram_gb": 2.5,
-        "min_ram": 4,
-        "max_ram": 12,
-        "description": "Fast, efficient model for basic coding tasks.",
-        "contexts": [(32768, "32K context (~3GB RAM)")],
-    },
-    "4b": {
-        "name": "Gemma 4 4B (Balanced)",
-        "hf_repo": "ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M",
-        "ram_gb": 4.5,
-        "min_ram": 8,
-        "max_ram": 16,
-        "description": "Balanced performance and quality.",
-        "contexts": [(32768, "32K context (~5GB RAM)")],
-    },
-    "26b": {
-        "name": "Gemma 4 26B (High Quality)",
-        "hf_repo": "ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M",
-        "ram_gb": 16.0,
-        "min_ram": 16,
-        "max_ram": 32,
-        "description": "High quality 26B model, excellent balance.",
-        "contexts": [
-            (32768, "32K context (~17GB RAM)"),
-            (65536, "64K context (~20GB RAM)"),
-            (131072, "128K context (~25GB RAM)"),
-        ],
-    },
-    "31b": {
-        "name": "Gemma 4 31B (Maximum Quality)",
-        "hf_repo": "ggml-org/gemma-4-31B-it-GGUF:Q4_K_M",
-        "ram_gb": 20.0,
-        "min_ram": 24,
-        "max_ram": 64,
-        "description": "Largest model, best quality for high-RAM systems.",
-        "contexts": [
-            (32768, "32K context (~21GB RAM)"),
-            (65536, "64K context (~24GB RAM)"),
-            (131072, "128K context (~28GB RAM)"),
-        ],
-    },
-}
-
-
 def select_model_interactive(hw_info: hardware.HardwareInfo) -> Tuple[str, str, int]:
     """
-    Interactive model selection based on hardware.
+    Interactive model selection based on hardware using unified catalog.
 
     Returns:
         Tuple of (model_key, hf_repo, context_size)
@@ -108,36 +60,43 @@ def select_model_interactive(hw_info: hardware.HardwareInfo) -> Tuple[str, str, 
     ui.print_subheader("Model Selection")
     print()
 
+    # Get llama.cpp model catalog
+    catalog = model_catalog.get_model_catalog(model_catalog.Backend.LLAMACPP)
+
     # Filter models by RAM
-    suitable_models = {k: v for k, v in MODELS.items() if v["min_ram"] <= hw_info.ram_gb}
+    suitable_models = model_catalog.filter_models_by_ram(catalog, hw_info.ram_gb)
 
     if not suitable_models:
         ui.print_error(f"Insufficient RAM ({hw_info.ram_gb:.0f}GB) for any Gemma 4 model")
         raise SystemExit("Hardware requirements not met: Minimum 4GB RAM required")
 
-    # Find recommended model
-    recommended_key = None
-    for key, model in suitable_models.items():
-        if model["min_ram"] <= hw_info.ram_gb <= model["max_ram"]:
-            recommended_key = key
+    # Get recommended model
+    recommended_model = model_catalog.get_recommended_model(
+        model_catalog.Backend.LLAMACPP,
+        hw_info
+    )
 
-    # Display options
+    # Display hardware info
     print(f"Detected: {hw_info.apple_chip_model or hw_info.cpu_brand}, {hw_info.ram_gb:.0f}GB RAM")
     print()
     print("Available models:")
     print()
 
+    # Display model options
     for i, (key, model) in enumerate(suitable_models.items(), 1):
-        is_recommended = (key == recommended_key)
+        is_recommended = (recommended_model and model == recommended_model)
         marker = ui.colorize(" ★ RECOMMENDED", ui.Colors.GREEN) if is_recommended else ""
 
-        print(f"  {i}. {ui.colorize(model['name'], ui.Colors.CYAN)}{marker}")
-        print(f"     RAM: ~{model['ram_gb']}GB")
-        print(f"     {model['description']}")
+        print(f"  {i}. {ui.colorize(model.name, ui.Colors.CYAN)}{marker}")
+        print(f"     RAM: ~{model.ram_gb}GB")
+        print(f"     {model.description}")
         print()
 
     # Prompt for selection
-    default_idx = list(suitable_models.keys()).index(recommended_key) + 1 if recommended_key else 1
+    model_keys = list(suitable_models.keys())
+    default_idx = model_keys.index(
+        next((k for k, v in suitable_models.items() if v == recommended_model), model_keys[0])
+    ) + 1 if recommended_model else 1
 
     while True:
         try:
@@ -145,7 +104,7 @@ def select_model_interactive(hw_info: hardware.HardwareInfo) -> Tuple[str, str, 
             choice_num = int(choice)
 
             if 1 <= choice_num <= len(suitable_models):
-                model_key = list(suitable_models.keys())[choice_num - 1]
+                model_key = model_keys[choice_num - 1]
                 selected_model = suitable_models[model_key]
                 break
 
@@ -156,33 +115,39 @@ def select_model_interactive(hw_info: hardware.HardwareInfo) -> Tuple[str, str, 
             print()
             raise SystemExit("Setup cancelled")
 
-    # Select context size
+    # Select context size (if multiple options available)
+    if len(selected_model.contexts) > 1:
+        print()
+        print("Context window options:")
+        for i, ctx_opt in enumerate(selected_model.contexts, 1):
+            print(f"  {i}. {ctx_opt.description}")
+
+        default_ctx = 1
+        while True:
+            try:
+                choice = input(f"Select context (1-{len(selected_model.contexts)}) [{default_ctx}]: ").strip() or str(default_ctx)
+                choice_num = int(choice)
+
+                if 1 <= choice_num <= len(selected_model.contexts):
+                    context_option = selected_model.contexts[choice_num - 1]
+                    context_size = context_option.size
+                    break
+
+                print(ui.colorize(f"Please enter 1-{len(selected_model.contexts)}", ui.Colors.RED))
+            except ValueError:
+                print(ui.colorize("Please enter a valid number", ui.Colors.RED))
+            except KeyboardInterrupt:
+                print()
+                raise SystemExit("Setup cancelled")
+    else:
+        # Use default context
+        context_option = selected_model.get_default_context()
+        context_size = context_option.size
+
     print()
-    print("Context window options:")
-    for i, (ctx, desc) in enumerate(selected_model["contexts"], 1):
-        print(f"  {i}. {desc}")
+    ui.print_success(f"Selected: {selected_model.name} with {context_size} context")
 
-    default_ctx = 1
-    while True:
-        try:
-            choice = input(f"Select context (1-{len(selected_model['contexts'])}) [{default_ctx}]: ").strip() or str(default_ctx)
-            choice_num = int(choice)
-
-            if 1 <= choice_num <= len(selected_model["contexts"]):
-                context_size = selected_model["contexts"][choice_num - 1][0]
-                break
-
-            print(ui.colorize(f"Please enter 1-{len(selected_model['contexts'])}", ui.Colors.RED))
-        except ValueError:
-            print(ui.colorize("Please enter a valid number", ui.Colors.RED))
-        except KeyboardInterrupt:
-            print()
-            raise SystemExit("Setup cancelled")
-
-    print()
-    ui.print_success(f"Selected: {selected_model['name']} with {context_size} context")
-
-    return model_key, selected_model["hf_repo"], context_size
+    return model_key, selected_model.get_identifier(), context_size
 
 
 def main(argv: Optional[list] = None) -> int:
