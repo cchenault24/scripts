@@ -5,6 +5,7 @@ Handles llama.cpp installation via Homebrew and GGUF model downloads from Huggin
 """
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +21,50 @@ TIMEOUT_STANDARD = 60
 TIMEOUT_MODERATE = 180
 TIMEOUT_BUILD = 600
 TIMEOUT_MODEL_DOWNLOAD = 7200  # 2 hours
+
+
+def ensure_hf_token() -> Optional[str]:
+    """
+    Ensure HuggingFace token is available for authenticated downloads.
+
+    Checks environment variable HF_TOKEN, prompts if not found.
+
+    Returns:
+        Token string if available, None if user skips
+
+    Note:
+        Some models require authentication. Token can be obtained from:
+        https://huggingface.co/settings/tokens
+    """
+    # Check environment first
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        ui.print_success("HuggingFace token found in environment")
+        return token
+
+    # Prompt user
+    ui.print_warning("HuggingFace token not found in environment (HF_TOKEN)")
+    print()
+    print("Some models require authentication to download.")
+    print("You can:")
+    print("  1. Set environment variable: export HF_TOKEN=hf_...")
+    print("  2. Enter token now (will not be saved)")
+    print("  3. Skip (may fail for gated models)")
+    print()
+    print("Get token from: https://huggingface.co/settings/tokens")
+    print()
+
+    if ui.prompt_yes_no("Do you have a HuggingFace token to enter?", default=False):
+        token = input("Enter HF_TOKEN: ").strip()
+        if token:
+            # Set for current session only
+            os.environ["HF_TOKEN"] = token
+            ui.print_success("Token set for this session")
+            return token
+
+    ui.print_info("Continuing without HuggingFace token")
+    ui.print_warning("Some models may fail to download")
+    return None
 
 
 def install_llama_cpp_homebrew(
@@ -146,6 +191,9 @@ def download_model_from_hf(
         # Security: Validate filename
         if not utils.validate_filename(filename):
             return False, f"Invalid filename: {filename} (contains illegal characters)"
+
+        # Ensure HuggingFace token is available (for authenticated/gated models)
+        ensure_hf_token()
 
         # Check if model is already cached
         cache_dir = Path.home() / ".cache/huggingface/hub"

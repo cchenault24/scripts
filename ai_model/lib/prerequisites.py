@@ -100,6 +100,20 @@ def install_via_pipx(package_name: str, timeout: int = 180) -> Tuple[bool, str]:
     if code != 0:
         return False, f"pipx installation failed: {''.join(output_lines[-10:])}"
 
+    # For huggingface-hub, inject pip-system-certs for corporate SSL/proxy support
+    if "huggingface-hub" in package_name:
+        ui.print_info("Injecting pip-system-certs for SSL certificate support...")
+        code, stdout, stderr = utils.run_command(
+            ["pipx", "inject", "huggingface-hub", "pip-system-certs"],
+            timeout=60
+        )
+
+        if code != 0:
+            ui.print_warning(f"Could not inject pip-system-certs: {stderr}")
+            ui.print_info("This may cause SSL issues on corporate networks")
+        else:
+            ui.print_success("SSL certificate support enabled")
+
     return True, f"Installed {package_name} via pipx"
 
 
