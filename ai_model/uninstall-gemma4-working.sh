@@ -35,9 +35,11 @@ MODEL_REPO="ggml-org/gemma-4-26B-A4B-it-GGUF"
 
 # Print functions
 print_header() {
-    echo -e "\n${BLUE}${'═' * 60}${NC}"
+    echo ""
+    echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}${'═' * 60}${NC}\n"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+    echo ""
 }
 
 print_status() {
