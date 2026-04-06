@@ -717,383 +717,271 @@ def _create_rich_progress_bar() -> 'Progress':
     )
 
 
-def _pull_model_single_attempt(model_name: str, show_progress: bool = True, use_api: bool = True) -> Tuple[bool, str]:
+# =============================================================================
+# Phase 2: Progress Handlers
+# =============================================================================
+
+def _monitor_rich_progress(
+    process: subprocess.Popen,
+    model_name: str,
+    progress: 'Progress',
+    task: 'TaskID'
+) -> List[str]:
     """
-    Execute a single ollama pull attempt without retries.
-    
+    Monitor subprocess stderr and update rich progress bar.
+
+    Args:
+        process: Running subprocess (ollama pull)
+        model_name: Model being pulled
+        progress: Rich Progress instance
+        task: Progress task ID
+
     Returns:
-        Tuple of (success, error_message):
-        - success: True if the command succeeded
-        - error_message: Error details if failed, empty string if successful
+        List of output lines for error reporting
     """
-    # Try API first (preferred method with clean JSON progress)
-    if use_api:
-        try:
-            return _pull_model_via_api(model_name, show_progress)
-        except Exception as e:
-            # Fall back to CLI if API fails
-            if show_progress:
-                ui.print_warning(f"API pull failed, falling back to CLI: {e}")
-    
-    # Fallback to CLI method (parsing ANSI output)
-    process = None
-    output_lines: List[str] = []
-    
-    try:
-        # Create clean environment without SSH_AUTH_SOCK to prevent Go HTTP client issues
-        clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
-        
-        if show_progress:
-            # Try to use rich progress bar, fallback to simple output
-            try:
-                from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
-                from rich.console import Console
-                use_rich = True
-            except ImportError:
-                use_rich = False
-            
-            # Show live progress with separate stdout/stderr for better error capture
-            process = subprocess.Popen(
-                ["ollama", "pull", model_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                env=clean_env  # Pass clean environment
-            )
-            
-            if use_rich:
-                # #region agent log
-                # Log that we're using rich
-                import json as json_module
-                try:
-                    with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                        f.write(json_module.dumps({
-                            "id": f"log_{int(time.time() * 1000)}_rich_start",
-                            "timestamp": int(time.time() * 1000),
-                            "location": "validator.py:_pull_model_single_attempt:rich_start",
-                            "message": "Starting rich progress bar",
-                            "data": {"model_name": model_name, "use_rich": True},
-                            "sessionId": "debug-session",
-                            "runId": "run1"
-                        }) + "\n")
-                except Exception as e:
-                    pass  # Don't fail on logging errors
-                # #endregion
-                
-                # Use rich progress bar
-                console = Console()
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    DownloadColumn(),
-                    TransferSpeedColumn(),
-                    TimeRemainingColumn(),
-                    console=console,
-                    transient=False,
-                    refresh_per_second=10  # Refresh 10 times per second for smooth updates
-                ) as progress:
-                    # Start with a reasonable default total (will be updated when we get real size info)
-                    task = progress.add_task(f"Pulling {model_name}", total=100)  # Start with percentage-based
-                    total_bytes = None
-                    last_percent = 0
-                    
-                    # #region agent log
-                    try:
-                        with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                            f.write(json_module.dumps({
-                                "id": f"log_{int(time.time() * 1000)}_before_stderr",
-                                "timestamp": int(time.time() * 1000),
-                                "location": "validator.py:_pull_model_single_attempt:before_stderr",
-                                "message": "About to read stderr (Ollama writes progress to stderr!)",
-                                "data": {"model_name": model_name, "stderr_is_none": process.stderr is None},
-                                "sessionId": "debug-session",
-                                "runId": "run1"
-                            }) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
-                    
-                    # Read stderr for progress (Ollama writes progress to stderr, not stdout!)
-                    if process.stderr:
-                        for line in process.stderr:
-                            # #region agent log
-                            # Log raw line for debugging
-                            import json as json_module
-                            with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                                f.write(json_module.dumps({
-                                    "id": f"log_{int(time.time() * 1000)}_raw",
-                                    "timestamp": int(time.time() * 1000),
-                                    "location": "validator.py:_pull_model_single_attempt:raw_line",
-                                    "message": "Raw line from Ollama stdout",
-                                    "data": {
-                                        "model_name": model_name,
-                                        "raw_line": repr(line),
-                                        "raw_length": len(line),
-                                        "has_percent": "%" in line,
-                                        "has_pulling": "pulling" in line.lower()
-                                    },
-                                    "sessionId": "debug-session",
-                                    "runId": "run1"
-                                }) + "\n")
-                            # #endregion
-                            
-                            # Clean ANSI escape codes - be more aggressive
-                            # Remove all ANSI escape sequences including cursor positioning and OSC sequences
-                            clean_line = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', line)  # Include ? for escape sequences like [?25h
-                            clean_line = re.sub(r'\x1b\][0-9;]*', '', clean_line)  # Remove OSC sequences
-                            clean_line = clean_line.strip()
-                            
-                            # Extract progress part if line contains both progress and "pulling manifest"
-                            # Ollama sometimes appends "pulling manifest" to progress lines
-                            if "pulling manifest" in clean_line.lower() and "%" in clean_line:
-                                # Split on "pulling manifest" and take the progress part
-                                clean_line = clean_line.split("pulling manifest")[0].strip()
-                            
-                            # #region agent log
-                            # Log cleaned line
-                            with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                                f.write(json_module.dumps({
-                                    "id": f"log_{int(time.time() * 1000)}_clean",
-                                    "timestamp": int(time.time() * 1000),
-                                    "location": "validator.py:_pull_model_single_attempt:clean_line",
-                                    "message": "Cleaned line after ANSI removal",
-                                    "data": {
-                                        "model_name": model_name,
-                                        "clean_line": clean_line,
-                                        "clean_length": len(clean_line) if clean_line else 0
-                                    },
-                                    "sessionId": "debug-session",
-                                    "runId": "run1"
-                                }) + "\n")
-                            # #endregion
-                            
-                            # Skip empty lines but keep track of progress lines even if they're mostly ANSI
-                            if not clean_line and "%" not in line:
-                                continue
-                                
-                            if clean_line:
-                                output_lines.append(clean_line)
-                            
-                            # Parse Ollama progress output
-                            # Format: "pulling <hash>:   X% ▕█...▏  Y MB/Z GB   speed   time"
-                            # Or: "pulling manifest"
-                            # IMPORTANT: Check for percentage FIRST, then manifest (lines can contain both)
-                            if "pulling" in clean_line.lower() and "%" in clean_line:
-                                # Extract percentage
-                                percent_match = re.search(r'(\d+)%', clean_line)
-                                # #region agent log
-                                with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                                    f.write(json_module.dumps({
-                                        "id": f"log_{int(time.time() * 1000)}_parse",
-                                        "timestamp": int(time.time() * 1000),
-                                        "location": "validator.py:_pull_model_single_attempt:parse",
-                                        "message": "Parsing progress line",
-                                        "data": {
-                                            "model_name": model_name,
-                                            "clean_line": clean_line,
-                                            "percent_match": percent_match.group(1) if percent_match else None
-                                        },
-                                        "sessionId": "debug-session",
-                                        "runId": "run1"
-                                    }) + "\n")
-                                # #endregion
-                                
-                                if percent_match:
-                                    percent = int(percent_match.group(1))
-                                    last_percent = percent
-                                    
-                                    # Extract size info if available
-                                    # Pattern: "X MB/Y GB" or "X MB/Y MB" etc.
-                                    size_match = re.search(r'(\d+(?:\.\d+)?)\s*(MB|GB)\s*/\s*(\d+(?:\.\d+)?)\s*(MB|GB)', clean_line)
-                                    # #region agent log
-                                    with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                                        f.write(json_module.dumps({
-                                            "id": f"log_{int(time.time() * 1000)}_size",
-                                            "timestamp": int(time.time() * 1000),
-                                            "location": "validator.py:_pull_model_single_attempt:size",
-                                            "message": "Size match result",
-                                            "data": {
-                                                "model_name": model_name,
-                                                "percent": percent,
-                                                "size_match": size_match.groups() if size_match else None
-                                            },
-                                            "sessionId": "debug-session",
-                                            "runId": "run1"
-                                        }) + "\n")
-                                    # #endregion
-                                    
-                                    if size_match:
-                                        downloaded = float(size_match.group(1))
-                                        downloaded_unit = size_match.group(2)
-                                        total = float(size_match.group(3))
-                                        total_unit = size_match.group(4)
-                                        
-                                        # Convert to bytes for rich
-                                        if downloaded_unit == "GB":
-                                            downloaded_bytes = int(downloaded * 1024 * 1024 * 1024)
-                                        else:
-                                            downloaded_bytes = int(downloaded * 1024 * 1024)
-                                        
-                                        if total_unit == "GB":
-                                            total_bytes = int(total * 1024 * 1024 * 1024)
-                                        else:
-                                            total_bytes = int(total * 1024 * 1024)
-                                        
-                                        # Update with bytes - this enables DownloadColumn and TransferSpeedColumn
-                                        # #region agent log
-                                        with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                                            f.write(json_module.dumps({
-                                                "id": f"log_{int(time.time() * 1000)}_update",
-                                                "timestamp": int(time.time() * 1000),
-                                                "location": "validator.py:_pull_model_single_attempt:update",
-                                                "message": "Updating progress bar with bytes",
-                                                "data": {
-                                                    "model_name": model_name,
-                                                    "downloaded_bytes": downloaded_bytes,
-                                                    "total_bytes": total_bytes,
-                                                    "percent": percent
-                                                },
-                                                "sessionId": "debug-session",
-                                                "runId": "run1"
-                                            }) + "\n")
-                                        # #endregion
-                                        progress.update(
-                                            task, 
-                                            completed=downloaded_bytes, 
-                                            total=total_bytes,
-                                            description=f"Pulling {model_name}"
-                                        )
-                                    else:
-                                        # Just update percentage if we don't have size info
-                                        # Use percentage-based progress
-                                        if total_bytes is None:
-                                            # Set total to 100 for percentage-based progress
-                                            progress.update(task, total=100, completed=percent, description=f"Pulling {model_name}")
-                                        else:
-                                            # Calculate bytes from percentage
-                                            completed_bytes = int((percent / 100) * total_bytes)
-                                            progress.update(task, completed=completed_bytes, total=total_bytes, description=f"Pulling {model_name}")
-                            elif "pulling manifest" in clean_line.lower():
-                                # Only update for manifest if there's no percentage in the line
-                                # #region agent log
-                                with open("/Users/chenaultfamily/Documents/coding/scripts/.cursor/debug.log", "a") as f:
-                                    f.write(json_module.dumps({
-                                        "id": f"log_{int(time.time() * 1000)}_manifest",
-                                        "timestamp": int(time.time() * 1000),
-                                        "location": "validator.py:_pull_model_single_attempt:manifest",
-                                        "message": "Updating progress for manifest",
-                                        "data": {"model_name": model_name},
-                                        "sessionId": "debug-session",
-                                        "runId": "run1"
-                                    }) + "\n")
-                                # #endregion
-                                progress.update(task, description=f"Pulling {model_name} (manifest)", total=None)
-                            
-                            # Check for completion
-                            if "success" in clean_line.lower() or "done" in clean_line.lower() or "complete" in clean_line.lower():
-                                if total_bytes:
-                                    progress.update(task, completed=total_bytes, total=total_bytes, description=f"Pulling {model_name}")
-                                else:
-                                    progress.update(task, completed=100, total=100, description=f"Pulling {model_name}")
-                                print()
-                                ui.print_success(f"Downloaded {model_name}")
-                            elif "error" in clean_line.lower() or "ssh:" in clean_line.lower():
-                                print()
-                                ui.print_error(f"    {clean_line}")
-                        
-                        # Wait for process to complete (it should already be done after reading all stderr)
-                        if process.poll() is None:
-                            process.wait(timeout=MODEL_PULL_TIMEOUT)
-                    else:
-                        # If stderr is None, wait for process
-                        process.wait(timeout=MODEL_PULL_TIMEOUT)
+    output_lines = []
+    total_bytes = None
+
+    if not process.stderr:
+        return output_lines
+
+    for line in process.stderr:
+        # Clean ANSI codes
+        clean_line = _remove_ansi_codes(line)
+
+        # Handle edge case: "pulling manifest" appended to progress line
+        if "pulling manifest" in clean_line.lower() and "%" in clean_line:
+            clean_line = clean_line.split("pulling manifest")[0].strip()
+
+        if not clean_line and "%" not in line:
+            continue
+
+        if clean_line:
+            output_lines.append(clean_line)
+
+        # Parse progress
+        progress_info = _parse_ollama_progress(clean_line)
+        if not progress_info:
+            continue
+
+        # Update progress bar based on parsed info
+        if progress_info.status == "pulling" and progress_info.percent is not None:
+            if progress_info.total_bytes:
+                # Update with actual bytes
+                total_bytes = progress_info.total_bytes
+                progress.update(
+                    task,
+                    completed=progress_info.downloaded_bytes,
+                    total=progress_info.total_bytes,
+                    description=f"Pulling {model_name}"
+                )
             else:
-                # Fallback: simple progress output (rich not available)
-                # Read stderr for progress (Ollama writes progress to stderr!)
-                if process.stderr:
-                    for line in process.stderr:
-                        # Clean ANSI escape codes
-                        clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line).strip()
-                        if clean_line:
-                            output_lines.append(clean_line)
-                            # Show progress updates
-                            if "pulling" in clean_line.lower() or "%" in clean_line:
-                                print(f"    {clean_line}", end="\r", flush=True)
-                            elif "success" in clean_line.lower() or "done" in clean_line.lower():
-                                print()
-                                ui.print_success(f"    {clean_line}")
-                            elif "error" in clean_line.lower() or "ssh:" in clean_line.lower():
-                                print()
-                                ui.print_error(f"    {clean_line}")
-                    
-                    # Wait for process to complete
-                    process.wait(timeout=MODEL_PULL_TIMEOUT)
+                # Update with percentage only
+                if total_bytes is None:
+                    progress.update(task, total=100, completed=progress_info.percent)
                 else:
-                    process.wait(timeout=MODEL_PULL_TIMEOUT)
-            
-            # Note: stderr has already been read in the loop above, so we don't need to read it again
-            # Collect any remaining error info from output_lines
-            stderr_output = ""
-            # Check output_lines for errors (stderr was already consumed in the loop)
-            for line in output_lines:
-                if "error" in line.lower() or "ssh:" in line.lower():
-                    stderr_output = line
-                    break
-            
-            # Process should already be done, but ensure it's finished
-            if process.poll() is None:
-                process.wait(timeout=MODEL_PULL_TIMEOUT)
-            
-            if process.returncode == 0:
-                return True, ""
+                    completed_bytes = int((progress_info.percent / 100) * total_bytes)
+                    progress.update(task, completed=completed_bytes, total=total_bytes)
+
+        elif progress_info.status == "manifest":
+            progress.update(task, description=f"Pulling {model_name} (manifest)", total=None)
+
+        elif progress_info.status == "complete":
+            if total_bytes:
+                progress.update(task, completed=total_bytes, total=total_bytes)
             else:
-                # Collect error info
-                error_msg = stderr_output.strip() if stderr_output else ""
-                if not error_msg and output_lines:
-                    # Look for error in output
-                    for line in output_lines:
-                        if "error" in line.lower() or "failed" in line.lower() or "ssh:" in line.lower():
-                            error_msg = line
-                            break
-                return False, error_msg or "Unknown error during pull"
+                progress.update(task, completed=100, total=100)
+            print()
+            ui.print_success(f"Downloaded {model_name}")
+
+        elif progress_info.status == "error":
+            print()
+            ui.print_error(f"    {progress_info.message}")
+
+    return output_lines
+
+
+def _monitor_simple_progress(process: subprocess.Popen, model_name: str) -> List[str]:
+    """
+    Monitor subprocess stderr with simple text output (no rich).
+
+    Args:
+        process: Running subprocess (ollama pull)
+        model_name: Model being pulled
+
+    Returns:
+        List of output lines for error reporting
+    """
+    output_lines = []
+
+    if not process.stderr:
+        return output_lines
+
+    for line in process.stderr:
+        clean_line = _remove_ansi_codes(line)
+        if not clean_line:
+            continue
+
+        output_lines.append(clean_line)
+
+        # Simple progress output
+        line_lower = clean_line.lower()
+        if "pulling" in line_lower or "%" in clean_line:
+            print(f"    {clean_line}", end="\r", flush=True)
+        elif any(word in line_lower for word in ["success", "done"]):
+            print()
+            ui.print_success(f"    {clean_line}")
+        elif "error" in line_lower or "ssh:" in line_lower:
+            print()
+            ui.print_error(f"    {clean_line}")
+
+    return output_lines
+
+
+# =============================================================================
+# Phase 3: Transport Methods
+# =============================================================================
+
+def _pull_via_cli_with_progress(model_name: str) -> Tuple[bool, str]:
+    """
+    Pull model via Ollama CLI with progress display.
+
+    Uses rich progress bar if available, falls back to simple output.
+
+    Args:
+        model_name: Model to pull (e.g., "gpt-oss:20b")
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    # Check if rich is available
+    try:
+        from rich.progress import Progress
+        use_rich = True
+    except ImportError:
+        use_rich = False
+
+    # Create clean environment (remove SSH_AUTH_SOCK for VPN resilience)
+    clean_env = {k: v for k, v in os.environ.items() if k != 'SSH_AUTH_SOCK'}
+
+    # Start subprocess
+    process = subprocess.Popen(
+        ["ollama", "pull", model_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        env=clean_env
+    )
+
+    try:
+        # Monitor progress based on available UI
+        if use_rich:
+            with _create_rich_progress_bar() as progress:
+                task = progress.add_task(f"Pulling {model_name}", total=100)
+                output_lines = _monitor_rich_progress(process, model_name, progress, task)
         else:
-            # Silent pull - capture output
-            code, stdout, stderr = utils.run_command(
-                ["ollama", "pull", model_name],
-                timeout=MODEL_PULL_TIMEOUT,
-                clean_env=True
-            )
-            if code == 0:
-                return True, ""
-            else:
-                error_msg = stderr.strip() if stderr else stdout.strip()
-                return False, error_msg or "Unknown error during pull"
-    
+            output_lines = _monitor_simple_progress(process, model_name)
+
+        # Wait for completion
+        if process.poll() is None:
+            process.wait(timeout=MODEL_PULL_TIMEOUT)
+
+        # Check result
+        if process.returncode == 0:
+            return True, ""
+        else:
+            # Find error in output
+            error_msg = ""
+            for line in output_lines:
+                if any(word in line.lower() for word in ["error", "failed", "ssh:"]):
+                    error_msg = line
+                    break
+            return False, error_msg or "Unknown error during pull"
+
     except subprocess.TimeoutExpired:
-        # Clean up the process on timeout
-        if process:
-            process.kill()
-            try:
-                process.wait(timeout=PROCESS_KILL_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                pass
-        return False, f"Timeout after {MODEL_PULL_TIMEOUT}s - model download may be stuck"
-    except FileNotFoundError:
-        return False, "Ollama command not found - is Ollama installed?"
-    except (OSError, IOError, subprocess.SubprocessError) as e:
-        return False, f"Process error: {type(e).__name__}: {e}"
+        process.kill()
+        try:
+            process.wait(timeout=PROCESS_KILL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            pass
+        return False, f"Timeout after {MODEL_PULL_TIMEOUT}s"
+
     finally:
-        # Ensure process is cleaned up
-        if process and process.poll() is None:
+        # Cleanup
+        if process.poll() is None:
             process.kill()
             try:
                 process.wait(timeout=PROCESS_KILL_TIMEOUT)
             except subprocess.TimeoutExpired:
                 pass
 
+
+def _pull_via_cli_silent(model_name: str) -> Tuple[bool, str]:
+    """
+    Pull model via Ollama CLI without progress display.
+
+    Args:
+        model_name: Model to pull
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    code, stdout, stderr = utils.run_command(
+        ["ollama", "pull", model_name],
+        timeout=MODEL_PULL_TIMEOUT,
+        clean_env=True
+    )
+
+    if code == 0:
+        return True, ""
+    else:
+        error_msg = stderr.strip() if stderr else stdout.strip()
+        return False, error_msg or "Unknown error during pull"
+
+
+# =============================================================================
+# Phase 4: Simplified Main Function
+# =============================================================================
+
+def _pull_model_single_attempt(model_name: str, show_progress: bool = True, use_api: bool = True) -> Tuple[bool, str]:
+    """
+    Execute a single Ollama pull attempt without retries.
+
+    Strategy:
+    1. Try API method first (clean JSON progress)
+    2. Fall back to CLI with progress display
+    3. Or use silent CLI if progress disabled
+
+    Args:
+        model_name: Model to pull (e.g., "gpt-oss:20b")
+        show_progress: Whether to display progress
+        use_api: Whether to try API method first
+
+    Returns:
+        Tuple of (success, error_message):
+        - success: True if pull succeeded
+        - error_message: Error details if failed, empty if successful
+    """
+    # Try API first (preferred: clean JSON progress)
+    if use_api:
+        try:
+            return _pull_model_via_api(model_name, show_progress)
+        except Exception as e:
+            if show_progress:
+                ui.print_warning(f"API pull failed, falling back to CLI: {e}")
+
+    # Fall back to CLI method
+    try:
+        if show_progress:
+            return _pull_via_cli_with_progress(model_name)
+        else:
+            return _pull_via_cli_silent(model_name)
+
+    except FileNotFoundError:
+        return False, "Ollama command not found - is Ollama installed?"
+    except (OSError, IOError, subprocess.SubprocessError) as e:
+        return False, f"Process error: {type(e).__name__}: {e}"
 
 def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
     """
