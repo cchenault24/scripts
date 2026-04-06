@@ -320,58 +320,52 @@ def verify_model_exists(model_name: str) -> bool:
 
 
 def pull_model_with_verification(
-    model: GemmaModel,
+    model_name: str,
     show_progress: bool = True
-) -> PullResult:
+) -> Tuple[bool, str]:
     """
-    Pull a model with immediate verification.
-    
-    Strategy:
-    1. Check if model is restricted (Chinese-based LLMs are not allowed)
-    2. Try to pull the model
-    3. Verify it exists in Ollama
-    4. Track success/failure for reporting
+    Pull a model with immediate verification (simplified for OpenCode setup).
+
+    Args:
+        model_name: Ollama model name (e.g., "gemma4:31b", "nomic-embed-text")
+        show_progress: Whether to show progress output
+
+    Returns:
+        Tuple of (success, error_message)
     """
-    result = PullResult(model=model, success=False)
-    
     # Check if model is restricted (Chinese-based)
-    if is_restricted_model_name(model.ollama_name):
-        error_msg = f"Model {model.ollama_name} is from a restricted country and cannot be downloaded"
-        result.error_message = error_msg
+    if is_restricted_model_name(model_name):
+        error_msg = f"Model {model_name} is from a restricted country and cannot be downloaded"
         if show_progress:
-            ui.print_error(f"Blocked: {model.name} ({model.ollama_name})")
+            ui.print_error(f"✗ Blocked: {model_name}")
             ui.print_error(f"  Reason: Chinese-based LLMs are not allowed")
-        return result
-    
+        return False, error_msg
+
     if show_progress:
-        ui.print_info(f"Pulling {model.name} ({model.ollama_name})...")
-    
+        ui.print_info(f"Pulling {model_name}...")
+
     # Try to pull the model
-    success, error_msg = _pull_model(model.ollama_name, show_progress)
-    
+    success, error_msg = _pull_model(model_name, show_progress)
+
     if success:
         # Verify the model exists
         time.sleep(VERIFICATION_DELAY)  # Brief pause for Ollama to update
-        if verify_model_exists(model.ollama_name):
-            result.success = True
-            result.verified = True
+        if verify_model_exists(model_name):
             if show_progress:
-                ui.print_success(f"{model.name} downloaded and verified")
-            return result
+                ui.print_success(f"✓ {model_name} downloaded and verified")
+            return True, ""
         else:
             if show_progress:
-                ui.print_warning(f"{model.name} pull succeeded but verification failed")
-            error_msg = "Pull appeared to succeed but model not found in Ollama"
+                ui.print_warning(f"⚠ {model_name} pull succeeded but verification failed")
+            return False, "Pull appeared to succeed but model not found in Ollama"
     else:
         if show_progress:
-            ui.print_error(f"Failed to pull {model.name}")
+            ui.print_error(f"✗ Failed to pull {model_name}")
             if error_msg:
                 # Show truncated error for readability
                 display_error = error_msg[:300] if len(error_msg) > 300 else error_msg
                 ui.print_error(f"  Error: {display_error}")
-    
-    result.error_message = error_msg or "Model pull failed"
-    return result
+        return False, error_msg or "Model pull failed"
 
 
 def run_preflight_check(show_progress: bool = True) -> Tuple[bool, str, Optional[str]]:
