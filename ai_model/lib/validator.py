@@ -22,7 +22,7 @@ from . import hardware
 from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
-from .model_selector import RecommendedModel, ModelRole, EMBED_MODEL
+from .model_selector import ModelRole, GemmaModel
 
 
 # Ollama API configuration
@@ -223,7 +223,7 @@ def get_troubleshooting_steps(error_type: str) -> List[str]:
 @dataclass
 class PullResult:
     """Result of a model pull attempt."""
-    model: RecommendedModel
+    model: GemmaModel
     success: bool
     verified: bool = False
     error_message: str = ""
@@ -232,8 +232,8 @@ class PullResult:
 @dataclass
 class SetupResult:
     """Result of the complete model setup."""
-    successful_models: List[RecommendedModel] = field(default_factory=list)
-    failed_models: List[Tuple[RecommendedModel, str]] = field(default_factory=list)
+    successful_models: List[GemmaModel] = field(default_factory=list)
+    failed_models: List[Tuple[GemmaModel, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     
     @property
@@ -320,7 +320,7 @@ def verify_model_exists(model_name: str) -> bool:
 
 
 def pull_model_with_verification(
-    model: RecommendedModel,
+    model: GemmaModel,
     show_progress: bool = True
 ) -> PullResult:
     """
@@ -1030,7 +1030,7 @@ def _pull_model(model_name: str, show_progress: bool = True) -> Tuple[bool, str]
 
 
 def pull_models_with_tracking(
-    models: List[RecommendedModel],
+    models: List[GemmaModel],
     hw_info: hardware.HardwareInfo,
     show_progress: bool = True
 ) -> SetupResult:
@@ -1317,7 +1317,7 @@ def test_ollama_connectivity() -> Tuple[bool, str, Dict[str, Any]]:
 
 
 def validate_pre_install(
-    models: List[RecommendedModel],
+    models: List[GemmaModel],
     hw_info: hardware.HardwareInfo,
     run_preflight: bool = False
 ) -> Tuple[bool, List[str]]:
