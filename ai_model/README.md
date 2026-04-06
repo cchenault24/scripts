@@ -4,12 +4,13 @@ Automated setup for **Gemma 4 26B** with **llama.cpp** and **OpenCode** on macOS
 
 ## 🎯 Overview
 
-This project provides a working setup for running Gemma 4 26B locally with OpenCode, bypassing known issues:
+This project provides a **minimal, bash-only** setup for running Gemma 4 26B locally with OpenCode, bypassing known issues:
 - ✅ **llama.cpp** with Gemma 4 tokenizer fixes (PR #21343)
 - ✅ **OpenCode** with tool-call compatibility layer (PR #16531)
 - ✅ **Automatic SSL certificate support** for corporate networks
 - ✅ **Automatic model download and server startup**
 - ✅ **Comprehensive uninstaller** for clean removal
+- ✅ **No Python dependencies** - self-contained bash scripts
 
 **Based on**: [daniel-farina's proven guide](https://gist.github.com/daniel-farina/87dc1c394b94e45bb700d27e9ea03193)
 
@@ -198,35 +199,18 @@ Check logs for errors:
 tail -50 ~/.local/var/log/llama-server.log
 ```
 
-## 🧪 Development
-
-### Running Tests
-
-```bash
-# Run all tests
-python3 run_tests.py
-
-# Run with coverage
-python3 run_tests.py --cov
-
-# Quick mode (skip slow tests)
-python3 run_tests.py --quick
-```
-
-### Project Structure
+## 📁 Project Structure
 
 ```
 ai_model/
-├── setup-gemma4-working.sh        # Main installer
-├── uninstall-gemma4-working.sh    # Comprehensive uninstaller
-├── GEMMA4_WORKING_SETUP.md        # Detailed documentation
+├── setup-gemma4-working.sh        # Main installer (bash)
+├── uninstall-gemma4-working.sh    # Comprehensive uninstaller (bash)
+├── GEMMA4_WORKING_SETUP.md        # Detailed setup guide
 ├── README.md                      # This file
-├── REFACTORING_SUMMARY.md         # Project history
-├── lib/                           # Shared Python library
-├── tests/                         # Test suite
-├── run_tests.py                   # Test runner
-└── test_setup_flow.py             # Setup flow tests
+└── REFACTORING_SUMMARY.md         # Project history
 ```
+
+**Note**: This is a minimal, production-ready package with no dependencies. The scripts are self-contained bash scripts that don't require Python or any external libraries.
 
 ## 🤝 Contributing
 
