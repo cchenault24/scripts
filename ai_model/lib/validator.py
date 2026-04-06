@@ -589,9 +589,132 @@ def _pull_model_via_api(model_name: str, show_progress: bool = True) -> Tuple[bo
                 return False, str(e)
         
         return False, "Unexpected end of stream"
-    
+
     except Exception as e:
         return False, f"API error: {type(e).__name__}: {e}"
+
+
+# =============================================================================
+# Phase 1: Helper Functions (Pure Functions)
+# =============================================================================
+
+@dataclass
+class ProgressInfo:
+    """Parsed progress information from Ollama output."""
+    percent: Optional[int] = None
+    downloaded_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
+    status: str = "pulling"  # "pulling", "manifest", "complete", "error"
+    message: str = ""
+
+
+def _remove_ansi_codes(line: str) -> str:
+    """
+    Remove ANSI escape sequences from terminal output.
+
+    Args:
+        line: Raw terminal output line with ANSI codes
+
+    Returns:
+        Cleaned string with ANSI codes removed
+    """
+    # Remove ANSI control sequences (including cursor positioning with ?)
+    clean = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', line)
+    # Remove OSC sequences
+    clean = re.sub(r'\x1b\][0-9;]*', '', clean)
+    return clean.strip()
+
+
+def _parse_ollama_progress(line: str) -> Optional[ProgressInfo]:
+    """
+    Parse Ollama progress line into structured data.
+
+    Format examples:
+    - "pulling manifest"
+    - "pulling abc123:  45% ▕██...▏ 2.5 GB/5.5 GB"
+    - "success"
+
+    Args:
+        line: Cleaned terminal output line (ANSI removed)
+
+    Returns:
+        ProgressInfo if line contains progress, None otherwise
+    """
+    line_lower = line.lower()
+
+    # Check for completion
+    if any(word in line_lower for word in ["success", "done", "complete"]):
+        return ProgressInfo(percent=100, status="complete", message=line)
+
+    # Check for errors
+    if "error" in line_lower or "ssh:" in line_lower:
+        return ProgressInfo(status="error", message=line)
+
+    # Check for pulling with percentage
+    if "pulling" in line_lower and "%" in line:
+        # Extract percentage first
+        percent_match = re.search(r'(\d+)%', line)
+        if percent_match:
+            percent = int(percent_match.group(1))
+
+            # Extract size info if available: "X MB/Y GB"
+            size_match = re.search(
+                r'(\d+(?:\.\d+)?)\s*(MB|GB)\s*/\s*(\d+(?:\.\d+)?)\s*(MB|GB)',
+                line
+            )
+
+            if size_match:
+                downloaded = float(size_match.group(1))
+                downloaded_unit = size_match.group(2)
+                total = float(size_match.group(3))
+                total_unit = size_match.group(4)
+
+                # Convert to bytes
+                downloaded_bytes = int(downloaded * (1024**3 if downloaded_unit == "GB" else 1024**2))
+                total_bytes = int(total * (1024**3 if total_unit == "GB" else 1024**2))
+
+                return ProgressInfo(
+                    percent=percent,
+                    downloaded_bytes=downloaded_bytes,
+                    total_bytes=total_bytes,
+                    status="pulling"
+                )
+            else:
+                # Just percentage, no size info
+                return ProgressInfo(percent=percent, status="pulling")
+
+    # Check for manifest pulling (without percentage)
+    if "pulling manifest" in line_lower:
+        return ProgressInfo(status="manifest", message="Pulling manifest")
+
+    return None
+
+
+def _create_rich_progress_bar() -> 'Progress':
+    """
+    Create pre-configured rich Progress bar for model downloading.
+
+    Returns:
+        Configured Progress instance with columns for downloading
+    """
+    from rich.progress import (
+        Progress, SpinnerColumn, BarColumn, TextColumn,
+        DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
+    )
+    from rich.console import Console
+
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=Console(),
+        transient=False,
+        refresh_per_second=2  # Reduced from 10 (performance optimization)
+    )
 
 
 def _pull_model_single_attempt(model_name: str, show_progress: bool = True, use_api: bool = True) -> Tuple[bool, str]:
