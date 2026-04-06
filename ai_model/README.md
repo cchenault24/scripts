@@ -478,3 +478,222 @@ MIT License - See LICENSE file for details.
 ---
 
 **Ready to start?** Run `python3 setup.py` and choose your Gemma4 model! 🚀
+
+## llama.cpp Setup (Alternative Backend)
+
+As of v2.0, we provide a modular llama.cpp backend as an alternative to Ollama.
+
+### Why llama.cpp?
+
+llama.cpp offers several advantages over Ollama for certain use cases:
+- **Direct model control**: Specify exact context sizes, thread counts, and parameters
+- **Tool calling support**: Custom toolParser for Gemma 4 compatibility
+- **No service dependency**: Run as needed, not a persistent service
+- **Homebrew installation**: Easy updates with `brew upgrade llama.cpp`
+
+Use llama.cpp if:
+- ✅ You need fine-grained control over model parameters
+- ✅ You're experiencing Ollama tool calling bugs ([#15241](https://github.com/ollama/ollama/issues/15241))
+- ✅ You want to run bleeding-edge model fixes (`--HEAD`)
+
+Use Ollama if:
+- ✅ You prefer a service-based approach
+- ✅ You want automatic model management
+- ✅ You need stable, tested releases
+
+### Quick Start (llama.cpp)
+
+```bash
+cd ai_model
+
+# Basic setup
+python3 setup-llamacpp.py
+
+# With parallel installation (24GB+ RAM)
+python3 setup-llamacpp.py --parallel
+
+# Skip custom OpenCode build
+python3 setup-llamacpp.py --no-pr-build
+
+# Force reinstall everything
+python3 setup-llamacpp.py --force-reinstall
+```
+
+### What Gets Installed
+
+1. **Prerequisites**
+   - git, gh (GitHub CLI)
+   - pipx, HuggingFace CLI (with SSL certificate support)
+   - bun (JavaScript runtime)
+
+2. **llama.cpp** (via Homebrew --HEAD)
+   - Latest Gemma 4 fixes
+   - Metal GPU acceleration (Apple Silicon)
+   - Optimized for macOS
+
+3. **GGUF Model** (from HuggingFace)
+   - Interactive selection: 2B / 4B / 26B / 31B
+   - Hardware-aware recommendations
+   - Resumable downloads
+
+4. **OpenCode CLI**
+   - Official installer + custom PR build (optional)
+   - Tool calling compatibility layer
+   - Global configuration files
+
+### Corporate Network Support
+
+The setup automatically handles corporate environments:
+
+✅ **SSL Certificates**: Auto-injects `pip-system-certs` for proxy/SSL interception
+✅ **HF Authentication**: Prompts for `HF_TOKEN` if needed
+✅ **Proxy Support**: Respects `HTTP_PROXY`/`HTTPS_PROXY` environment variables
+
+See [CORPORATE_NETWORK_SETUP.md](CORPORATE_NETWORK_SETUP.md) for detailed configuration.
+
+### Security Features
+
+All security vulnerabilities from the comprehensive review have been fixed:
+
+- ✅ Cryptographic verification for downloads
+- ✅ Secure temporary file handling (0600/0700 permissions)
+- ✅ PATH hijacking protection (ownership validation)
+- ✅ Input sanitization (prevents command injection)
+- ✅ PR verification with author whitelist
+- ✅ Rollback mechanism on installation failures
+- ✅ Proper timeouts on all operations
+
+### Usage
+
+**1. Start llama-server:**
+
+```bash
+# For 26B model with 32K context
+llama-server -hf ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M \
+  --port 3456 -ngl 99 -c 32768 --jinja
+
+# Wait for: "listening on http://127.0.0.1:3456"
+```
+
+**2. Test the server:**
+
+```bash
+curl http://127.0.0.1:3456/health
+# Should return: {"status":"ok"}
+```
+
+**3. Run OpenCode:**
+
+```bash
+cd /path/to/your/project
+opencode  # Opens interactive TUI
+```
+
+### Configuration Files
+
+The setup creates global configuration files:
+
+- `~/.config/opencode/opencode.jsonc` - llama.cpp endpoint configuration
+- `~/.config/opencode/AGENTS.md` - Tool usage instructions for Gemma 4
+- `~/.config/opencode/prompts/build.txt` - Build agent prompt
+
+These apply to all projects unless overridden locally.
+
+### Architecture
+
+The new setup uses a modular architecture for maintainability:
+
+```
+lib/
+├── utils.py              # Security utilities, subprocess helpers
+├── prerequisites.py      # Tool installation with PATH validation
+├── llamacpp.py          # llama.cpp backend operations
+├── opencode_builder.py  # Secure OpenCode source builds
+└── opencode.py          # Config generation for all backends
+
+setup-llamacpp.py        # Modular entry point (397 lines)
+```
+
+**Key Improvements:**
+- 70% code reduction (1,302 → 397 lines)
+- ~400 lines of duplication eliminated
+- Comprehensive security measures
+- 12% speedup with parallel installation
+
+See [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) for full details.
+
+### Troubleshooting
+
+#### SSL Certificate Errors
+
+```
+SSLError: [SSL: CERTIFICATE_VERIFY_FAILED]
+```
+
+**Solution**: Automatic via `pip-system-certs` injection. If issues persist:
+```bash
+pipx inject huggingface-hub pip-system-certs
+```
+
+#### HuggingFace Authentication
+
+```
+HTTP 401: Unauthorized
+```
+
+**Solution**: Set HF_TOKEN (or the script will prompt):
+```bash
+export HF_TOKEN=hf_your_token_here
+```
+
+Get token from: https://huggingface.co/settings/tokens
+
+#### Model Download Hangs
+
+The 2-hour timeout should prevent hangs. If download fails:
+```bash
+# Download manually
+hf download ggml-org/gemma-4-26B-A4B-it-GGUF Q4_K_M.gguf
+
+# Run setup again (will skip download)
+python3 setup-llamacpp.py
+```
+
+### Performance Tips
+
+**Parallel Installation** (24GB+ RAM):
+```bash
+python3 setup-llamacpp.py --parallel
+# Installs llama.cpp and downloads model simultaneously
+# Saves ~4 minutes (12% speedup)
+```
+
+**Context Size Selection:**
+- 32K context: ~17GB RAM (recommended for most users)
+- 64K context: ~20GB RAM (longer coding sessions)
+- 128K context: ~25GB RAM (maximum context, may cause memory pressure)
+
+**CPU Threads:**
+Use performance cores for best results:
+```bash
+# Automatically optimized by setup based on your CPU
+# M1 Max: 8 performance cores
+# M2 Pro: 8 performance cores
+# Etc.
+```
+
+### Uninstallation
+
+```bash
+# Remove llama.cpp
+brew uninstall llama.cpp
+
+# Remove OpenCode
+rm -rf ~/.opencode
+
+# Remove configurations
+rm -rf ~/.config/opencode
+
+# Remove HuggingFace cache (optional, saves 20GB+)
+rm -rf ~/.cache/huggingface
+```
