@@ -78,6 +78,46 @@ def install_via_homebrew(package_name: str, timeout: int = 300) -> Tuple[bool, s
     return True, f"Installed {package_name} via Homebrew"
 
 
+def ensure_hf_ssl_support() -> Tuple[bool, str]:
+    """
+    Ensure pip-system-certs is injected into huggingface-hub for SSL support.
+
+    This is needed for corporate networks with SSL interception/proxies.
+    Should be called after huggingface-hub is installed (or verified as installed).
+
+    Returns:
+        Tuple of (success, message)
+    """
+    # Check if huggingface-hub is installed via pipx
+    code, stdout, _ = utils.run_command(["pipx", "list"], timeout=10)
+
+    if code != 0 or "huggingface-hub" not in stdout:
+        return False, "huggingface-hub not installed via pipx"
+
+    # Check if pip-system-certs is already injected
+    if "pip-system-certs" in stdout:
+        ui.print_success("SSL certificate support already enabled")
+        return True, "pip-system-certs already injected"
+
+    # Inject pip-system-certs for SSL support
+    ui.print_info("Injecting pip-system-certs for SSL certificate support...")
+    ui.print_info("(Required for corporate networks with SSL interception)")
+
+    code, stdout, stderr = utils.run_command(
+        ["pipx", "inject", "huggingface-hub", "pip-system-certs"],
+        timeout=60
+    )
+
+    if code != 0:
+        ui.print_warning(f"Could not inject pip-system-certs: {stderr}")
+        ui.print_info("This may cause SSL issues on corporate networks")
+        ui.print_info("To fix manually: pipx inject huggingface-hub pip-system-certs")
+        return False, f"Injection failed: {stderr}"
+
+    ui.print_success("SSL certificate support enabled")
+    return True, "pip-system-certs injected successfully"
+
+
 def install_via_pipx(package_name: str, timeout: int = 180) -> Tuple[bool, str]:
     """Install Python CLI tool via pipx."""
     ui.print_info(f"Installing {package_name} via pipx...")
@@ -100,19 +140,9 @@ def install_via_pipx(package_name: str, timeout: int = 180) -> Tuple[bool, str]:
     if code != 0:
         return False, f"pipx installation failed: {''.join(output_lines[-10:])}"
 
-    # For huggingface-hub, inject pip-system-certs for corporate SSL/proxy support
+    # For huggingface-hub, inject pip-system-certs immediately after install
     if "huggingface-hub" in package_name:
-        ui.print_info("Injecting pip-system-certs for SSL certificate support...")
-        code, stdout, stderr = utils.run_command(
-            ["pipx", "inject", "huggingface-hub", "pip-system-certs"],
-            timeout=60
-        )
-
-        if code != 0:
-            ui.print_warning(f"Could not inject pip-system-certs: {stderr}")
-            ui.print_info("This may cause SSL issues on corporate networks")
-        else:
-            ui.print_success("SSL certificate support enabled")
+        ensure_hf_ssl_support()
 
     return True, f"Installed {package_name} via pipx"
 
@@ -201,6 +231,11 @@ def install_all_prerequisites(force_reinstall: bool = False) -> Tuple[bool, str]
         # Check if already installed (unless forcing)
         if not force_reinstall and is_tool_available(prereq):
             ui.print_success(f"{prereq.name} installed")
+
+            # Special case: Ensure SSL support for existing huggingface-hub installations
+            if prereq.name == "HuggingFace CLI":
+                ensure_hf_ssl_support()
+
             continue
 
         # Tool needs installation
