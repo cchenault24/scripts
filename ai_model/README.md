@@ -1,82 +1,243 @@
-# Local LLM Setup for Continue.dev
+# Gemma4 + OpenCode Setup for IntelliJ IDEA
 
-Automated setup for locally hosted Large Language Models (LLMs) using **Ollama** with Continue.dev integration for VS Code and IntelliJ IDEA. Optimized for Apple Silicon Macs (M1/M2/M3/M4).
+Automated setup for **Gemma4 models** with **OpenCode plugin** in IntelliJ IDEA. Optimized for Apple Silicon Macs (M1/M2/M3/M4) using Ollama.
 
 ## 🎯 Overview
 
-This project provides a complete automated setup for running LLMs locally using Ollama. It:
+This project provides an interactive setup for running Gemma4 LLMs locally with OpenCode in IntelliJ IDEA. It:
 
-- Detects your Apple Silicon Mac hardware (CPU, RAM, Metal GPU)
-- Installs fixed models optimized for coding (GPT-OSS 20B + nomic-embed-text)
-- Configures Ollama service with automatic startup
-- Generates Continue.dev configuration for your IDE
-- Provides smart uninstallation with manifest tracking
+- **Detects** your Apple Silicon Mac hardware (CPU, RAM, Metal GPU)
+- **Presents** 5 Gemma4 model options with hardware-based recommendations
+- **Pulls** your selected model + optional embedding model
+- **Optimizes** model parameters for Mac Silicon performance
+- **Guides** you through OpenCode plugin configuration
 
-**Simplified Architecture**: Previously supported dual backends (Docker + Ollama). Now focused exclusively on Ollama for better maintainability and user experience.
+**Version 5.0**: Focused on single-model selection with Gemma4 family and OpenCode plugin for IntelliJ IDEA.
 
 ## ✨ Features
 
 ### Core Functionality
-- **Hardware Detection**: Automatic detection of Apple Silicon, RAM, and Metal GPU
-- **Fixed Model Installation**: GPT-OSS 20B (16GB) + nomic-embed-text (0.3GB)
-- **Ollama Integration**: Full service management with automatic startup
-- **Continue.dev Configuration**: Generates both YAML and JSON configs
-- **IDE Auto-Detection**: Finds VS Code, Cursor, and IntelliJ IDEA
-- **Smart Uninstallation**: Manifest-based removal with backup restoration
+- **Interactive Model Selection**: Choose from 5 Gemma4 variants (2B to 31B)
+- **Hardware-Based Recommendations**: Suggests optimal model for your RAM
+- **Mac Silicon Optimization**: Tuned parameters (temperature, context length, top-k)
+- **Optional Embedding Model**: nomic-embed-text for semantic code search
+- **OpenCode Integration**: Step-by-step configuration guide
 
-### Advanced Features
-- **Reliable Model Pulling**: Verification after each pull with automatic retry
-- **Progress Tracking**: Real-time download progress (percentage, speed, ETA)
-- **VPN Resilience**: Works with VPN/corporate proxies
-- **Backup & Restore**: Preserves existing Continue.dev configurations
-- **Error Handling**: User-friendly error messages with troubleshooting steps
+### Available Gemma4 Models
+| Model | Size | RAM Required | Best For |
+|-------|------|-------------|----------|
+| **gemma4:e2b** | 2B | 4GB+ | Low RAM systems, fast responses |
+| **gemma4:e4b** | 4B | 8GB+ | Balanced performance |
+| **VladimirGav/gemma4-26b-16GB-VRAM:latest** | 26B | 16GB+ | **Recommended for 16GB+ Mac** ⭐ |
+| **gemma4:26b** | 26B | 16GB+ | Standard 26B variant |
+| **gemma4:31b** | 31B | 24GB+ | Maximum quality for high-RAM systems |
+
+### Mac Silicon Optimization
+Parameters are automatically optimized based on your chip and RAM:
+
+**M4/M3 with 24GB+ RAM:**
+- Temperature: 0.8
+- Context Length: 16,384 tokens
+- Top-K: 50
+
+**M4/M3 with 16GB RAM:**
+- Temperature: 0.75
+- Context Length: 12,288 tokens
+- Top-K: 45
+
+**M2/M1 with 24GB+ RAM:**
+- Temperature: 0.75
+- Context Length: 12,288 tokens
+
+**M2/M1 with 16GB RAM:**
+- Temperature: 0.7
+- Context Length: 8,192 tokens
 
 ## 📦 Requirements
 
 ### System Requirements
 - **macOS**: Apple Silicon (M1/M2/M3/M4) required
-- **RAM**: 16GB minimum (20GB+ recommended)
+- **RAM**: 16GB minimum (24GB+ recommended for 26B+ models)
 - **Python**: 3.8 or higher
+- **IntelliJ IDEA**: Community or Ultimate Edition
 - **Ollama**: Installed automatically if not present
 
 ### Platform Support
 - ✅ **macOS (Apple Silicon)**: Full support with Metal GPU acceleration
-- ❌ **Linux/Windows**: Not currently supported (code requires Apple Silicon detection)
-
-> **Note**: Despite hardware detection for other platforms, the model selector exits on non-Apple Silicon systems. See `MIGRATION_FROM_DOCKER.md` if you need multi-platform support.
+- ❌ **Linux/Windows/Intel Mac**: Not currently supported
 
 ## 🚀 Quick Start
 
 ```bash
-# Clone or download this repository
+# Navigate to project directory
 cd ai_model
 
-# Run setup (installs Ollama if needed, configures everything)
+# Run interactive setup
 python3 setup.py
 
-# Models will be pulled automatically:
-# - gpt-oss:20b (16GB - primary coding model)
-# - nomic-embed-text (0.3GB - embeddings for context)
-
-# Verify installation
-ollama list
+# Follow the prompts to:
+# 1. Select your Gemma4 model (recommended model will be highlighted)
+# 2. Choose whether to install embedding model (recommended)
+# 3. Wait for model download
+# 4. Follow OpenCode configuration instructions
 ```
 
-## 📖 Usage
+### Example Setup Flow
+
+```
+🚀 Ollama + OpenCode Setup v5.0
+Gemma4 models for IntelliJ IDEA
+Optimized for Mac Silicon
+
+Ready to begin setup? [Y/n]: y
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Hardware Detection
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Detected: Apple M4
+  CPU: Apple M4 (10 cores: 4P+6E)
+  RAM: 16.0 GB
+  GPU: Apple M4 (10 GPU cores)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📦 Model Selection
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Detected: Apple M4
+  Total RAM:       16 GB
+  Available RAM:   ~9 GB (for AI models)
+
+Available Gemma4 models:
+
+  1. Gemma4 2B (Efficient)
+     gemma4:e2b
+     ✓ RAM: 2.5 GB (requires 4+ GB system RAM)
+     Fast, efficient model for basic coding tasks.
+
+  2. Gemma4 4B (Balanced)
+     gemma4:e4b
+     ✓ RAM: 4.5 GB (requires 8+ GB system RAM)
+     Balanced performance and quality.
+
+  3. Gemma4 26B (Optimized for 16GB VRAM) ★ RECOMMENDED
+     VladimirGav/gemma4-26b-16GB-VRAM:latest
+     ✓ RAM: 16.0 GB (requires 16+ GB system RAM)
+     Optimized 26B model for Mac Silicon with 16GB+ RAM.
+
+  4. Gemma4 26B (Standard)
+     gemma4:26b
+     ✓ RAM: 16.0 GB (requires 16+ GB system RAM)
+     Standard 26B model, high quality code generation.
+
+  5. Gemma4 31B (Maximum Quality)
+     gemma4:31b
+     ✗ RAM: 20.0 GB (requires 24+ GB system RAM)
+     Largest model, best quality for high-RAM systems.
+
+Recommended: Option 3 (Gemma4 26B (Optimized for 16GB VRAM))
+
+Select model (1-5) or press Enter for recommended [3]: ⏎
+
+✓ Selected: Gemma4 26B (Optimized for 16GB VRAM)
+  Model: VladimirGav/gemma4-26b-16GB-VRAM:latest
+  Size: 26B
+  RAM Usage: ~16.0 GB
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Embedding Model (Optional)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+An embedding model enables semantic code search:
+  • Ask 'how does authentication work?' → finds relevant files
+  • Understands code meaning, not just keywords
+  • Model: nomic-embed-text (274 MB)
+
+Install embedding model for code search? [Y/n]: y
+
+📥 Downloading Models
+
+[1/2] Pulling VladimirGav/gemma4-26b-16GB-VRAM:latest...
+⠋ Pulling VladimirGav/gemma4-26b-16GB-VRAM:latest ▕████████████▏ 45% 8.2GB/16GB 25MB/s 5m12s
+
+✓ Downloaded VladimirGav/gemma4-26b-16GB-VRAM:latest
+
+[2/2] Pulling nomic-embed-text...
+✓ Downloaded nomic-embed-text
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ⚙️ Configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Generated reference config: ~/.opencode/opencode-config.json
+✓ Created manifest: ~/.opencode/setup-manifest.json
+
+🔧 OpenCode Configuration
+
+OpenCode is configured through IntelliJ IDEA settings.
+Follow these steps to complete setup:
+
+1. Install OpenCode Plugin:
+   • Open IntelliJ IDEA
+   • Go to: Preferences → Plugins (Cmd+,)
+   • Click 'Marketplace' tab
+   • Search for 'OpenCode'
+   • Click 'Install' and restart IntelliJ
+   • Plugin URL: https://plugins.jetbrains.com/plugin/30681-opencode
+
+2. Configure Ollama Connection:
+   • In IntelliJ, open OpenCode settings
+   • Set Ollama API endpoint:
+     http://127.0.0.1:11434
+
+3. Select Gemma4 Model:
+   • In OpenCode settings, choose model:
+     VladimirGav/gemma4-26b-16GB-VRAM:latest
+
+4. Optimize Model Parameters:
+   • Temperature: 0.75
+   • Context Length: 12288 tokens
+   • Top-K: 45
+   • Top-P: 0.9
+
+   (Optimized for Apple M4 with 16GB RAM)
+
+5. Configure Embedding Model (Optional):
+   • For semantic code search, configure:
+     nomic-embed-text
+   • Temperature: 0.0 (deterministic)
+
+6. Verify Setup:
+   • Open any code file in IntelliJ
+   • Activate OpenCode (check plugin toolbar/menu)
+   • Ask a coding question to test the connection
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Setup Complete!
+
+Next steps:
+  1. Open IntelliJ IDEA
+  2. Install OpenCode plugin (if not already)
+  3. Configure OpenCode using the instructions above
+  4. Start coding with AI assistance!
+```
+
+## 📖 Detailed Usage
 
 ### Setup Script
 ```bash
 python3 setup.py
 ```
 
-**What it does:**
-1. Detects Apple Silicon hardware and validates RAM (16GB+)
-2. Installs/updates Ollama if needed
-3. Pulls GPT-OSS 20B and nomic-embed-text models
-4. Configures Ollama service for automatic startup
-5. Generates Continue.dev configuration files
-6. Creates global rules for assistant behavior
-7. Saves installation manifest for smart uninstallation
+**Interactive Steps:**
+1. **Hardware Detection**: Detects your Mac Silicon chip and RAM
+2. **IDE Detection**: Checks for IntelliJ IDEA and OpenCode plugin
+3. **Model Selection**: Shows 5 Gemma4 models with recommendations
+4. **Embedding Model**: Optional semantic search capability
+5. **Pre-flight Checks**: Verifies Ollama is installed and running
+6. **Model Download**: Pulls selected models with progress bars
+7. **Configuration**: Generates reference config and setup instructions
+8. **Completion**: Provides step-by-step OpenCode configuration guide
 
 ### Uninstall Script
 ```bash
@@ -84,490 +245,236 @@ python3 uninstall.py
 ```
 
 **What it does:**
-1. Loads installation manifest
-2. Removes installed models (preserves pre-existing models)
-3. Stops Ollama service if installed by setup
-4. Restores backed-up Continue.dev configs
-5. Cleans up generated files and cache directories
-6. Optionally uninstalls Ollama completely
+1. Loads installation manifest from `~/.opencode/setup-manifest.json`
+2. Removes installed Gemma4 models
+3. Removes embedding model (if installed)
+4. Cleans up configuration files
+5. Optionally uninstalls Ollama completely
 
 ### Check Status
 ```bash
-# Ollama service status
+# List installed models
 ollama list
 
-# Test model inference
-ollama run gpt-oss:20b "Write hello world in Python"
+# Test Gemma4 model
+ollama run VladimirGav/gemma4-26b-16GB-VRAM:latest "Write hello world in Python"
 
-# Check API endpoint
+# Test embedding model
+ollama run nomic-embed-text "test embedding"
+
+# Check Ollama service
 curl http://127.0.0.1:11434/api/tags
 ```
 
-## 🏗️ Project Structure
+## 🔧 Configuration
 
-```
-ai_model/
-├── lib/                    # Core library modules
-│   ├── __init__.py        # Lazy-loading module exports
-│   ├── config.py          # Continue.dev config generation
-│   ├── hardware.py        # Hardware detection
-│   ├── ide.py             # IDE detection and integration
-│   ├── model_selector.py  # Model selection (fixed: GPT-OSS 20B)
-│   ├── models.py          # Model catalog
-│   ├── ollama.py          # Ollama service management
-│   ├── ui.py              # Terminal UI utilities
-│   ├── uninstaller.py     # Smart uninstallation
-│   ├── utils.py           # General utilities
-│   └── validator.py       # Model pulling and verification
-├── tests/                  # Test suite
-│   ├── conftest.py        # Shared pytest fixtures
-│   ├── SPECIFICATIONS.md  # TDD behavioral specs
-│   ├── test_*.py          # Unit, integration, e2e tests
-│   └── ...
-├── setup.py               # Main entry point
-├── uninstall.py           # Uninstaller entry point
-├── run_tests.py           # Test runner with auto venv
-└── README.md              # This file
-```
+### Reference Config File
+Setup creates `~/.opencode/opencode-config.json` with your optimized settings:
 
-## 🎨 Architecture
-
-### Module Responsibilities
-
-| Module | Purpose | Key Functions |
-|--------|---------|---------------|
-| `hardware.py` | Hardware detection | `detect_hardware()` → `HardwareInfo` |
-| `model_selector.py` | Model selection | `select_models()` → `List[RecommendedModel]` |
-| `validator.py` | Model pulling & verification | `pull_models_with_tracking()` → `SetupResult` |
-| `ollama.py` | Ollama service management | `setup_ollama()`, `configure_launchagent()` |
-| `config.py` | Continue.dev config generation | `generate_continue_config()` → `Path` |
-| `ide.py` | IDE detection & setup | `detect_installed_ides()` → `List[str]` |
-| `uninstaller.py` | Smart uninstallation | `uninstall_with_manifest()` |
-
-### Data Flow
-
-```
-setup.py
-  ↓
-hardware.detect_hardware() → HardwareInfo
-  ↓
-model_selector.select_models(hw_info) → [GPT-OSS 20B, nomic-embed-text]
-  ↓
-validator.pull_models_with_tracking(models) → SetupResult
-  ↓
-ollama.setup_ollama() → Configure service
-  ↓
-config.generate_continue_config(models, hw_info) → ~/.continue/config.yaml
-  ↓
-ide.detect_installed_ides() → Auto-detect VS Code/Cursor/IntelliJ
-```
-
-## ⚙️ Configuration
-
-### Continue.dev Files
-
-**Generated files:**
-- `~/.continue/config.yaml` - Main configuration (VS Code, Cursor)
-- `~/.continue/config.json` - JSON format (IntelliJ IDEA)
-- `~/.continue/rules/global-rule.md` - Assistant behavior rules
-- `~/.continue/.continueignore` - Files to exclude from context
-
-**API Endpoint:**
-```yaml
-models:
-  - name: GPT-OSS 20B
-    provider: openai
-    model: gpt-oss:20b
-    apiBase: http://127.0.0.1:11434/v1  # Ollama API endpoint
-    roles:
-      - chat
-      - edit
-      - autocomplete
-```
-
-### Ollama Service
-
-**LaunchAgent (macOS):**
-- `~/Library/LaunchAgents/com.ollama.server.plist`
-- Starts automatically on login
-- Runs on port 11434
-
-**Model Storage:**
-- `~/.ollama/models/` - Downloaded models
-- `~/.ollama/logs/` - Service logs
-
-### Installation Manifest
-
-**Manifest file:** `~/.continue/setup-manifest.json`
-
-**Purpose:**
-- Tracks installed models, files, and configurations
-- Enables smart uninstallation (preserves pre-existing setup)
-- Records hardware snapshot and installer version
-
-**Example:**
 ```json
 {
-  "version": "2.0",
-  "timestamp": "2026-04-06T...",
-  "installer_version": "2.0.0",
-  "hardware_snapshot": {
-    "ram_gb": 16.0,
-    "apple_chip_model": "Apple M3 Pro"
+  "version": "1.0",
+  "ollama": {
+    "api_base": "http://127.0.0.1:11434",
+    "models": {
+      "chat": {
+        "name": "VladimirGav/gemma4-26b-16GB-VRAM:latest",
+        "parameters": {
+          "temperature": 0.75,
+          "top_p": 0.9,
+          "top_k": 45,
+          "num_ctx": 12288,
+          "repeat_penalty": 1.1
+        }
+      },
+      "embedding": {
+        "name": "nomic-embed-text",
+        "parameters": {
+          "temperature": 0.0,
+          "top_k": 1
+        }
+      }
+    }
   },
-  "pre_existing": {
-    "models": [],  # Models that existed before setup
-    "backups": {}   # Backed-up config files
-  },
-  "installed": {
-    "models": [
-      {"name": "gpt-oss:20b", "ram_gb": 16.0},
-      {"name": "nomic-embed-text", "ram_gb": 0.3}
-    ],
-    "files": [
-      "~/.continue/config.yaml",
-      "~/.continue/config.json"
-    ],
-    "ollama_available": true
+  "hardware": {
+    "chip": "M4",
+    "ram_gb": 16,
+    "optimized": true
   }
 }
 ```
 
-## 💻 IDE Support
+**Note**: This file is for reference only. OpenCode is configured through IntelliJ IDEA's settings UI, not by reading this file.
 
-### Supported IDEs
+### OpenCode Settings Location
 
-| IDE | Support | Config Format | Detection |
-|-----|---------|---------------|-----------|
-| **VS Code** | ✅ Full | YAML + JSON | `~/.vscode/extensions/` |
-| **Cursor** | ✅ Full | YAML + JSON | Auto-detected |
-| **IntelliJ IDEA** | ✅ Full | JSON only | `/Applications/IntelliJ*` |
+OpenCode stores settings in IntelliJ IDEA's configuration:
+- **macOS**: `~/Library/Application Support/JetBrains/IntelliJIdea<version>/`
+- **Linux**: `~/.config/JetBrains/IntelliJIdea<version>/`
+- **Windows**: `%APPDATA%\JetBrains\IntelliJIdea<version>\`
 
-### Installing Continue Extension
+You configure OpenCode through: **Preferences/Settings → Tools → OpenCode**
 
-**VS Code/Cursor:**
+## 🧪 Testing
+
+### Manual Testing
 ```bash
-# Manual installation
-code --install-extension continue.continue
+# Test model inference
+ollama run VladimirGav/gemma4-26b-16GB-VRAM:latest "Explain Python decorators"
 
-# Or install via VS Code marketplace
+# Verify Ollama API
+curl http://127.0.0.1:11434/api/tags | python3 -m json.tool
+
+# Check model parameters
+ollama show VladimirGav/gemma4-26b-16GB-VRAM:latest
 ```
 
-**IntelliJ IDEA:**
-1. File → Settings → Plugins
-2. Search for "Continue"
-3. Install and restart
+### In IntelliJ IDEA
+1. Open any code file
+2. Activate OpenCode (toolbar or menu)
+3. Ask: "Explain this function"
+4. Verify model responds correctly
+5. Test semantic search: "Find authentication code"
 
-### Verifying Setup
+## 🎓 Model Details
 
-After running `setup.py`:
-1. Open your IDE
-2. Reload window (if Continue was already installed)
-3. Open Continue chat panel
-4. Type a message - should respond using GPT-OSS 20B
-5. Check status bar - should show "● Ollama" (connected)
+### Gemma4 26B (Optimized for 16GB VRAM)
 
-## 🖥️ Hardware Requirements
+**Source**: [VladimirGav/gemma4-26b-16GB-VRAM](https://ollama.com/VladimirGav/gemma4-26b-16GB-VRAM)
 
-### Apple Silicon Tiers
+**Optimizations**:
+- Quantized for 16GB Mac Silicon systems
+- Optimized inference speed on Metal GPU
+- Balanced quality/performance tradeoff
 
-| Tier | RAM | Chip | Model Size | Context | Status |
-|------|-----|------|------------|---------|--------|
-| **S** | 16GB | M1/M2/M3 | 20GB max | 32K | ✅ Supported |
-| **A** | 18GB | M1/M2/M3 Pro | 20GB max | 32K | ✅ Supported |
-| **B** | 24-32GB | M3 Pro/Max | 20GB max | 65K | ✅ Supported |
-| **C** | 36-48GB | M1/M2/M3 Max/Ultra | 20GB max | 128K | ✅ Supported |
+**Use Cases**:
+- Code completion and generation
+- Code explanation and documentation
+- Refactoring suggestions
+- Bug detection and fixes
 
-### RAM Allocation
+### Nomic Embed Text
 
-- **System Reserved**: 30-40% (macOS, apps, browser)
-- **Available for Models**: 60-70%
-- **Model RAM Usage**: 16.3GB (GPT-OSS 20B + nomic-embed-text)
-- **Minimum**: 16GB total RAM
+**Source**: [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
 
-### Metal GPU
+**Purpose**: Converts code into semantic embeddings for:
+- Semantic code search ("find authentication logic")
+- Context-aware suggestions
+- Related file discovery
+- Documentation matching
 
-All Apple Silicon Macs have unified memory with Metal GPU acceleration:
-- M1/M2/M3: 8-10 GPU cores
-- M1/M2/M3 Pro: 14-19 GPU cores
-- M1/M2/M3 Max: 30-40 GPU cores
-- M1/M2 Ultra: 48-76 GPU cores
+**Size**: 274 MB (lightweight, recommended for all setups)
 
-## 📊 Model Catalog
+## 🛠️ Troubleshooting
 
-### Installed Models
-
-| Model | Size | RAM | Purpose | Context Length |
-|-------|------|-----|---------|----------------|
-| **gpt-oss:20b** | 16GB | 16GB | Primary coding model | 131K tokens |
-| **nomic-embed-text** | 274MB | 0.3GB | Embeddings for context | 8K tokens |
-
-### Model Details
-
-**GPT-OSS 20B:**
-- **Architecture**: GPT-style transformer
-- **Parameters**: 20 billion
-- **Training**: Open-source code datasets
-- **Strengths**: Code generation, debugging, explanations
-- **Roles**: chat, edit, autocomplete
-
-**Nomic Embed Text:**
-- **Architecture**: Sentence transformer
-- **Purpose**: Convert text to vector embeddings
-- **Use Case**: Semantic search in codebase context
-- **Roles**: embed
-
-### Model Selection Logic
-
-**Fixed Selection (v4.0):**
-```python
-# No user choice - same models for all 16GB+ systems
-models = [
-    RecommendedModel(name="GPT-OSS 20B", ram_gb=16.0, roles=["chat", "edit", "autocomplete"]),
-    RecommendedModel(name="Nomic Embed Text", ram_gb=0.3, roles=["embed"])
-]
-```
-
-**Validation:**
-- ✅ Apple Silicon detected
-- ✅ 16GB+ RAM available
-- ✅ Models fit in available memory (with safety margin)
-- ❌ Exit if requirements not met
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**1. "Apple Silicon required" error**
-```
-Error: This setup only supports Apple Silicon Macs
-```
-**Solution**: Code currently requires Apple Silicon. For Intel/Linux/Windows support, see `MIGRATION_FROM_DOCKER.md`.
-
-**2. "Insufficient RAM" error**
-```
-Error: 16GB RAM required (found: 8GB)
-```
-**Solution**: Upgrade to 16GB+ RAM or use smaller models (requires code modification).
-
-**3. Ollama models not pulling**
-```
-Error: Failed to pull gpt-oss:20b
-```
-**Solutions:**
-- Check internet connection
-- Verify disk space (20GB+ free)
-- Try manual pull: `ollama pull gpt-oss:20b`
-- Check Ollama logs: `tail -f ~/.ollama/logs/server.log`
-
-**4. Continue not connecting to Ollama**
-```
-Status: Disconnected from Ollama
-```
-**Solutions:**
-- Verify Ollama running: `ollama list`
-- Check API endpoint: `curl http://127.0.0.1:11434/api/tags`
-- Restart Ollama: `pkill ollama && ollama serve`
-- Check Continue config: `~/.continue/config.yaml`
-
-**5. VPN/Corporate Proxy Issues**
-```
-Error: Connection refused / SSL error
-```
-**Solutions:**
-- Script handles SSH_AUTH_SOCK automatically
-- Uses `127.0.0.1` instead of `localhost` for VPN resilience
-- SSL verification disabled for corporate proxies (security tradeoff)
-
-### Debug Mode
-
-Enable detailed logging:
+### Model Not Found
 ```bash
-# Set environment variable before running setup
-export DEBUG=1
-python3 setup.py
+# Verify model is pulled
+ollama list
+
+# Re-pull if needed
+ollama pull VladimirGav/gemma4-26b-16GB-VRAM:latest
 ```
 
-**Debug logs:**
-- Console output shows all subprocess commands
-- API call details and responses
-- Model pull progress with detailed parsing
-
-### Getting Help
-
-1. **Check logs:**
-   - Ollama: `~/.ollama/logs/server.log`
-   - Setup: Console output during `setup.py`
-
-2. **Verify setup:**
+### OpenCode Not Connecting
+1. Check Ollama is running:
    ```bash
-   ollama list                    # Should show gpt-oss:20b, nomic-embed-text
-   cat ~/.continue/config.yaml    # Check configuration
-   curl http://127.0.0.1:11434/api/tags  # Test API
+   curl http://127.0.0.1:11434/api/tags
    ```
 
-3. **Clean reinstall:**
-   ```bash
-   python3 uninstall.py  # Clean uninstall
-   python3 setup.py      # Fresh install
-   ```
+2. Verify OpenCode settings:
+   - API endpoint: `http://127.0.0.1:11434`
+   - Model name matches exactly
 
-4. **Open an issue:** [GitHub Issues](https://github.com/[your-repo]/issues)
+3. Restart IntelliJ IDEA
 
-## 🗑️ Uninstallation
+### Out of Memory
+If the selected model runs out of RAM:
+- Choose a smaller model (4B or 2B)
+- Close other applications
+- Reduce context length in parameters
 
-### Smart Uninstallation
+### Slow Performance
+- **M1/M2 users**: Stick with 26B or smaller
+- **Reduce context**: Lower `num_ctx` to 8192 or 4096
+- **Disable embedding**: Skip nomic-embed-text if not needed
 
-```bash
-python3 uninstall.py
-```
-
-**What gets removed:**
-- Models installed by setup (gpt-oss:20b, nomic-embed-text)
-- Generated config files (~/.continue/config.yaml, config.json)
-- Global rules file (~/.continue/rules/global-rule.md)
-- Cache directories
-
-**What gets preserved:**
-- Pre-existing models (tracked in manifest)
-- Backed-up config files (restored automatically)
-- Ollama installation (unless you choose to remove it)
-
-### Manual Cleanup
-
-If manifest is lost:
-```bash
-# Remove models
-ollama rm gpt-oss:20b
-ollama rm nomic-embed-text
-
-# Remove configs
-rm -rf ~/.continue/config.yaml
-rm -rf ~/.continue/config.json
-rm -rf ~/.continue/rules/global-rule.md
-
-# Stop Ollama service
-launchctl unload ~/Library/LaunchAgents/com.ollama.server.plist
-
-# Optionally remove Ollama
-brew uninstall ollama
-rm -rf ~/.ollama
-```
-
-## 🧪 Development
-
-### Running Tests
-
-```bash
-# Run all tests (auto-creates venv, installs dependencies)
-python3 run_tests.py
-
-# Run with coverage
-python3 run_tests.py --cov
-
-# Run specific tests
-python3 run_tests.py -k "test_hardware"
-
-# Verbose output
-python3 run_tests.py -v
-
-# Quick mode (skip slow tests)
-python3 run_tests.py --quick
-```
-
-**Test Infrastructure:**
-- Automatic virtual environment (`.venv/`)
-- Auto-installs `pytest`, `pytest-cov` from `tests/requirements.txt`
-- Parametrized fixtures for comprehensive coverage
-- TDD approach with `SPECIFICATIONS.md` defining expected behavior
-
-### Test Organization
+## 📂 Project Structure
 
 ```
-tests/
-├── conftest.py              # Shared fixtures and test configuration
-├── SPECIFICATIONS.md        # Behavioral specifications for TDD
-├── test_unit_*.py          # Unit tests (11 files)
-├── test_integration.py     # Integration tests
-├── test_e2e_flows.py       # End-to-end workflow tests
-└── mocks.py                 # Test mocks and utilities
+ai_model/
+├── lib/                      # Core library modules
+│   ├── __init__.py
+│   ├── config.py            # OpenCode configuration
+│   ├── hardware.py          # Mac Silicon detection
+│   ├── ide.py               # IntelliJ/OpenCode detection
+│   ├── model_selector.py    # Gemma4 catalog & selection
+│   ├── models.py            # Model definitions
+│   ├── ollama.py            # Ollama service management
+│   ├── ui.py                # Terminal UI utilities
+│   ├── uninstaller.py       # Uninstall logic
+│   ├── utils.py             # Shared utilities
+│   └── validator.py         # Model pulling & verification
+├── setup.py                 # Main setup script (230 lines)
+├── uninstall.py             # Uninstall script
+├── run_tests.py             # Test runner
+├── tests/                   # Test suite
+├── .gitignore
+├── README.md                # This file
+└── OPENCODE_REFACTORING_PLAN.md  # Development notes
 ```
 
-### Code Quality
+## 🔄 Version History
 
-**Type Hints:**
-- 95%+ coverage with complete type annotations
-- Uses `dataclasses`, `Optional`, `List`, `Dict`, `Tuple`
+### v5.0.0 (2026-04-06) - OpenCode & Gemma4
+- **Breaking**: Complete pivot from Continue.dev to OpenCode
+- **Added**: Interactive Gemma4 model selection (5 variants)
+- **Added**: Mac Silicon parameter optimization
+- **Added**: IntelliJ IDEA + OpenCode plugin support
+- **Removed**: Continue.dev YAML/JSON generation
+- **Removed**: Multi-model automatic selection
+- **Changed**: User choice with hardware recommendations
 
-**Documentation:**
-- Module docstrings
-- Function docstrings with Args/Returns sections
-- Inline comments for complex logic
-
-**Architecture:**
-- Clean module boundaries
-- Single Responsibility Principle
-- No circular dependencies
-
-## 📝 Changelog
-
-### v4.1.0 (2026-04-06) - Ollama-Only Refactoring
+### v4.1.0 (2026-04-05) - Ollama Only
 - **Breaking**: Removed Docker Model Runner backend
-- **Simplified**: Single backend architecture (Ollama only)
-- **Improved**: -40% code reduction (6,759 lines deleted)
-- **Enhanced**: Flattened directory structure for clarity
-- **Migration**: See `MIGRATION_FROM_DOCKER.md` for Docker users
+- **Changed**: Fixed GPT-OSS 20B + nomic-embed-text for all users
+- **Simplified**: Single backend architecture (-40% code)
+- **Improved**: Validator refactoring (-343 lines, complexity 71 → 5)
 
-### v4.0.0 (2025-01-13) - Fixed Model Selection
-- **Changed**: Fixed model installation (GPT-OSS 20B + nomic-embed-text)
-- **Removed**: Hardware-based model tier selection
-- **Simplified**: No user choice needed
-- **Added**: Manifest-based smart uninstallation
-
-### v3.0.0 - Dual Backend Support
-- **Added**: Docker Model Runner backend support
-- **Added**: AI fine-tuning profiles (performance/balanced/quality)
-- **Enhanced**: Parametrized test fixtures for both backends
-
-### v2.0.0 - TDD Rewrite
-- **Rewrote**: Test-driven development approach
-- **Added**: SPECIFICATIONS.md with behavioral specs
-- **Enhanced**: Hardware detection with Apple Silicon details
-
-### v1.0.0 - Initial Release
-- **Released**: Ollama setup automation
-- **Features**: Hardware detection, model selection, Continue.dev config
-
-## 📄 License
-
-MIT License - See LICENSE file for details
+### v4.0.0 (2026-04-04) - Dual Backend
+- Supported both Docker Model Runner and Ollama
+- Hardware-based tiering
+- Continue.dev integration
 
 ## 🤝 Contributing
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Write tests for new functionality
-4. Ensure all tests pass (`python3 run_tests.py`)
-5. Update documentation (README.md, docstrings)
-6. Submit a pull request
+This is a personal project optimized for Mac Silicon + Gemma4 + OpenCode. If you want to:
 
-### Development Guidelines
-- Follow PEP 8 style guide
-- Add type hints to all functions
-- Write docstrings with Args/Returns sections
-- Add unit tests for new functions
-- Update `SPECIFICATIONS.md` for behavioral changes
+- **Add Linux/Windows support**: Remove Apple Silicon validation in `model_selector.py`
+- **Add other models**: Extend `GEMMA4_MODELS` catalog in `model_selector.py`
+- **Support other IDEs**: Extend `ide.py` detection logic
+
+## 📝 License
+
+MIT License - See LICENSE file for details.
+
+## 🔗 Resources
+
+- **Ollama**: https://ollama.com
+- **Gemma4 Models**: https://ollama.com/library/gemma4
+- **VladimirGav Optimized 26B**: https://ollama.com/VladimirGav/gemma4-26b-16GB-VRAM
+- **OpenCode Plugin**: https://plugins.jetbrains.com/plugin/30681-opencode
+- **IntelliJ IDEA**: https://www.jetbrains.com/idea/
+- **Nomic Embed Text**: https://ollama.com/library/nomic-embed-text
 
 ## 🙏 Acknowledgments
 
-- **Ollama** - Local LLM runtime (https://ollama.com)
-- **Continue.dev** - AI coding assistant (https://continue.dev)
-- **GPT-OSS** - Open-source coding model
-- **Nomic AI** - Embedding models
+- **Google**: Gemma4 model family
+- **VladimirGav**: Optimized 26B variant for 16GB systems
+- **Ollama**: Local LLM runtime with Metal GPU support
+- **JetBrains**: IntelliJ IDEA and plugin ecosystem
+- **Nomic AI**: nomic-embed-text embedding model
 
 ---
 
-**Questions?** Open an issue: [GitHub Issues](https://github.com/[your-repo]/issues)
-
-**Migration Guide:** See `MIGRATION_FROM_DOCKER.md` for Docker Model Runner users
+**Ready to start?** Run `python3 setup.py` and choose your Gemma4 model! 🚀
