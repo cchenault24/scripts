@@ -10,6 +10,7 @@ Provides functions to:
 
 import json
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
@@ -422,3 +423,309 @@ def display_opencode_usage_instructions(model_name: str) -> None:
     print(f"  {ui.colorize('opencode --help', ui.Colors.GREEN)}          # Show all commands")
     print(f"  {ui.colorize('/models', ui.Colors.GREEN)}                  # Switch models (in TUI)")
     print()
+
+
+def generate_opencode_config_llamacpp(
+    model_name: str,
+    context_size: int,
+    hw_info,
+    force: bool = False
+) -> Tuple[bool, str]:
+    """
+    Generate OpenCode configuration for llama.cpp backend (JSONC format).
+
+    Args:
+        model_name: Model name for display (e.g., "Gemma 4 26B")
+        context_size: Context window size
+        hw_info: Hardware information for optimizations
+        force: If True, overwrite existing config
+
+    Returns:
+        Tuple of (success, message)
+
+    Note:
+        Uses JSONC format with tool Parsing compatibility layer for llama.cpp.
+    """
+    config_dir = Path.home() / ".config/opencode"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    config_file = config_dir / "opencode.jsonc"
+
+    # Check if config already exists
+    if config_file.exists() and not force:
+        return True, f"Config already exists: {config_file} - skipping (use --force-reinstall to overwrite)"
+
+    # Calculate optimal settings based on hardware
+    cpu_threads = hw_info.cpu_perf_cores if hasattr(hw_info, 'cpu_perf_cores') and hw_info.cpu_perf_cores > 0 else hw_info.cpu_cores
+
+    config_content = f'''{{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {{
+    "llama": {{
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "llama.cpp (local)",
+      "options": {{
+        "baseURL": "http://127.0.0.1:3456/v1",
+        "toolParser": [
+          {{ "type": "raw-function-call" }},
+          {{ "type": "json" }}
+        ]
+      }},
+      "models": {{
+        "gemma4": {{
+          "name": "{model_name}",
+          "tool_call": true,
+          "limit": {{
+            "context": {context_size},
+            "output": 8192
+          }}
+        }}
+      }}
+    }}
+  }},
+  "model": "llama/gemma4",
+  "agent": {{
+    "build": {{
+      "prompt": "{{{{file:~/.config/opencode/prompts/build.txt}}}}",
+      "permission": {{
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow"
+      }}
+    }}
+  }}
+}}'''
+
+    try:
+        # Backup existing config if forcing
+        if config_file.exists() and force:
+            backup_file = config_dir / "opencode.jsonc.backup"
+            shutil.copy(config_file, backup_file)
+            ui.print_info(f"Backed up existing config to: {backup_file}")
+
+        config_file.write_text(config_content)
+        action = "Updated" if force else "Created"
+        return True, f"{action} global config: {config_file}"
+    except Exception as e:
+        return False, f"Failed to create config: {e}"
+
+
+def generate_agents_md(force: bool = False) -> Tuple[bool, str]:
+    """
+    Generate global AGENTS.md with tool usage instructions.
+
+    Args:
+        force: If True, overwrite existing file
+
+    Returns:
+        Tuple of (success, message)
+
+    Note:
+        Contains parameter name guidance for Gemma 4 tool calling.
+    """
+    config_dir = Path.home() / ".config/opencode"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    agents_file = config_dir / "AGENTS.md"
+
+    # Check if file already exists
+    if agents_file.exists() and not force:
+        return True, f"AGENTS.md already exists: {agents_file} - skipping"
+
+    agents_content = '''# OpenCode Agent Instructions
+
+## Tool Usage Guidelines
+
+When using tools, follow these exact parameter names:
+
+### File Operations
+
+**Read files:**
+```
+{
+  "name": "read",
+  "arguments": {
+    "path": "path/to/file.txt"
+  }
+}
+```
+
+**Edit files:**
+```
+{
+  "name": "edit",
+  "arguments": {
+    "path": "path/to/file.txt",
+    "instructions": "what to change"
+  }
+}
+```
+
+**Create files:**
+```
+{
+  "name": "write",
+  "arguments": {
+    "path": "path/to/file.txt",
+    "content": "file contents"
+  }
+}
+```
+
+### Shell Commands
+
+**Run bash commands:**
+```
+{
+  "name": "bash",
+  "arguments": {
+    "command": "ls -la"
+  }
+}
+```
+
+### Web Access
+
+**Fetch web pages:**
+```
+{
+  "name": "webfetch",
+  "arguments": {
+    "url": "https://example.com",
+    "query": "what information to extract"
+  }
+}
+```
+
+## Important Rules
+
+1. Always use exact parameter names shown above
+2. For file paths, use forward slashes (/)
+3. For bash commands, test with simple commands first
+4. Check tool results before proceeding
+5. If a tool fails, read the error and try again with corrections
+'''
+
+    try:
+        # Backup existing file if forcing
+        if agents_file.exists() and force:
+            backup_file = config_dir / "AGENTS.md.backup"
+            shutil.copy(agents_file, backup_file)
+
+        agents_file.write_text(agents_content)
+        action = "Updated" if force else "Created"
+        return True, f"{action} global guide: {agents_file}"
+    except Exception as e:
+        return False, f"Failed to create AGENTS.md: {e}"
+
+
+def generate_build_prompt(force: bool = False) -> Tuple[bool, str]:
+    """
+    Generate global build.txt prompt for build agent.
+
+    Args:
+        force: If True, overwrite existing file
+
+    Returns:
+        Tuple of (success, message)
+    """
+    config_dir = Path.home() / ".config/opencode"
+    prompt_dir = config_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_file = prompt_dir / "build.txt"
+
+    # Check if file already exists
+    if prompt_file.exists() and not force:
+        return True, f"Build prompt already exists: {prompt_file} - skipping"
+
+    prompt_content = '''You are a software build agent. Your job is to help users build and modify code.
+
+Available tools:
+- read(path): Read file contents
+- edit(path, instructions): Edit files
+- write(path, content): Create new files
+- bash(command): Run shell commands
+- webfetch(url, query): Fetch information from the web
+
+Guidelines:
+1. Always read files before editing
+2. Use bash to run builds, tests, and git commands
+3. Check results after each operation
+4. Ask for clarification if requirements are unclear
+5. Follow the tool parameter names exactly as shown in AGENTS.md
+'''
+
+    try:
+        # Backup existing file if forcing
+        if prompt_file.exists() and force:
+            backup_file = prompt_dir / "build.txt.backup"
+            shutil.copy(prompt_file, backup_file)
+
+        prompt_file.write_text(prompt_content)
+        action = "Updated" if force else "Created"
+        return True, f"{action} global prompt: {prompt_file}"
+    except Exception as e:
+        return False, f"Failed to create build prompt: {e}"
+
+
+def create_optimized_modelfile_llamacpp(
+    model_name: str,
+    hw_info,
+    force: bool = False
+) -> Tuple[bool, str]:
+    """
+    Create optimized Modelfile template for advanced users.
+
+    Args:
+        model_name: Model name (e.g., "gemma4:26b")
+        hw_info: Hardware information
+        force: If True, overwrite existing file
+
+    Returns:
+        Tuple of (success, message)
+    """
+    config_dir = Path.home() / ".config/opencode"
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    modelfile_path = config_dir / f"Modelfile.{model_name}.optimized"
+
+    if modelfile_path.exists() and not force:
+        return True, f"Modelfile already exists - skipping"
+
+    # Calculate optimal settings
+    num_ctx = 32768 if hw_info.ram_gb >= 48 else 16384 if hw_info.ram_gb >= 32 else 8192
+    num_thread = hw_info.cpu_perf_cores if hasattr(hw_info, 'cpu_perf_cores') and hw_info.cpu_perf_cores > 0 else hw_info.cpu_cores
+
+    modelfile_content = f'''# Optimized Modelfile for {model_name} on Apple Silicon
+FROM {model_name}
+
+# Context window (larger = more memory usage)
+PARAMETER num_ctx {num_ctx}
+
+# CPU threads (use performance cores for best results)
+PARAMETER num_thread {num_thread}
+
+# Temperature (lower = more deterministic, higher = more creative)
+PARAMETER temperature 0.7
+
+# Top-p sampling (nucleus sampling)
+PARAMETER top_p 0.9
+
+# Repeat penalty (higher = less repetition)
+PARAMETER repeat_penalty 1.1
+
+# Custom system prompt (optional)
+SYSTEM ""
+You are a helpful AI coding assistant.
+"""
+
+# To create a custom model:
+# ollama create {model_name}-optimized -f {modelfile_path}
+'''
+
+    try:
+        modelfile_path.write_text(modelfile_content)
+        return True, f"Created Modelfile: {modelfile_path}"
+    except Exception as e:
+        return False, f"Failed to create Modelfile: {e}"
