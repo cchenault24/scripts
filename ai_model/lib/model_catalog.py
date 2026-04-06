@@ -175,7 +175,7 @@ LLAMACPP_MODELS: Dict[str, LlamaCppModel] = {
     "26b": LlamaCppModel(
         name="Gemma 4 26B (High Quality)",
         size=ModelSize.LARGE,
-        hf_repo="ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_K_M",
+        hf_repo="ggml-org/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-Q4_K_M.gguf",
         ram_gb=16.0,
         min_ram=16,
         max_ram=32,
@@ -191,7 +191,7 @@ LLAMACPP_MODELS: Dict[str, LlamaCppModel] = {
     "31b": LlamaCppModel(
         name="Gemma 4 31B (Maximum Quality)",
         size=ModelSize.XLARGE,
-        hf_repo="ggml-org/gemma-4-31B-it-GGUF:Q4_K_M",
+        hf_repo="ggml-org/gemma-4-31B-it-GGUF:gemma-4-31B-it-Q4_K_M.gguf",
         ram_gb=20.0,
         min_ram=24,
         max_ram=64,

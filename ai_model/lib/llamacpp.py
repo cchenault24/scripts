@@ -241,6 +241,12 @@ def download_model_from_hf(
 
         # Download with progress and timeout
         # Note: --local-dir-use-symlinks removed as it's not available in all hf CLI versions
+
+        # Debug: Print exact command being run
+        cmd_str = f"{hf_cli_path} download {repo_id} {filename}"
+        if show_progress:
+            ui.print_info(f"Running: {cmd_str}")
+
         code, output_lines = utils.stream_command_output(
             [hf_cli_path, "download", repo_id, filename],
             keywords=["Downloading", "Download", "fetching", "%", "MB", "GB", "100%", "done"],
@@ -249,8 +255,15 @@ def download_model_from_hf(
         )
 
         if code != 0:
-            error_msg = "".join(output_lines[-10:])
-            return False, f"Model download failed: {error_msg}"
+            # Show full error output for debugging
+            error_msg = "".join(output_lines[-20:]) if output_lines else "(no output captured)"
+
+            if show_progress:
+                ui.print_error("Full error output:")
+                for line in output_lines[-20:]:
+                    print(f"  {line}")
+
+            return False, f"Model download failed with exit code {code}: {error_msg}"
 
         # Verify download succeeded
         if not cache_dir.exists():
