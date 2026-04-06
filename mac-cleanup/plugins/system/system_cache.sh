@@ -13,9 +13,9 @@ clean_system_cache() {
     
     if [[ "$MC_DRY_RUN" != "true" ]]; then
       # Get size before cleanup (requires sudo)
-      # SAFE-6: Properly quote cache_dir to prevent command injection
-      local escaped_cache_dir_size=$(printf '%q' "$cache_dir")
-      space_before=$(sudo sh -c "du -sk $escaped_cache_dir_size 2>/dev/null | awk '{print \$1 * 1024}'" || echo "0")
+      # SEC-2/SEC-3: Use direct sudo execution without sh -c
+      local du_output=$(sudo -- du -sk "$cache_dir" 2>/dev/null | awk '{print $1 * 1024}' || echo "0")
+      space_before="$du_output"
     fi
     
     if ! backup "$cache_dir" "system_caches"; then
@@ -48,9 +48,9 @@ clean_system_cache() {
         return 1
       }
       
-      # SAFE-6: Properly quote cache_dir to prevent command injection
-      local escaped_cache_dir_after=$(printf '%q' "$cache_dir")
-      local space_after=$(sudo sh -c "du -sk $escaped_cache_dir_after 2>/dev/null | awk '{print \$1 * 1024}'" || echo "0")
+      # SEC-2/SEC-3: Use direct sudo execution without sh -c
+      local du_output_after=$(sudo -- du -sk "$cache_dir" 2>/dev/null | awk '{print $1 * 1024}' || echo "0")
+      local space_after="$du_output_after"
       local space_freed=$((space_before - space_after))
       
       # Validate space_freed is not negative
@@ -73,11 +73,10 @@ clean_system_cache() {
 _calculate_system_cache_size_bytes() {
   local size_bytes=0
   if [[ -d "/Library/Caches" ]]; then
-    # Requires sudo for system directories, but we can try without for size calculation
-    # Path is hardcoded, so safe from injection, but we quote it anyway for consistency
+    # SEC-2/SEC-3: Use direct sudo execution without sh -c
     local cache_path="/Library/Caches"
-    local escaped_cache_path=$(printf '%q' "$cache_path")
-    size_bytes=$(sudo sh -c "du -sk $escaped_cache_path 2>/dev/null | awk '{print \$1 * 1024}'" 2>/dev/null || echo "0")
+    local du_output=$(sudo -- du -sk "$cache_path" 2>/dev/null | awk '{print $1 * 1024}' 2>/dev/null || echo "0")
+    size_bytes="$du_output"
   fi
   echo "$size_bytes"
 }

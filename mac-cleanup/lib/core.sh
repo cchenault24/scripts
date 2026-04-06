@@ -30,15 +30,27 @@ if [[ -z "${MC_BYTES_PER_MB:-}" ]]; then
   source "$MC_SCRIPT_DIR/lib/constants.sh" 2>/dev/null || true
 fi
 
-# Create backup directory if it doesn't exist
+# SEC-9: Create backup directory with restrictive permissions (700)
+# Prevents other users from reading sensitive cached data in backups
 _create_backup_dir() {
   if [[ ! -d "$MC_BACKUP_DIR" ]]; then
+    # SEC-9: Set restrictive umask (owner only: rwx------)
+    local old_umask=$(umask)
+    umask 077
+
     if ! mkdir -p "$MC_BACKUP_DIR" 2>/dev/null; then
+      # Restore umask before error handling
+      umask "$old_umask"
+
       print_error "Failed to create backup directory at $MC_BACKUP_DIR"
       print_info "This may be due to insufficient permissions or disk space."
       print_info "Creating backup directory in /tmp instead..."
       MC_BACKUP_DIR="${MC_BACKUP_FALLBACK_DIR:-/tmp/mac-cleanup-backups}/$(date +%Y-%m-%d-%H-%M-%S)"
+
+      # Try again with restrictive umask
+      umask 077
       if ! mkdir -p "$MC_BACKUP_DIR" 2>/dev/null; then
+        umask "$old_umask"
         print_error "Failed to create fallback backup directory. Cannot proceed safely."
         print_info "Next steps:"
         print_info "  • Check disk space: df -h"
@@ -49,7 +61,38 @@ _create_backup_dir() {
       print_warning "Using fallback backup location: $MC_BACKUP_DIR"
       log_message "WARNING" "Using fallback backup directory: $MC_BACKUP_DIR"
     fi
-    print_success "Created backup directory at $MC_BACKUP_DIR"
+
+    # Restore umask
+    umask "$old_umask"
+
+    # SEC-9: Double-check permissions (drwx------) = 700
+    chmod 700 "$MC_BACKUP_DIR" 2>/dev/null || {
+      print_error "Failed to set restrictive permissions on backup directory"
+      log_message "ERROR" "chmod 700 failed on $MC_BACKUP_DIR"
+      exit 1
+    }
+
+    # SEC-9: Verify ownership (must be owned by current user)
+    local owner=$(stat -f "%Su" "$MC_BACKUP_DIR" 2>/dev/null)
+    if [[ "$owner" != "$USER" ]]; then
+      print_error "Backup directory owned by wrong user: $owner (expected: $USER)"
+      log_message "ERROR" "Security violation: backup directory owned by $owner, expected $USER"
+      exit 1
+    fi
+
+    print_success "Created backup directory at $MC_BACKUP_DIR (permissions: 700)"
+    log_message "INFO" "Created secure backup directory: $MC_BACKUP_DIR (mode: 700, owner: $USER)"
+  else
+    # SEC-9: Directory exists - verify permissions are restrictive
+    local perms=$(stat -f "%Lp" "$MC_BACKUP_DIR" 2>/dev/null)
+    if [[ "$perms" != "700" ]]; then
+      print_warning "Backup directory has insecure permissions: $perms (should be 700)"
+      log_message "WARNING" "Fixing insecure backup directory permissions: $perms -> 700"
+      chmod 700 "$MC_BACKUP_DIR" 2>/dev/null || {
+        print_error "Failed to fix backup directory permissions"
+        log_message "ERROR" "chmod 700 failed on existing directory $MC_BACKUP_DIR"
+      }
+    fi
   fi
 }
 
@@ -228,8 +271,9 @@ mc_check_zsh_compatibility() {
   # Verify zsh-specific features are available
   # Check for glob qualifiers (used in the script)
   # The (N) qualifier makes globs return nothing instead of erroring on no matches
-  # Test by trying to use the qualifier syntax - if it errors, qualifiers aren't supported
-  if ! (eval 'local test_glob=(/nonexistent/*(N)); true' 2>/dev/null); then
+  # Test by trying to use the qualifier syntax directly in a subshell
+  # SEC-1: Removed eval, using direct subshell execution instead
+  if ! (zsh -c 'local test_glob=(/nonexistent/*(N)); true' 2>/dev/null); then
     print_warning "zsh glob qualifiers may not be fully supported."
     log_message "WARNING" "zsh glob qualifier test failed - some features may not work"
   else
@@ -425,7 +469,7 @@ typeset -A MC_PLUGIN_DEPENDENCIES
 # Plugin registry for category metadata (QUAL-10)
 typeset -A MC_PLUGIN_CATEGORY_METADATA
 
-# Plugin registry functions
+# SEC-10: Plugin registry with input validation to prevent code injection
 mc_register_plugin() {
   local name="$1"
   local category="$2"
@@ -434,39 +478,115 @@ mc_register_plugin() {
   local size_function="${5:-}"  # Optional size calculation function (PERF-3)
   local version="${6:-}"  # Optional version string (QUAL-12)
   local dependencies="${7:-}"  # Optional space-separated dependencies (QUAL-9)
-  
+
+  # SEC-10: Validate plugin name (alphanumeric, spaces, hyphens, underscores only)
+  if [[ ! "$name" =~ ^[a-zA-Z0-9_\ -]+$ ]]; then
+    print_error "Invalid plugin name: $name"
+    print_error "Only alphanumeric, spaces, hyphens, underscores allowed"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: invalid name: $name"
+    return 1
+  fi
+
   # Normalize plugin name at registration time to avoid redundant lookups
   name=$(_normalize_plugin_name "$name")
-  
-  # Validate function exists
+
+  # SEC-10: Validate function name (must be valid shell function name)
   if [[ -z "$function" ]]; then
     print_error "Plugin registration failed: function name is empty for plugin: $name"
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: empty function for: $name"
     return 1
   fi
-  
+
+  if [[ ! "$function" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+    print_error "Invalid function name: $function"
+    print_error "Function names must start with letter/underscore, contain only alphanumeric/underscores"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: invalid function name: $function"
+    return 1
+  fi
+
+  # SEC-10: Verify function exists and is actually a function (not an external command)
+  # Use whence -w in zsh to distinguish functions from commands
+  local func_type=""
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    func_type=$(whence -w "$function" 2>/dev/null | awk '{print $2}')
+  else
+    # Bash: use type -t
+    func_type=$(type -t "$function" 2>/dev/null)
+  fi
+
+  if [[ "$func_type" != "function" ]]; then
+    print_error "Function not found or not a function: $function (type: ${func_type:-none})"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: $function is not a function (type: ${func_type:-none})"
+    return 1
+  fi
+
+  # SEC-10: Validate category (must be one of the allowed categories)
+  case "$category" in
+    system|user|development|browsers|misc|package-managers|maintenance|network)
+      # Valid category
+      ;;
+    *)
+      print_error "Invalid category: $category"
+      print_error "Allowed categories: system, user, development, browsers, misc, package-managers, maintenance, network"
+      log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: invalid category: $category"
+      return 1
+      ;;
+  esac
+
+  # SEC-10: Validate size_function if provided
+  if [[ -n "$size_function" ]]; then
+    if [[ ! "$size_function" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+      print_error "Invalid size function name: $size_function"
+      log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: invalid size function: $size_function"
+      return 1
+    fi
+    # Verify size function exists and is a function
+    local size_func_type=""
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+      size_func_type=$(whence -w "$size_function" 2>/dev/null | awk '{print $2}')
+    else
+      size_func_type=$(type -t "$size_function" 2>/dev/null)
+    fi
+
+    if [[ "$size_func_type" != "function" ]]; then
+      print_warning "Size function not found or not a function: $size_function (plugin: $name)"
+      log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Size function not found: $size_function"
+      # Don't fail registration, just skip size function
+      size_function=""
+    fi
+  fi
+
+  # SEC-10: Validate version format if provided (semver-like or simple version)
+  if [[ -n "$version" && ! "$version" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    print_warning "Invalid version format: $version (plugin: $name)"
+    log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Invalid version format: $version"
+    version="unknown"
+  fi
+
   # Store full registry entry: function|category|requires_admin|version
   MC_PLUGIN_REGISTRY["$name"]="$function|$category|$requires_admin|${version:-unknown}"
-  
+
   # Register size calculation function if provided (PERF-3)
   if [[ -n "$size_function" ]]; then
     MC_PLUGIN_SIZE_FUNCTIONS["$name"]="$size_function"
   fi
-  
+
   # Register version if provided (QUAL-12)
   if [[ -n "$version" ]]; then
     MC_PLUGIN_VERSIONS["$name"]="$version"
   fi
-  
+
   # Register dependencies if provided (QUAL-9)
   if [[ -n "$dependencies" ]]; then
     MC_PLUGIN_DEPENDENCIES["$name"]="$dependencies"
   fi
-  
+
   # Store category metadata (QUAL-10) - allows plugins to define custom categories
   if [[ -n "$category" ]]; then
     MC_PLUGIN_CATEGORY_METADATA["$category"]="${MC_PLUGIN_CATEGORY_METADATA[$category]:-}"
   fi
+
+  log_message "${MC_LOG_LEVEL_INFO:-INFO}" "Registered plugin: $name (category: $category, function: $function)"
 }
 
 mc_get_plugin_function() {

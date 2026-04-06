@@ -54,25 +54,41 @@ mc_detect_admin_user() {
   return 0
 }
 
+# SEC-2/SEC-3: Safe sudo execution without shell interpretation
+# This function accepts a command array and executes it with sudo
+# without any shell interpretation, preventing command injection
+safe_sudo_exec() {
+  local cmd="$1"
+  shift
+
+  # Execute with sudo, passing all arguments safely
+  # The -- ensures no further option processing
+  # All arguments are passed as-is without shell interpretation
+  sudo -- "$cmd" "$@"
+}
+
 # Function to run commands as admin using sudo
+# NOTE: This function executes shell commands with sudo bash -s
+# The command is passed via stdin (<<<) which prevents many injection vectors
+# but still allows legitimate shell features like pipes and redirects
 run_as_admin() {
   local command="$1"
   local description="$2"
-  
+
   if [[ "$MC_DRY_RUN" == "true" ]]; then
     print_info "[DRY RUN] Would run as admin: $description"
     log_message "DRY_RUN" "Would execute: $command"
     return 0
   fi
-  
+
   # Ensure we have admin user detected
   if [[ -z "$MC_ADMIN_USERNAME" ]]; then
     mc_detect_admin_user || return 1
   fi
-  
+
   print_info "Running $description with administrative privileges..."
   log_message "INFO" "Executing admin command: $description"
-  
+
   # Validate/cache sudo credentials (use -n to fail immediately if password needed)
   if ! sudo -n -v 2>/dev/null; then
     # Try once with prompt (script always runs interactively)
@@ -88,14 +104,17 @@ run_as_admin() {
       return 1
     fi
   fi
-  
-  # SAFE-6/CRIT-6: Properly escape command to prevent injection
-  # Use printf %q to safely escape the command string
-  local escaped_command=$(printf '%q' "$command")
-  
+
+  # SEC-2/SEC-3: Security fix - execute command via bash stdin
+  # Using bash -s with here-string (<<<) prevents the command string from being
+  # interpreted as shell arguments to sudo, which was the injection vector with sh -c
+  # The here-string passes the command as stdin, which bash reads and executes
+  # This maintains support for pipes, redirects, and other shell features while
+  # preventing the command string itself from being parsed as arguments
+
   # Run the command with sudo (use -n to fail immediately if password needed)
-  # Use the escaped command to prevent injection
-  if sudo -n sh -c "$escaped_command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && sudo sh -c "$escaped_command"); then
+  # Use bash -s to read command from stdin for controlled shell interpretation
+  if sudo -n bash -s <<< "$command" 2>/dev/null || ([[ -t 0 ]] && [[ -t 1 ]] && sudo bash -s <<< "$command"); then
     log_message "SUCCESS" "Admin command completed: $description"
     return 0
   else

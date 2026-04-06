@@ -1,7 +1,8 @@
 #!/bin/zsh
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
 #
 # mac-cleanup.sh - Interactive macOS system cleanup utility
-# 
+#
 # Modular, plugin-based architecture for easy extension and maintenance
 #
 # Author: Generated with Claude
@@ -152,8 +153,12 @@ run_async_sweep() {
   local plugin_index=0
   
   for plugin_name in "${plugin_list[@]}"; do
-    # Create temp file for this plugin's result
-    local temp_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-$$-$plugin_index.tmp"
+    # Create temp file for this plugin's result (SEC-6: secure temp file creation)
+    local temp_file=$(create_secure_temp_file "mac-cleanup-sweep" 2>/dev/null || echo "")
+    if [[ -z "$temp_file" ]]; then
+      log_message "ERROR" "Failed to create secure temp file for plugin: $plugin_name"
+      continue
+    fi
     temp_files+=("$temp_file")
     
     # Calculate size in background
@@ -645,8 +650,12 @@ main() {
     exit 1
   fi
   
-  # Start async sweep in background
-  local sweep_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-sweep-$$.tmp"
+  # Start async sweep in background (SEC-6: secure temp file creation)
+  local sweep_file=$(create_secure_temp_file "mac-cleanup-sweep" 2>/dev/null || echo "")
+  if [[ -z "$sweep_file" ]]; then
+    print_error "Failed to create secure temporary file for sweep operation"
+    exit 1
+  fi
   local sweep_pid=""
   if [[ ${#plugin_array[@]} -gt 0 ]]; then
     # Run sweep in background - use () to create subshell that inherits functions
@@ -768,8 +777,12 @@ main() {
         continue
       fi
       
-      # Create temp file for this plugin's result
-      local temp_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-size-$$-$plugin_index.tmp"
+      # Create temp file for this plugin's result (SEC-6: secure temp file creation)
+      local temp_file=$(create_secure_temp_file "mac-cleanup-size" 2>/dev/null || echo "")
+      if [[ -z "$temp_file" ]]; then
+        log_message "ERROR" "Failed to create secure temp file for plugin: $plugin_name"
+        continue
+      fi
       temp_files+=("$temp_file")
       
       # Calculate size in background
@@ -1114,13 +1127,15 @@ main() {
   echo ""
   print_info "Time to sweep up! Getting the broom ready..."
   
-  # Create temp files for cleanup output, progress tracking, and space tracking
-  local cleanup_output_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-output-$$.tmp"
-  local progress_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-progress-$$.tmp"
-  local space_tracking_file="${MC_TEMP_DIR}/${MC_TEMP_PREFIX}-space-$$.tmp"
-  : > "$cleanup_output_file" 2>&1 || true
-  : > "$progress_file" 2>&1 || true
-  : > "$space_tracking_file" 2>&1 || true
+  # Create temp files for cleanup output, progress tracking, and space tracking (SEC-6: secure temp file creation)
+  local cleanup_output_file=$(create_secure_temp_file "mac-cleanup-output" 2>/dev/null || echo "")
+  local progress_file=$(create_secure_temp_file "mac-cleanup-progress" 2>/dev/null || echo "")
+  local space_tracking_file=$(create_secure_temp_file "mac-cleanup-space" 2>/dev/null || echo "")
+
+  if [[ -z "$cleanup_output_file" || -z "$progress_file" || -z "$space_tracking_file" ]]; then
+    print_error "Failed to create secure temporary files for cleanup operation"
+    exit 1
+  fi
   
   local total_operations=${#selected_options[@]}
   

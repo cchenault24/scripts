@@ -99,21 +99,9 @@ mc_handle_cleanup_error() {
   return 1
 }
 
-# Execute command with error handling
-# Usage: mc_execute_with_error_handling <command> <description> <plugin_name>
-mc_execute_with_error_handling() {
-  local command="$1"
-  local description="$2"
-  local plugin_name="${3:-Unknown}"
-  
-  if eval "$command" 2>&1; then
-    return 0
-  else
-    local error_code=$?
-    mc_handle_plugin_error "$description" "" "$error_code" "$plugin_name"
-    return $error_code
-  fi
-}
+# SEC-1: Removed mc_execute_with_error_handling function due to command injection vulnerability
+# The function used eval on unsanitized input which could allow arbitrary command execution
+# This function was unused in the codebase and has been removed for security
 
 # Check return value and handle error
 # Usage: mc_check_return_value <return_code> <success_message> <error_message> <plugin_name>

@@ -58,50 +58,92 @@ mc_storage_check_space() {
   return 0
 }
 
-# Ensure backup directory exists and is writable
+# SEC-9: Ensure backup directory exists with restrictive permissions (700)
 # Returns 0 on success, 1 on failure
 # Outputs directory path to stdout (for command substitution)
 # Outputs error messages to stderr
 mc_storage_ensure_dir() {
   local backup_dir="$1"
-  
+
   if [[ -z "$backup_dir" ]]; then
     print_error "Backup directory path is empty" >&2
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "mc_storage_ensure_dir: backup_dir is empty"
     return 1
   fi
-  
+
   # Create directory if it doesn't exist
   if [[ ! -d "$backup_dir" ]]; then
+    # SEC-9: Set restrictive umask (owner only: rwx------)
+    local old_umask=$(umask)
+    umask 077
+
     # Ensure parent directory exists first (mkdir -p should handle this, but be explicit)
     local parent_dir=$(dirname "$backup_dir" 2>/dev/null)
     if [[ -n "$parent_dir" && "$parent_dir" != "." && "$parent_dir" != "/" && ! -d "$parent_dir" ]]; then
       mkdir -p "$parent_dir" 2>/dev/null || true
     fi
-    
+
     if ! mkdir -p "$backup_dir" 2>/dev/null; then
+      # Restore umask before error handling
+      umask "$old_umask"
+
       print_error "Failed to create backup directory: $backup_dir" >&2
       log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Failed to create backup directory: $backup_dir"
-      
-      # Try fallback location
+
+      # Try fallback location with restrictive umask
+      umask 077
       local fallback_dir="${MC_BACKUP_FALLBACK_DIR:-/tmp/mac-cleanup-backups}/$(/bin/date +%Y-%m-%d-%H-%M-%S 2>/dev/null || echo 'backup')"
       print_info "Attempting fallback location: $fallback_dir" >&2
       if mkdir -p "$fallback_dir" 2>/dev/null; then
         backup_dir="$fallback_dir"
         log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Using fallback backup directory: $backup_dir"
+        # Set restrictive permissions on fallback
+        chmod 700 "$fallback_dir" 2>/dev/null || true
       else
+        umask "$old_umask"
         return 1
       fi
     fi
+
+    # Restore umask
+    umask "$old_umask"
+
+    # SEC-9: Double-check permissions (drwx------) = 700
+    chmod 700 "$backup_dir" 2>/dev/null || {
+      print_error "Failed to set restrictive permissions on backup directory" >&2
+      log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "chmod 700 failed on $backup_dir"
+      return 1
+    }
+
+    # SEC-9: Verify ownership (must be owned by current user)
+    local owner=$(stat -f "%Su" "$backup_dir" 2>/dev/null)
+    if [[ "$owner" != "$USER" ]]; then
+      print_error "Backup directory owned by wrong user: $owner (expected: $USER)" >&2
+      log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Security violation: backup dir owned by $owner, expected $USER"
+      return 1
+    fi
+
+    log_message "${MC_LOG_LEVEL_INFO:-INFO}" "Created secure backup directory: $backup_dir (mode: 700, owner: $USER)"
+  else
+    # SEC-9: Directory exists - verify permissions are restrictive
+    local perms=$(stat -f "%Lp" "$backup_dir" 2>/dev/null)
+    if [[ "$perms" != "700" ]]; then
+      print_warning "Backup directory has insecure permissions: $perms (fixing to 700)" >&2
+      log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Fixing insecure backup directory permissions: $perms -> 700"
+      chmod 700 "$backup_dir" 2>/dev/null || {
+        print_error "Failed to fix backup directory permissions" >&2
+        log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "chmod 700 failed on existing directory $backup_dir"
+      }
+    fi
   fi
-  
+
   # Verify directory is writable
   if [[ ! -w "$backup_dir" ]]; then
     print_error "Backup directory is not writable: $backup_dir" >&2
     log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Backup directory not writable: $backup_dir"
     return 1
   fi
-  
+
   # Return the validated directory path to stdout (for command substitution)
   echo "$backup_dir"
   return 0

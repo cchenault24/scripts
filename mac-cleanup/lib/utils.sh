@@ -8,18 +8,69 @@ set -euo pipefail  # Exit on error, undefined vars, pipe failures
 # Size calculation cache (associative array)
 typeset -A MC_SIZE_CACHE
 
-# Helper function to safely write to progress file with locking (SAFE-7)
+# SEC-6: Create secure temporary files using mktemp
+# Usage: create_secure_temp_file "prefix"
+# Returns: Path to newly created temp file with mode 600
+create_secure_temp_file() {
+  local prefix="${1:-mac-cleanup}"
+
+  # Use mktemp with random suffix for secure temp file creation
+  # -t flag adds prefix, XXXXXXXXXX provides 10 random characters
+  local temp_file=""
+  temp_file=$(mktemp -t "${prefix}.XXXXXXXXXX" 2>/dev/null)
+
+  if [[ -z "$temp_file" || ! -f "$temp_file" ]]; then
+    log_message "ERROR" "Failed to create secure temp file with prefix: $prefix"
+    return 1
+  fi
+
+  # Set restrictive permissions (owner read/write only)
+  chmod 600 "$temp_file" 2>/dev/null || {
+    log_message "ERROR" "Failed to set permissions on temp file: $temp_file"
+    rm -f "$temp_file" 2>/dev/null
+    return 1
+  }
+
+  echo "$temp_file"
+  return 0
+}
+
+# Lock tracking for read-modify-write operations (SEC-4-FIX)
+# Uses a lock owner file to track which process holds the lock
+# This works across subshell boundaries (unlike global variables)
+
+# Helper to check if this process owns the lock
+_check_lock_ownership() {
+  local lock_dir="$1"
+  local lock_owner_file="${lock_dir}/owner"
+
+  # Check if lock directory exists and contains our PID
+  if [[ -d "$lock_dir" && -f "$lock_owner_file" ]]; then
+    local owner_pid=$(cat "$lock_owner_file" 2>/dev/null || echo "")
+    if [[ "$owner_pid" == "$$" ]]; then
+      # Check age - auto-expire after 2 seconds to prevent deadlock
+      local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_owner_file" 2>/dev/null || echo 0)))
+      if [[ $lock_age -le 2 ]]; then
+        return 0  # We own this lock and it's still valid
+      fi
+    fi
+  fi
+  return 1  # We don't own the lock
+}
+
+# Helper function to safely write to progress file with locking (SAFE-7, SEC-4)
+# SEC-4-FIX: Uses atomic mkdir with lock reuse to prevent TOCTOU race conditions
 # Phase 4.2: Enhanced with better error handling and cleanup
 _write_progress_file() {
   local progress_file="$1"
   local content="$2"
-  
+
   # Phase 4.2: Validate inputs
   if [[ -z "$progress_file" || -z "$content" ]]; then
     log_message "WARNING" "_write_progress_file called with empty arguments"
     return 1
   fi
-  
+
   # Phase 4.2: Ensure parent directory exists
   local progress_dir=$(dirname "$progress_file" 2>/dev/null)
   if [[ -n "$progress_dir" && ! -d "$progress_dir" ]]; then
@@ -28,116 +79,215 @@ _write_progress_file() {
       return 1
     }
   fi
-  
-  # Use file locking to prevent race conditions (SAFE-7)
-  local lock_file="${progress_file}.lock"
-  local lock_acquired=false
+
+  # SEC-4-FIX: Use atomic mkdir-based file locking to prevent race conditions
+  # mkdir is atomic - only one process can successfully create the directory
+  # This prevents TOCTOU race conditions that were present with lockf approach
+  local lock_dir="${progress_file}.lock"
+  local lock_owner_file="${lock_dir}/owner"
+  local max_attempts=200  # 10 seconds total (200 * 0.05s) - generous for high contention
   local attempts=0
-  
-  # Phase 4.2: Clean up stale lock files (older than 30 seconds)
-  if [[ -f "$lock_file" ]]; then
-    local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_file" 2>/dev/null || echo 0)))
+
+  # Clean up stale locks (older than 30 seconds)
+  if [[ -d "$lock_dir" ]]; then
+    local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_dir" 2>/dev/null || echo 0)))
     if [[ $lock_age -gt 30 ]]; then
-      log_message "WARNING" "Removing stale progress lock file (age: ${lock_age}s)"
-      rm -f "$lock_file" 2>/dev/null || true
+      log_message "WARNING" "Removing stale progress lock directory (age: ${lock_age}s)"
+      rm -rf "$lock_dir" 2>/dev/null || true
     fi
   fi
-  
-  # Try to acquire lock (wait up to 5 seconds)
-  while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
-    # Check if lock file exists first to avoid set -C error
-    if [[ ! -f "$lock_file" ]]; then
-      # Try to create lock file - suppress all errors
-      if (set -C; { echo $$ > "$lock_file" 2>&1; } 2>/dev/null); then
-        # Verify we got the lock (check if file contains our PID)
-        if [[ -f "$lock_file" ]]; then
-          local lock_pid=$(cat "$lock_file" 2>/dev/null || echo "")
-          if [[ "$lock_pid" == "$$" ]]; then
-            lock_acquired=true
-            # Write to progress file
-            echo "$content" > "$progress_file" 2>/dev/null || {
-              log_message "ERROR" "Failed to write progress file: $progress_file"
-              rm -f "$lock_file" 2>/dev/null || true
-              return 1
-            }
-            # Release lock
-            rm -f "$lock_file" 2>/dev/null || true
-            return 0
-          fi
-        fi
+
+  # Check if this process already owns the lock (from prior _read_progress_file call)
+  if [[ -f "$lock_owner_file" ]]; then
+    local owner_info=$(cat "$lock_owner_file" 2>/dev/null || echo "")
+    local owner_pid=$(echo "$owner_info" | cut -d: -f1)
+    local owner_time=$(echo "$owner_info" | cut -d: -f2)
+    local current_time=$(/bin/date +%s)
+    local lock_age=$((current_time - owner_time))
+
+    if [[ "$owner_pid" == "$$" && $lock_age -le 1 ]]; then
+      # We own the lock and it's fresh - reuse it for RMW
+      echo "$content" > "$progress_file" 2>/dev/null || {
+        log_message "ERROR" "Failed to write progress file: $progress_file"
+        rm -rf "$lock_dir" 2>/dev/null || true
+        return 1
+      }
+      # Release lock after write
+      rm -rf "$lock_dir" 2>/dev/null || true
+      return 0
+    elif [[ $lock_age -gt 1 ]]; then
+      # Lock expired - clean it up
+      rm -rf "$lock_dir" 2>/dev/null || true
+    fi
+  fi
+
+  # Acquire lock using atomic mkdir
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    # Check if lock expired while waiting
+    if [[ -f "$lock_owner_file" ]]; then
+      local owner_info=$(cat "$lock_owner_file" 2>/dev/null || echo "")
+      local owner_time=$(echo "$owner_info" | cut -d: -f2)
+      local current_time=$(/bin/date +%s)
+      local lock_age=$((current_time - owner_time))
+
+      if [[ $lock_age -gt 1 ]]; then
+        # Lock expired - clean it up and retry immediately
+        rm -rf "$lock_dir" 2>/dev/null || true
+        continue
       fi
     fi
-    # Lock file exists - wait and retry (suppress error output)
-    sleep 0.1 2>/dev/null || sleep 0.1
+
+    sleep 0.05
     attempts=$((attempts + 1))
+    if [[ $attempts -ge $max_attempts ]]; then
+      log_message "ERROR" "Failed to acquire lock after ${attempts} attempts (10 second timeout)"
+      return 1
+    fi
   done
-  
-  # Phase 4.2: If lock acquisition failed, try one more time without lock (better than losing progress)
-  # But log a warning
+
+  # Mark ownership
+  echo "$$:$(/bin/date +%s)" > "$lock_owner_file" 2>/dev/null || true
+
+  # Critical section: lock acquired, perform write
   echo "$content" > "$progress_file" 2>/dev/null || {
-    log_message "ERROR" "Failed to write progress file even without lock: $progress_file"
+    log_message "ERROR" "Failed to write progress file: $progress_file"
+    rm -rf "$lock_dir" 2>/dev/null || true
     return 1
   }
-  log_message "WARNING" "Progress file lock timeout after ${attempts} attempts, wrote without lock"
+
+  # Release lock immediately after write
+  rm -rf "$lock_dir" 2>/dev/null || true
   return 0
 }
 
-# Helper function to safely read progress file with locking (SAFE-7)
+# Helper function to safely read progress file with locking (SAFE-7, SEC-4)
+# SEC-4-FIX: Uses atomic mkdir-based file locking with lock reuse to prevent TOCTOU race conditions
 _read_progress_file() {
   local progress_file="$1"
-  
+
   if [[ -z "$progress_file" || ! -f "$progress_file" ]]; then
     echo ""
     return 1
   fi
-  
-  # Use file locking to prevent race conditions (SAFE-7)
-  local lock_file="${progress_file}.lock"
-  local lock_acquired=false
+
+  # SEC-4-FIX: Use atomic mkdir-based file locking to prevent race conditions
+  local lock_dir="${progress_file}.lock"
+  local lock_owner_file="${lock_dir}/owner"
+  local max_attempts=200  # 10 seconds total (200 * 0.05s) - generous for high contention
   local attempts=0
   local content=""
-  
-  # Try to acquire lock (wait up to 1 second for reads - shorter timeout)
-  while [[ $attempts -lt 10 && "$lock_acquired" == "false" ]]; do
-    # Check if lock file exists first to avoid set -C error
-    if [[ ! -f "$lock_file" ]]; then
-      # Try to create lock file - suppress all errors
-      if (set -C; { echo $$ > "$lock_file" 2>&1; } 2>/dev/null); then
-        # Verify we got the lock (check if file contains our PID)
-        if [[ -f "$lock_file" ]]; then
-          local lock_pid=$(cat "$lock_file" 2>/dev/null || echo "")
-          if [[ "$lock_pid" == "$$" ]]; then
-            lock_acquired=true
-            # Read from progress file
-            content=$(cat "$progress_file" 2>/dev/null || echo "")
-            # Release lock
-            rm -f "$lock_file" 2>/dev/null || true
-            echo "$content"
-            return 0
-          fi
-        fi
-      fi
-    fi
-    # Lock file exists - wait and retry (suppress error output)
-    sleep 0.1 2>/dev/null || sleep 0.1
+
+  # Check if this process already holds the lock (for nested reads)
+  if _check_lock_ownership "$lock_dir"; then
+    # We already hold the lock - just read
+    content=$(cat "$progress_file" 2>/dev/null || echo "")
+    echo "$content"
+    return 0
+  fi
+
+  # Acquire lock using atomic mkdir
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    sleep 0.05
     attempts=$((attempts + 1))
+    if [[ $attempts -ge $max_attempts ]]; then
+      # If lock acquisition failed, read without lock for reads (acceptable for progress monitoring)
+      # SEC-4: For reads, reading without lock is acceptable since we're just monitoring progress
+      content=$(cat "$progress_file" 2>/dev/null || echo "")
+      echo "$content"
+      return 0
+    fi
   done
-  
-  # If lock acquisition failed, read without lock (better than blocking)
+
+  # Mark ownership
+  echo "$$" > "$lock_owner_file" 2>/dev/null || true
+
+  # Mark ownership with timestamp for auto-expiry
+  echo "$$:$(/bin/date +%s)" > "$lock_owner_file" 2>/dev/null || true
+
+  # Critical section: lock acquired, perform read
   content=$(cat "$progress_file" 2>/dev/null || echo "")
+
+  # DON'T release lock - keep it for potential RMW operation
+  # Lock will auto-expire after 1 second or be released by _write_progress_file
+  # This enables atomic read-modify-write when read is followed by write
+
   echo "$content"
   return 0
+}
+
+# Atomic read-modify-write helper for progress file (SEC-4-FIX)
+# This function holds the lock for the entire read-modify-write cycle to prevent race conditions
+# Usage: _atomic_update_progress_file file_path callback_function
+# The callback receives current content as $1 and should echo the new content
+_atomic_update_progress_file() {
+  local progress_file="$1"
+  local callback="$2"
+
+  if [[ -z "$progress_file" || -z "$callback" ]]; then
+    log_message "WARNING" "_atomic_update_progress_file called with empty arguments"
+    return 1
+  fi
+
+  # SEC-4-FIX: Use atomic mkdir-based file locking
+  local lock_dir="${progress_file}.lock"
+  local max_attempts=20  # 1 second total (20 * 0.05s)
+  local attempts=0
+
+  # Clean up stale locks (older than 30 seconds)
+  if [[ -d "$lock_dir" ]]; then
+    local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_dir" 2>/dev/null || echo 0)))
+    if [[ $lock_age -gt 30 ]]; then
+      log_message "WARNING" "Removing stale progress lock directory (age: ${lock_age}s)"
+      rmdir "$lock_dir" 2>/dev/null || true
+    fi
+  fi
+
+  # Acquire lock using atomic mkdir
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    sleep 0.05
+    attempts=$((attempts + 1))
+    if [[ $attempts -ge $max_attempts ]]; then
+      log_message "ERROR" "Failed to acquire lock after ${attempts} attempts (1 second timeout)"
+      return 1
+    fi
+  done
+
+  # Critical section: lock acquired, perform atomic read-modify-write
+  if [[ -d "$lock_dir" ]]; then
+    local current_content=$(cat "$progress_file" 2>/dev/null || echo "")
+    local new_content=$($callback "$current_content")
+
+    if [[ $? -eq 0 ]]; then
+      echo "$new_content" > "$progress_file" 2>/dev/null || {
+        log_message "ERROR" "Failed to write progress file: $progress_file"
+        rmdir "$lock_dir" 2>/dev/null || true
+        return 1
+      }
+    else
+      log_message "ERROR" "Callback function failed"
+      rmdir "$lock_dir" 2>/dev/null || true
+      return 1
+    fi
+
+    # Release lock
+    rmdir "$lock_dir" 2>/dev/null || true
+    return 0
+  fi
+
+  # This should never be reached, but handle it defensively
+  log_message "ERROR" "Lock directory disappeared unexpectedly"
+  return 1
 }
 
 # Progress reporting function for plugins
 # Usage: update_operation_progress current_item total_items "item_name"
 # This allows plugins to report progress as they process multiple items
-# SAFE-7: Uses file locking to prevent race conditions
+# SAFE-7, SEC-4: Uses proper file locking to prevent race conditions
 update_operation_progress() {
   local current_item=$1
   local total_items=$2
   local item_name="${3:-}"
-  
+
   # Only update if progress file is set (we're in a cleanup operation)
   if [[ -n "${MC_PROGRESS_FILE:-}" && -f "$MC_PROGRESS_FILE" ]]; then
     # Throttle updates: only update every 1% or every 10 items, whichever is more frequent
@@ -148,68 +298,67 @@ update_operation_progress() {
       local percent_progress=$((current_item * 100 / total_items))
       local last_percent=${MC_LAST_PROGRESS_PERCENT:-0}
       local item_diff=$((current_item - ${MC_LAST_PROGRESS_ITEM:-0}))
-      
+
       # Only update if we've crossed a percent boundary or processed 10+ items
       if [[ $percent_progress -eq $last_percent && $item_diff -lt 10 ]]; then
         # Skip this update
         return 0
       fi
-      
+
       # Store last update values
       MC_LAST_PROGRESS_PERCENT=$percent_progress
       MC_LAST_PROGRESS_ITEM=$current_item
     fi
-    
-    # Use file locking to prevent race conditions (SAFE-7)
+
+    # SEC-4: Use proper file locking for read-modify-write operation
     local lock_file="${MC_PROGRESS_FILE}.lock"
-    local lock_acquired=false
-    local attempts=0
-    
-    # Try to acquire lock (wait up to 5 seconds)
-    while [[ $attempts -lt 50 && "$lock_acquired" == "false" ]]; do
-      # Check if lock file exists first to avoid set -C error
-      if [[ ! -f "$lock_file" ]]; then
-        # Try to create lock file - suppress all errors
-        if (set -C; { echo $$ > "$lock_file" 2>&1; } 2>/dev/null); then
-          # Verify we got the lock (check if file contains our PID)
-          if [[ -f "$lock_file" ]]; then
-            local lock_pid=$(cat "$lock_file" 2>/dev/null || echo "")
-            if [[ "$lock_pid" == "$$" ]]; then
-              lock_acquired=true
-              
-              # Read current operation info from progress file
-              local progress_line=$(cat "$MC_PROGRESS_FILE" 2>/dev/null || echo "")
-              if [[ -n "$progress_line" ]]; then
-                local op_index=$(echo "$progress_line" | cut -d'|' -f1)
-                local total_ops=$(echo "$progress_line" | cut -d'|' -f2)
-                local op_name=$(echo "$progress_line" | cut -d'|' -f3- | cut -d'|' -f1)
-                
-                # Update progress file with item-level progress
-                # Format: operation_index|total_operations|operation_name|current_item|total_items|item_name
-                echo "$op_index|$total_ops|$op_name|$current_item|$total_items|$item_name" > "$MC_PROGRESS_FILE"
-              fi
-              
-              # Release lock
-              rm -f "$lock_file" 2>/dev/null || true
-              return 0
-            fi
-          fi
+    local lock_dir="${MC_PROGRESS_FILE}.lock.d"
+    local max_attempts=50  # 5 seconds total
+    local timeout=5
+
+    # Try lockf first (proper file locking, race-condition-free)
+    if command -v lockf &>/dev/null; then
+      # SEC-4: lockf provides proper advisory locking for atomic read-modify-write
+      touch "$lock_file" 2>/dev/null || return 1
+
+      # Use lockf with a shell script to do read-modify-write atomically
+      lockf -t "$timeout" -k "$lock_file" sh -c "
+        progress_line=\$(cat '$MC_PROGRESS_FILE' 2>/dev/null || echo '')
+        if [[ -n \"\$progress_line\" ]]; then
+          op_index=\$(echo \"\$progress_line\" | cut -d'|' -f1)
+          total_ops=\$(echo \"\$progress_line\" | cut -d'|' -f2)
+          op_name=\$(echo \"\$progress_line\" | cut -d'|' -f3- | cut -d'|' -f1)
+          echo \"\$op_index|\$total_ops|\$op_name|$current_item|$total_items|$item_name\" > '$MC_PROGRESS_FILE'
         fi
+      " 2>/dev/null || log_message "WARNING" "Progress update failed with lockf"
+      return 0
+    fi
+
+    # Fallback: Use atomic mkdir for read-modify-write
+    local attempts=0
+    while [[ $attempts -lt $max_attempts ]]; do
+      # SEC-4: mkdir is atomic - only one process can create the directory
+      if mkdir "$lock_dir" 2>/dev/null; then
+        # Successfully acquired lock - do read-modify-write
+        local progress_line=$(cat "$MC_PROGRESS_FILE" 2>/dev/null || echo "")
+        if [[ -n "$progress_line" ]]; then
+          local op_index=$(echo "$progress_line" | cut -d'|' -f1)
+          local total_ops=$(echo "$progress_line" | cut -d'|' -f2)
+          local op_name=$(echo "$progress_line" | cut -d'|' -f3- | cut -d'|' -f1)
+          echo "$op_index|$total_ops|$op_name|$current_item|$total_items|$item_name" > "$MC_PROGRESS_FILE" 2>/dev/null || true
+        fi
+        rmdir "$lock_dir" 2>/dev/null || true
+        return 0
       fi
-      # Lock file exists - wait and retry (suppress error output)
+
+      # Lock exists - wait and retry
       sleep 0.1 2>/dev/null || sleep 0.1
       attempts=$((attempts + 1))
     done
-    
-    # If lock acquisition failed, try one more time without lock (better than losing progress)
-    local progress_line=$(cat "$MC_PROGRESS_FILE" 2>/dev/null || echo "")
-    if [[ -n "$progress_line" ]]; then
-      local op_index=$(echo "$progress_line" | cut -d'|' -f1)
-      local total_ops=$(echo "$progress_line" | cut -d'|' -f2)
-      local op_name=$(echo "$progress_line" | cut -d'|' -f3- | cut -d'|' -f1)
-      echo "$op_index|$total_ops|$op_name|$current_item|$total_items|$item_name" > "$MC_PROGRESS_FILE" 2>/dev/null || true
-      log_message "WARNING" "Progress file lock timeout, wrote without lock"
-    fi
+
+    # SEC-4: If lock acquisition failed, log error and skip update
+    # Progress updates are not critical, so we can safely skip rather than risk corruption
+    log_message "WARNING" "Progress file lock timeout after ${attempts} attempts, skipping update"
   fi
 }
 
@@ -540,18 +689,21 @@ safe_remove() {
     
     log_message "INFO" "Removing: $path"
     
-    # SAFE-1: Handle symlinks safely - don't follow them
+    # SAFE-1 & SEC-5: Handle symlinks safely - don't follow them
     if [[ -L "$path" ]]; then
       # It's a symlink, remove the symlink itself, not the target
       rm -f "$path" 2>/dev/null || true
     elif [[ -d "$path" ]]; then
-      # For directories, use find to avoid following symlinks
+      # SEC-5: Use find to avoid following symlinks (prevents symlink attacks)
       # First remove symlinks, then regular files
       find "$path" -mindepth 1 -type l -delete 2>/dev/null || true
       find "$path" -mindepth 1 -not -type l -delete 2>/dev/null || {
-        # Fallback for stubborn files
-        rm -rf "$path" 2>/dev/null || true
+        # SEC-5: Fallback without rm -rf to prevent symlink attacks
+        # Recursively delete contents, then remove the directory itself
+        find "$path" -mindepth 1 -delete 2>/dev/null || true
       }
+      # Remove the directory itself after contents are deleted
+      rmdir "$path" 2>/dev/null || true
     else
       # Regular file
       rm -f "$path" 2>/dev/null || true
@@ -697,7 +849,7 @@ safe_clean_dir() {
           fi
         fi
       done 2>/dev/null
-      # Delete directories and files
+      # Delete directories and files (SEC-5: Use find -delete to avoid symlink attacks)
       for item in "$path"/*(N) "$path"/.*(N); do
         if [[ -e "$item" && "$item" != "$path/." && "$item" != "$path/.." && ! -L "$item" ]]; then
           local item_size=$(/usr/bin/du -sk "$item" 2>/dev/null | /usr/bin/awk '{print $1}' 2>/dev/null || echo "0")
@@ -706,7 +858,16 @@ safe_clean_dir() {
           if [[ -z "$item_size" || ! "$item_size" =~ ^[0-9]+$ ]]; then
             item_size=0
           fi
-          if /bin/rm -rf "$item" 2>/dev/null; then
+          # SEC-5: Use find -delete for symlink-safe deletion
+          if [[ -d "$item" ]]; then
+            # For directories, recursively delete contents first
+            find "$item" -mindepth 1 -delete 2>/dev/null && rmdir "$item" 2>/dev/null
+          else
+            # For regular files, just delete
+            /bin/rm -f "$item" 2>/dev/null
+          fi
+          # Check if deletion succeeded
+          if [[ ! -e "$item" ]]; then
             if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
               actual_space_freed=$((actual_space_freed + item_size * 1024))
             fi
@@ -727,11 +888,20 @@ safe_clean_dir() {
             fi
           fi
         done 2>/dev/null
-        # Delete directories and files
+        # Delete directories and files (SEC-5: Use find -delete to avoid symlink attacks)
         for item in "$path"/* "$path"/.*; do
           if [[ -e "$item" && "$item" != "$path/." && "$item" != "$path/.." && ! -L "$item" ]]; then
             local item_size=$(/usr/bin/du -sk "$item" 2>/dev/null | /usr/bin/awk '{print $1}' 2>/dev/null || echo "0")
-            if /bin/rm -rf "$item" 2>/dev/null; then
+            # SEC-5: Use find -delete for symlink-safe deletion
+            if [[ -d "$item" ]]; then
+              # For directories, recursively delete contents first
+              find "$item" -mindepth 1 -delete 2>/dev/null && rmdir "$item" 2>/dev/null
+            else
+              # For regular files, just delete
+              /bin/rm -f "$item" 2>/dev/null
+            fi
+            # Check if deletion succeeded
+            if [[ ! -e "$item" ]]; then
               if [[ -n "$item_size" && "$item_size" =~ ^[0-9]+$ ]]; then
                 actual_space_freed=$((actual_space_freed + item_size * 1024))
               fi
@@ -740,26 +910,47 @@ safe_clean_dir() {
         done 2>/dev/null
       fi
     fi
-    # Fallback: try find-based deletion if direct deletion didn't work
+    # SEC-5: Symlink-safe fallback deletion using find -delete
+    # This approach never follows symlinks, preventing symlink attack vulnerability
     find "$path" -mindepth 1 -not -type l -delete 2>/dev/null || {
       # Fallback: batch delete visible and hidden files separately
       find "$path" -mindepth 1 -maxdepth 1 ! -name ".*" -not -type l -delete 2>/dev/null || true
       find "$path" -mindepth 1 -maxdepth 1 -name ".*" -not -type l -delete 2>/dev/null || true
       find "$path" -mindepth 1 -maxdepth 1 -type l -delete 2>/dev/null || true
-      # Final fallback for stubborn files - use (N) qualifier to handle empty globs in zsh
-      # In zsh, we need to handle globs that might not match
-      # Note: rm -rf will follow symlinks, so we try to remove symlinks first
-      # Use /bin/rm explicitly to ensure it's found even if PATH is not set correctly
+      # SEC-5: Final fallback WITHOUT rm -rf (prevents symlink attacks)
+      # Manual per-item deletion with explicit symlink and directory handling
       if [[ -n "${ZSH_VERSION:-}" ]]; then
         # Zsh: use (N) qualifier to return empty if no matches
-        # Remove symlinks first (don't follow), then regular files
-        find "$path" -mindepth 1 -maxdepth 1 -type l -delete 2>/dev/null || true
-        /bin/rm -rf "${path:?}"/*(N) "${path:?}"/.[!.]*(N) 2>/dev/null || true
+        for item in "${path:?}"/*(N) "${path:?}"/.[!.]*(N); do
+          [[ -e "$item" ]] || continue
+          if [[ -L "$item" ]]; then
+            # Symlink: Remove link only, don't follow
+            /bin/rm -f "$item" 2>/dev/null || true
+          elif [[ -d "$item" ]]; then
+            # Directory: Recursively delete contents with find, then remove dir
+            find "$item" -mindepth 1 -delete 2>/dev/null || true
+            rmdir "$item" 2>/dev/null || true
+          else
+            # Regular file
+            /bin/rm -f "$item" 2>/dev/null || true
+          fi
+        done 2>/dev/null
       else
-        # Bash: use nullglob or just try and ignore errors
-        # Remove symlinks first (don't follow), then regular files
-        find "$path" -mindepth 1 -maxdepth 1 -type l -delete 2>/dev/null || true
-        /bin/rm -rf "${path:?}"/* "${path:?}"/.[!.]* 2>/dev/null || true
+        # Bash: handle each item explicitly
+        for item in "${path:?}"/* "${path:?}"/.[!.]*; do
+          [[ -e "$item" ]] || continue
+          if [[ -L "$item" ]]; then
+            # Symlink: Remove link only, don't follow
+            /bin/rm -f "$item" 2>/dev/null || true
+          elif [[ -d "$item" ]]; then
+            # Directory: Recursively delete contents with find, then remove dir
+            find "$item" -mindepth 1 -delete 2>/dev/null || true
+            rmdir "$item" 2>/dev/null || true
+          else
+            # Regular file
+            /bin/rm -f "$item" 2>/dev/null || true
+          fi
+        done 2>/dev/null
       fi
     }
     
