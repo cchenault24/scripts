@@ -504,10 +504,19 @@ mc_register_plugin() {
     return 1
   fi
 
-  # SEC-10: Verify function exists and is actually a function
-  if ! type -f "$function" &>/dev/null; then
-    print_error "Function not found: $function"
-    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: function not found: $function"
+  # SEC-10: Verify function exists and is actually a function (not an external command)
+  # Use whence -w in zsh to distinguish functions from commands
+  local func_type=""
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    func_type=$(whence -w "$function" 2>/dev/null | awk '{print $2}')
+  else
+    # Bash: use type -t
+    func_type=$(type -t "$function" 2>/dev/null)
+  fi
+
+  if [[ "$func_type" != "function" ]]; then
+    print_error "Function not found or not a function: $function (type: ${func_type:-none})"
+    log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: $function is not a function (type: ${func_type:-none})"
     return 1
   fi
 
@@ -531,9 +540,16 @@ mc_register_plugin() {
       log_message "${MC_LOG_LEVEL_ERROR:-ERROR}" "Plugin registration failed: invalid size function: $size_function"
       return 1
     fi
-    # Verify size function exists
-    if ! type -f "$size_function" &>/dev/null; then
-      print_warning "Size function not found: $size_function (plugin: $name)"
+    # Verify size function exists and is a function
+    local size_func_type=""
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+      size_func_type=$(whence -w "$size_function" 2>/dev/null | awk '{print $2}')
+    else
+      size_func_type=$(type -t "$size_function" 2>/dev/null)
+    fi
+
+    if [[ "$size_func_type" != "function" ]]; then
+      print_warning "Size function not found or not a function: $size_function (plugin: $name)"
       log_message "${MC_LOG_LEVEL_WARNING:-WARNING}" "Size function not found: $size_function"
       # Don't fail registration, just skip size function
       size_function=""

@@ -110,12 +110,31 @@ _write_progress_file() {
     return 0
   fi
 
+  # If lock directory exists but we don't own it, clean up expired locks
+  if [[ -d "$lock_dir" ]]; then
+    local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_owner_file" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo 0)))
+    if [[ $lock_age -gt 2 ]]; then
+      # Lock expired - clean it up
+      rm -rf "$lock_dir" 2>/dev/null || true
+    fi
+  fi
+
   # Acquire lock using atomic mkdir
   while ! mkdir "$lock_dir" 2>/dev/null; do
+    # Check for expired locks
+    if [[ -d "$lock_dir" ]]; then
+      local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_owner_file" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo 0)))
+      if [[ $lock_age -gt 2 ]]; then
+        # Lock expired during wait - try to clean it up
+        rm -rf "$lock_dir" 2>/dev/null || true
+        continue  # Try mkdir again immediately
+      fi
+    fi
+
     sleep 0.05
     attempts=$((attempts + 1))
     if [[ $attempts -ge $max_attempts ]]; then
-      log_message "ERROR" "Failed to acquire lock after ${attempts} attempts (1 second timeout)"
+      log_message "ERROR" "Failed to acquire lock after ${attempts} attempts (10 second timeout)"
       return 1
     fi
   done
