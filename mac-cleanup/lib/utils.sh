@@ -97,23 +97,25 @@ _write_progress_file() {
     fi
   fi
 
-  # Check if this process already holds the lock (for RMW operations)
-  if _check_lock_ownership "$lock_dir"; then
-    # We already hold the lock - just write and release
-    echo "$content" > "$progress_file" 2>/dev/null || {
-      log_message "ERROR" "Failed to write progress file: $progress_file"
-      rm -rf "$lock_dir" 2>/dev/null || true
-      return 1
-    }
-    # Release lock (completing the RMW cycle)
-    rm -rf "$lock_dir" 2>/dev/null || true
-    return 0
-  fi
+  # Check if this process already owns the lock (from prior _read_progress_file call)
+  if [[ -f "$lock_owner_file" ]]; then
+    local owner_info=$(cat "$lock_owner_file" 2>/dev/null || echo "")
+    local owner_pid=$(echo "$owner_info" | cut -d: -f1)
+    local owner_time=$(echo "$owner_info" | cut -d: -f2)
+    local current_time=$(/bin/date +%s)
+    local lock_age=$((current_time - owner_time))
 
-  # If lock directory exists but we don't own it, clean up expired locks
-  if [[ -d "$lock_dir" ]]; then
-    local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_owner_file" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo 0)))
-    if [[ $lock_age -gt 2 ]]; then
+    if [[ "$owner_pid" == "$$" && $lock_age -le 1 ]]; then
+      # We own the lock and it's fresh - reuse it for RMW
+      echo "$content" > "$progress_file" 2>/dev/null || {
+        log_message "ERROR" "Failed to write progress file: $progress_file"
+        rm -rf "$lock_dir" 2>/dev/null || true
+        return 1
+      }
+      # Release lock after write
+      rm -rf "$lock_dir" 2>/dev/null || true
+      return 0
+    elif [[ $lock_age -gt 1 ]]; then
       # Lock expired - clean it up
       rm -rf "$lock_dir" 2>/dev/null || true
     fi
@@ -121,13 +123,17 @@ _write_progress_file() {
 
   # Acquire lock using atomic mkdir
   while ! mkdir "$lock_dir" 2>/dev/null; do
-    # Check for expired locks
-    if [[ -d "$lock_dir" ]]; then
-      local lock_age=$(($(/bin/date +%s 2>/dev/null || echo 0) - $(stat -f %m "$lock_owner_file" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo 0)))
-      if [[ $lock_age -gt 2 ]]; then
-        # Lock expired during wait - try to clean it up
+    # Check if lock expired while waiting
+    if [[ -f "$lock_owner_file" ]]; then
+      local owner_info=$(cat "$lock_owner_file" 2>/dev/null || echo "")
+      local owner_time=$(echo "$owner_info" | cut -d: -f2)
+      local current_time=$(/bin/date +%s)
+      local lock_age=$((current_time - owner_time))
+
+      if [[ $lock_age -gt 1 ]]; then
+        # Lock expired - clean it up and retry immediately
         rm -rf "$lock_dir" 2>/dev/null || true
-        continue  # Try mkdir again immediately
+        continue
       fi
     fi
 
@@ -140,7 +146,7 @@ _write_progress_file() {
   done
 
   # Mark ownership
-  echo "$$" > "$lock_owner_file" 2>/dev/null || true
+  echo "$$:$(/bin/date +%s)" > "$lock_owner_file" 2>/dev/null || true
 
   # Critical section: lock acquired, perform write
   echo "$content" > "$progress_file" 2>/dev/null || {
@@ -149,7 +155,7 @@ _write_progress_file() {
     return 1
   }
 
-  # Release lock (always release on write, completing the RMW cycle)
+  # Release lock immediately after write
   rm -rf "$lock_dir" 2>/dev/null || true
   return 0
 }
@@ -195,12 +201,15 @@ _read_progress_file() {
   # Mark ownership
   echo "$$" > "$lock_owner_file" 2>/dev/null || true
 
+  # Mark ownership with timestamp for auto-expiry
+  echo "$$:$(/bin/date +%s)" > "$lock_owner_file" 2>/dev/null || true
+
   # Critical section: lock acquired, perform read
   content=$(cat "$progress_file" 2>/dev/null || echo "")
 
-  # Keep the lock held - don't release it yet!
-  # This allows a subsequent _write_progress_file call to reuse the lock (within 2 seconds)
-  # The write function will release the lock, or it will auto-expire after 2 seconds
+  # DON'T release lock - keep it for potential RMW operation
+  # Lock will auto-expire after 1 second or be released by _write_progress_file
+  # This enables atomic read-modify-write when read is followed by write
 
   echo "$content"
   return 0
