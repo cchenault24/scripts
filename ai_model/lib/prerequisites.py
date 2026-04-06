@@ -94,8 +94,15 @@ def ensure_hf_ssl_support() -> Tuple[bool, str]:
     if code != 0 or "huggingface-hub" not in stdout:
         return False, "huggingface-hub not installed via pipx"
 
-    # Check if pip-system-certs is already injected
-    if "pip-system-certs" in stdout:
+    # Check if pip-system-certs is already injected in the venv
+    # pipx list doesn't show injected packages, so check the venv directly
+    # Note: Package name shows as pip_system_certs (underscores) in pip list output
+    code, venv_packages, _ = utils.run_command(
+        ["pipx", "runpip", "huggingface-hub", "list"],
+        timeout=10
+    )
+
+    if code == 0 and "pip_system_certs" in venv_packages:
         ui.print_success("SSL certificate support already enabled")
         return True, "pip-system-certs already injected"
 
