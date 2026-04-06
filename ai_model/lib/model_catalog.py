@@ -149,7 +149,7 @@ LLAMACPP_MODELS: Dict[str, LlamaCppModel] = {
     "2b": LlamaCppModel(
         name="Gemma 4 2B (Efficient)",
         size=ModelSize.SMALL,
-        hf_repo="ggml-org/gemma-4-E2B-it-GGUF:Q8_0",
+        hf_repo="ggml-org/gemma-4-E2B-it-GGUF:gemma-4-e2b-it-Q8_0.gguf",
         ram_gb=2.5,
         min_ram=4,
         max_ram=12,
@@ -162,7 +162,7 @@ LLAMACPP_MODELS: Dict[str, LlamaCppModel] = {
     "4b": LlamaCppModel(
         name="Gemma 4 4B (Balanced)",
         size=ModelSize.MEDIUM,
-        hf_repo="ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M",
+        hf_repo="ggml-org/gemma-4-E4B-it-GGUF:gemma-4-e4b-it-Q4_K_M.gguf",
         ram_gb=4.5,
         min_ram=8,
         max_ram=16,
