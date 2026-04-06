@@ -121,15 +121,27 @@ echo ""
 print_info "Scanning system for installed components..."
 echo ""
 
-# Track what we find
-declare -A FOUND_COMPONENTS
+# Track what we find (simple variables for bash 3.2 compatibility)
+FOUND_LLAMA_BUILD=""
+FOUND_OPENCODE_BUILD=""
+FOUND_OPENCODE_CUSTOM=false
+FOUND_OPENCODE_BACKUP=false
+FOUND_CONFIG_FILES=0
+FOUND_MODEL=""
+FOUND_LLAMA_RUNNING=false
+FOUND_PID_FILE=false
+FOUND_LOG_FILE=""
+FOUND_LAUNCHD=false
+FOUND_PIPX_HF=false
 TOTAL_SIZE_MB=0
+COMPONENT_COUNT=0
 
 # Check llama.cpp build
 if [ -d "$LLAMA_BUILD_DIR" ]; then
     SIZE=$(get_size_mb "$LLAMA_BUILD_DIR")
     TOTAL_SIZE_MB=$((TOTAL_SIZE_MB + SIZE))
-    FOUND_COMPONENTS["llama_build"]="$SIZE"
+    FOUND_LLAMA_BUILD="$SIZE"
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "llama.cpp build found ($(format_size $SIZE)): $LLAMA_BUILD_DIR"
 fi
 
@@ -137,19 +149,21 @@ fi
 if [ -d "$OPENCODE_BUILD_DIR" ]; then
     SIZE=$(get_size_mb "$OPENCODE_BUILD_DIR")
     TOTAL_SIZE_MB=$((TOTAL_SIZE_MB + SIZE))
-    FOUND_COMPONENTS["opencode_build"]="$SIZE"
+    FOUND_OPENCODE_BUILD="$SIZE"
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "OpenCode build directory found ($(format_size $SIZE)): $OPENCODE_BUILD_DIR"
 fi
 
 # Check OpenCode custom build
 CUSTOM_BUILD_MARKER="$HOME/.opencode/bin/.custom-build-pr16531"
 if [ -f "$CUSTOM_BUILD_MARKER" ]; then
-    FOUND_COMPONENTS["opencode_custom"]="1"
+    FOUND_OPENCODE_CUSTOM=true
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "OpenCode custom build marker found"
 fi
 
 if [ -f "$HOME/.opencode/bin/opencode.backup" ]; then
-    FOUND_COMPONENTS["opencode_backup"]="1"
+    FOUND_OPENCODE_BACKUP=true
     print_status "OpenCode backup found"
 fi
 
@@ -166,7 +180,8 @@ if [ -f "$HOME/.config/opencode/prompts/build.txt" ]; then
 fi
 
 if [ ${#CONFIG_FILES[@]} -gt 0 ]; then
-    FOUND_COMPONENTS["config_files"]="${#CONFIG_FILES[@]}"
+    FOUND_CONFIG_FILES=${#CONFIG_FILES[@]}
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "Configuration files found: ${#CONFIG_FILES[@]}"
 fi
 
@@ -177,7 +192,8 @@ MODEL_CACHE_PATH="$HF_CACHE/models--ggml-org--gemma-4-26B-A4B-it-GGUF"
 if [ -d "$MODEL_CACHE_PATH" ]; then
     SIZE=$(get_size_mb "$MODEL_CACHE_PATH")
     TOTAL_SIZE_MB=$((TOTAL_SIZE_MB + SIZE))
-    FOUND_COMPONENTS["model_cache"]="$SIZE"
+    FOUND_MODEL="$SIZE"
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "Gemma 4 26B model found ($(format_size $SIZE)): $MODEL_CACHE_PATH"
 fi
 
@@ -185,34 +201,39 @@ fi
 LLAMA_RUNNING=false
 if lsof -ti:$PORT >/dev/null 2>&1; then
     LLAMA_RUNNING=true
-    FOUND_COMPONENTS["llama_running"]="1"
+    FOUND_LLAMA_RUNNING=true
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "llama-server running on port $PORT"
 fi
 
 # Check for PID file
 if [ -f "$HOME/.local/var/llama-server.pid" ]; then
-    FOUND_COMPONENTS["pid_file"]="1"
+    FOUND_PID_FILE=true
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "PID file found: $HOME/.local/var/llama-server.pid"
 fi
 
 # Check for log file
 if [ -f "$HOME/.local/var/log/llama-server.log" ]; then
     SIZE=$(get_size_mb "$HOME/.local/var/log/llama-server.log")
-    FOUND_COMPONENTS["log_file"]="$SIZE"
+    FOUND_LOG_FILE="$SIZE"
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "Log file found ($(format_size $SIZE)): $HOME/.local/var/log/llama-server.log"
 fi
 
 # Check for launchd service
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.llamacpp.server.plist"
 if [ -f "$LAUNCHD_PLIST" ]; then
-    FOUND_COMPONENTS["launchd_plist"]="1"
+    FOUND_LAUNCHD=true
+    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "launchd service found: $LAUNCHD_PLIST"
 fi
 
 # Check for pipx huggingface-hub
 if command -v pipx >/dev/null 2>&1; then
     if pipx list 2>/dev/null | grep -q "huggingface-hub"; then
-        FOUND_COMPONENTS["pipx_hf"]="1"
+        FOUND_PIPX_HF=true
+        COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
         print_status "HuggingFace CLI (pipx) installed"
     fi
 fi
@@ -220,7 +241,7 @@ fi
 echo ""
 
 # Check if anything was found
-if [ ${#FOUND_COMPONENTS[@]} -eq 0 ]; then
+if [ $COMPONENT_COUNT -eq 0 ]; then
     print_info "No components found - system is clean"
     exit 0
 fi
@@ -245,23 +266,23 @@ REMOVE_LAUNCHD=false
 REMOVE_PIPX_HF=false
 
 # llama.cpp build
-if [ -n "${FOUND_COMPONENTS[llama_build]:-}" ]; then
-    if prompt_yes_no "Remove llama.cpp build? ($(format_size ${FOUND_COMPONENTS[llama_build]}))" true; then
+if [ -n "$FOUND_LLAMA_BUILD" ]; then
+    if prompt_yes_no "Remove llama.cpp build? ($(format_size $FOUND_LLAMA_BUILD))" true; then
         REMOVE_LLAMA_BUILD=true
     fi
 fi
 
 # OpenCode build directory
-if [ -n "${FOUND_COMPONENTS[opencode_build]:-}" ]; then
-    if prompt_yes_no "Remove OpenCode build directory? ($(format_size ${FOUND_COMPONENTS[opencode_build]}))" true; then
+if [ -n "$FOUND_OPENCODE_BUILD" ]; then
+    if prompt_yes_no "Remove OpenCode build directory? ($(format_size $FOUND_OPENCODE_BUILD))" true; then
         REMOVE_OPENCODE_BUILD=true
     fi
 fi
 
 # OpenCode custom build
-if [ -n "${FOUND_COMPONENTS[opencode_custom]:-}" ]; then
+if [ "$FOUND_OPENCODE_CUSTOM" = true ]; then
     echo ""
-    if [ -n "${FOUND_COMPONENTS[opencode_backup]:-}" ]; then
+    if [ "$FOUND_OPENCODE_BACKUP" = true ]; then
         print_info "You have a backup of the original OpenCode"
         if prompt_yes_no "Remove custom OpenCode build?" true; then
             REMOVE_OPENCODE_CUSTOM=true
@@ -278,17 +299,17 @@ if [ -n "${FOUND_COMPONENTS[opencode_custom]:-}" ]; then
 fi
 
 # Configuration files
-if [ -n "${FOUND_COMPONENTS[config_files]:-}" ]; then
+if [ $FOUND_CONFIG_FILES -gt 0 ]; then
     echo ""
-    if prompt_yes_no "Remove configuration files? (${FOUND_COMPONENTS[config_files]} files)" true; then
+    if prompt_yes_no "Remove configuration files? ($FOUND_CONFIG_FILES files)" true; then
         REMOVE_CONFIG=true
     fi
 fi
 
 # Model cache
-if [ -n "${FOUND_COMPONENTS[model_cache]:-}" ]; then
+if [ -n "$FOUND_MODEL" ]; then
     echo ""
-    print_warning "Model cache: $(format_size ${FOUND_COMPONENTS[model_cache]})"
+    print_warning "Model cache: $(format_size $FOUND_MODEL)"
     print_info "Models are stored in HuggingFace cache and can be reused"
     if prompt_yes_no "Remove downloaded Gemma 4 26B model?" false; then
         REMOVE_MODEL=true
@@ -296,7 +317,7 @@ if [ -n "${FOUND_COMPONENTS[model_cache]:-}" ]; then
 fi
 
 # Log files
-if [ -n "${FOUND_COMPONENTS[log_file]:-}" ] || [ -n "${FOUND_COMPONENTS[pid_file]:-}" ]; then
+if [ -n "$FOUND_LOG_FILE" ] || [ "$FOUND_PID_FILE" = true ]; then
     echo ""
     if prompt_yes_no "Remove log files and PID files?" true; then
         REMOVE_LOGS=true
@@ -304,7 +325,7 @@ if [ -n "${FOUND_COMPONENTS[log_file]:-}" ] || [ -n "${FOUND_COMPONENTS[pid_file
 fi
 
 # launchd service
-if [ -n "${FOUND_COMPONENTS[launchd_plist]:-}" ]; then
+if [ "$FOUND_LAUNCHD" = true ]; then
     echo ""
     if prompt_yes_no "Remove launchd service (auto-start on login)?" true; then
         REMOVE_LAUNCHD=true
@@ -312,7 +333,7 @@ if [ -n "${FOUND_COMPONENTS[launchd_plist]:-}" ]; then
 fi
 
 # pipx huggingface-hub
-if [ -n "${FOUND_COMPONENTS[pipx_hf]:-}" ]; then
+if [ "$FOUND_PIPX_HF" = true ]; then
     echo ""
     print_info "HuggingFace CLI may be used by other tools"
     if prompt_yes_no "Uninstall HuggingFace CLI (pipx)?" false; then
@@ -326,10 +347,10 @@ print_header "Uninstall Summary"
 
 ACTIONS=()
 if [ "$REMOVE_LLAMA_BUILD" = true ]; then
-    ACTIONS+=("Remove llama.cpp build ($(format_size ${FOUND_COMPONENTS[llama_build]}))")
+    ACTIONS+=("Remove llama.cpp build ($(format_size $FOUND_LLAMA_BUILD))")
 fi
 if [ "$REMOVE_OPENCODE_BUILD" = true ]; then
-    ACTIONS+=("Remove OpenCode build directory ($(format_size ${FOUND_COMPONENTS[opencode_build]}))")
+    ACTIONS+=("Remove OpenCode build directory ($(format_size $FOUND_OPENCODE_BUILD))")
 fi
 if [ "$REMOVE_OPENCODE_CUSTOM" = true ]; then
     if [ "$RESTORE_OPENCODE_BACKUP" = true ]; then
@@ -339,10 +360,10 @@ if [ "$REMOVE_OPENCODE_CUSTOM" = true ]; then
     fi
 fi
 if [ "$REMOVE_CONFIG" = true ]; then
-    ACTIONS+=("Remove ${FOUND_COMPONENTS[config_files]} configuration files")
+    ACTIONS+=("Remove $FOUND_CONFIG_FILES configuration files")
 fi
 if [ "$REMOVE_MODEL" = true ]; then
-    ACTIONS+=("Remove Gemma 4 26B model ($(format_size ${FOUND_COMPONENTS[model_cache]}))")
+    ACTIONS+=("Remove Gemma 4 26B model ($(format_size $FOUND_MODEL))")
 fi
 if [ "$REMOVE_LOGS" = true ]; then
     ACTIONS+=("Remove log files and PID files")
