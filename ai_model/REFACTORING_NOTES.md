@@ -123,3 +123,58 @@ ai_model/
 - Update CLAUDE.md (single backend architecture)
 - Create MIGRATION_FROM_DOCKER.md
 - Update changelog
+
+---
+
+## Day 4: Update Documentation (Completed)
+
+### Actions Taken
+
+**1. Updated README.md:**
+- Reduced from 1,508 lines → 574 lines (-62%)
+- Removed all Docker Model Runner references
+- Clarified Apple Silicon requirement (honest about platform support)
+- Added v4.1.0 changelog entry
+- Simplified structure and instructions
+- Single backend focus throughout
+
+**2. Updated CLAUDE.md:**
+- Changed "Dual Backend Support" → "Single Backend Design"
+- Removed Docker-specific commands and paths
+- Updated test runner commands (removed `--docker` flag)
+- Simplified "Running Setup Scripts" section
+- Added architecture history note
+
+**3. Created MIGRATION_FROM_DOCKER.md:**
+- Comprehensive guide for Docker users (62KB, detailed)
+- Explains why change was made (technical + strategic reasons)
+- Documents lost features (AI tuning profiles)
+- Step-by-step migration instructions
+- Platform support workarounds
+- FAQ section with common issues
+
+### Documentation Metrics
+
+| File | Before | After | Change |
+|------|--------|-------|--------|
+| README.md | 1,508 lines | 574 lines | -62% |
+| CLAUDE.md | 267 lines | 267 lines | Updated sections |
+| MIGRATION_FROM_DOCKER.md | N/A | 550 lines | New file |
+
+### Key Messages in Documentation
+
+**README.md:**
+- "Simplified Architecture: Previously supported dual backends (Docker + Ollama). Now focused exclusively on Ollama."
+- Platform support: ✅ macOS (Apple Silicon), ❌ Linux/Windows
+- Honest about Apple Silicon requirement
+
+**MIGRATION_FROM_DOCKER.md:**
+- Why: 60-70% code duplication, maintenance overhead
+- Lost: AI tuning profiles (use Continue.dev UI instead)
+- Gained: Simpler codebase, faster installation, better maintainability
+
+### Next Steps (Day 5)
+- Run full test suite (`python3 run_tests.py`)
+- Manual testing (setup.py, uninstall.py)
+- Fix any test failures from restructuring
+- Final commit and branch summary
