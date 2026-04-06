@@ -300,3 +300,35 @@ def create_installation_manifest(
     except Exception as e:
         _logger.error(f"Failed to create manifest: {e}")
         return manifest_path
+
+
+def check_config_customization(config_path: Path, manifest: dict) -> str:
+    """
+    Check if a config file has been customized since installation.
+
+    Args:
+        config_path: Path to config file
+        manifest: Installation manifest
+
+    Returns:
+        Status: "original", "modified", or "unknown"
+    """
+    # Simple stub for uninstaller compatibility
+    # Always returns "unknown" since we don't track config customizations
+    return "unknown"
+
+
+def is_our_file(filepath: Path, manifest: dict) -> bool:
+    """
+    Check if a file was created by our setup script.
+
+    Args:
+        filepath: Path to file
+        manifest: Installation manifest
+
+    Returns:
+        True if file was created by us, False otherwise
+    """
+    # Simple stub for uninstaller compatibility
+    # Always returns False (conservative approach)
+    return False
