@@ -41,6 +41,236 @@ VPN_RESILIENT_ENV = {
 }
 
 
+def get_ollama_version() -> Optional[str]:
+    """
+    Get the currently installed Ollama version.
+
+    Returns:
+        Version string (e.g., "0.18.2") or None if not installed
+    """
+    try:
+        code, stdout, stderr = utils.run_command(
+            ["ollama", "--version"],
+            timeout=5,
+            clean_env=True
+        )
+        if code == 0 and stdout:
+            # Output format: "ollama version is 0.18.2" or just "0.18.2"
+            version = stdout.strip()
+            # Extract just the version number
+            if "version" in version.lower():
+                parts = version.split()
+                if parts:
+                    version = parts[-1]
+            return version
+        return None
+    except Exception:
+        return None
+
+
+def get_latest_ollama_version() -> Optional[str]:
+    """
+    Get the latest available Ollama version from GitHub releases.
+
+    Returns:
+        Latest version string (e.g., "0.5.1") or None if unavailable
+    """
+    try:
+        url = "https://api.github.com/repos/ollama/ollama/releases/latest"
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'Python-urllib')
+
+        with urllib.request.urlopen(req, timeout=10, context=get_unverified_ssl_context()) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            tag_name = data.get('tag_name', '')
+            # Remove 'v' prefix if present (e.g., "v0.5.1" -> "0.5.1")
+            return tag_name.lstrip('v')
+    except Exception:
+        return None
+
+
+def compare_versions(version1: str, version2: str) -> int:
+    """
+    Compare two version strings.
+
+    Args:
+        version1: First version (e.g., "0.18.2")
+        version2: Second version (e.g., "0.5.1")
+
+    Returns:
+        -1 if version1 < version2
+         0 if version1 == version2
+         1 if version1 > version2
+    """
+    try:
+        # Parse versions
+        parts1 = [int(x) for x in version1.split('.')]
+        parts2 = [int(x) for x in version2.split('.')]
+
+        # Pad to same length
+        max_len = max(len(parts1), len(parts2))
+        parts1 += [0] * (max_len - len(parts1))
+        parts2 += [0] * (max_len - len(parts2))
+
+        # Compare
+        for p1, p2 in zip(parts1, parts2):
+            if p1 < p2:
+                return -1
+            elif p1 > p2:
+                return 1
+        return 0
+    except:
+        return 0
+
+
+def upgrade_ollama() -> Tuple[bool, str]:
+    """
+    Upgrade Ollama to the latest version.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    os_name = platform.system()
+
+    if os_name == "Darwin":  # macOS
+        # Try Homebrew upgrade
+        if shutil.which("brew"):
+            ui.print_info("Upgrading Ollama via Homebrew...")
+            code, stdout, stderr = utils.run_command(
+                ["brew", "upgrade", "ollama"],
+                timeout=300
+            )
+            if code == 0:
+                new_version = get_ollama_version()
+                return True, f"Upgraded to version {new_version}"
+            else:
+                # Try reinstall if upgrade fails (in case it wasn't installed via brew)
+                code, stdout, stderr = utils.run_command(
+                    ["brew", "reinstall", "ollama"],
+                    timeout=300
+                )
+                if code == 0:
+                    new_version = get_ollama_version()
+                    return True, f"Reinstalled to version {new_version}"
+                return False, f"Upgrade failed: {stderr}"
+        else:
+            return False, "Homebrew not available - please upgrade manually from https://ollama.com/download"
+
+    elif os_name == "Linux":
+        ui.print_info("Upgrading Ollama via install script...")
+        try:
+            url = "https://ollama.com/install.sh"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=30, context=get_unverified_ssl_context()) as response:
+                script_content = response.read().decode('utf-8')
+
+            process = subprocess.Popen(
+                ["bash", "-s"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = process.communicate(input=script_content, timeout=300)
+
+            if process.returncode == 0:
+                new_version = get_ollama_version()
+                return True, f"Upgraded to version {new_version}"
+            return False, f"Upgrade failed: {stderr}"
+        except Exception as e:
+            return False, f"Upgrade failed: {e}"
+
+    return False, "Automatic upgrade not supported on this platform"
+
+
+def start_ollama() -> Tuple[bool, str]:
+    """
+    Start Ollama service if not already running.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    os_name = platform.system()
+
+    if os_name == "Darwin":  # macOS
+        # Check if Ollama is installed via Homebrew
+        if shutil.which("brew"):
+            # Try to start via Homebrew services
+            code, stdout, stderr = utils.run_command(
+                ["brew", "services", "start", "ollama"],
+                timeout=10
+            )
+            if code == 0:
+                # Wait for service to start
+                time.sleep(3)
+                return True, "Started Ollama via Homebrew services"
+
+        # Try to start Ollama directly in background
+        try:
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True  # Detach from parent process
+            )
+            # Wait for service to start
+            time.sleep(3)
+            return True, "Started Ollama in background"
+        except Exception as e:
+            return False, f"Failed to start Ollama: {e}"
+
+    elif os_name == "Linux":
+        # Try systemctl on Linux
+        code, stdout, stderr = utils.run_command(
+            ["systemctl", "start", "ollama"],
+            timeout=10
+        )
+        if code == 0:
+            time.sleep(2)
+            return True, "Started Ollama via systemd"
+
+        # Try to start directly
+        try:
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            time.sleep(3)
+            return True, "Started Ollama in background"
+        except Exception as e:
+            return False, f"Failed to start Ollama: {e}"
+
+    return False, "Automatic start not supported on this platform"
+
+
+def check_and_prompt_upgrade() -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Check if Ollama needs an upgrade and prompt user.
+
+    Returns:
+        Tuple of (needs_upgrade, current_version, latest_version)
+    """
+    current_version = get_ollama_version()
+    if not current_version:
+        return False, None, None
+
+    latest_version = get_latest_ollama_version()
+    if not latest_version:
+        # Can't determine latest version, assume current is fine
+        return False, current_version, None
+
+    # Compare versions
+    comparison = compare_versions(current_version, latest_version)
+
+    if comparison < 0:
+        # Current version is older
+        return True, current_version, latest_version
+
+    return False, current_version, latest_version
+
+
 def get_installation_instructions() -> str:
     """Get OS-specific Ollama installation instructions."""
     os_name = platform.system()

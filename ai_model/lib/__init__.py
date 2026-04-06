@@ -1,15 +1,16 @@
 """
 Ollama LLM Setup Library
 
-Modular components for Ollama and Continue.dev setup.
+Modular components for Ollama and OpenCode setup.
 
 Modules:
-- config: Continue.dev configuration generation + manifest tracking
+- config: Configuration generation + manifest tracking
 - hardware: Hardware detection
 - ide: IDE detection and integration (VS Code, Cursor, IntelliJ)
-- model_selector: Model selection
+- model_selector: Gemma4 model selection
 - models: Model catalog and legacy support
 - ollama: Ollama service management
+- opencode: OpenCode CLI installation and configuration
 - ui: Terminal UI utilities
 - uninstaller: Smart uninstallation with manifest tracking
 - utils: General utilities
@@ -29,6 +30,7 @@ __all__ = [
     "model_selector",
     "models",
     "ollama",
+    "opencode",
     "ui",
     "uninstaller",
     "utils",
@@ -79,6 +81,7 @@ _SUBMODULES = {
     "model_selector",
     "models",
     "ollama",
+    "opencode",
     "ui",
     "uninstaller",
     "utils",

@@ -69,7 +69,7 @@ GEMMA4_MODELS = [
         min_ram_required=16,
         max_ram_recommended=32,
         description="Optimized 26B model for Mac Silicon with 16GB+ RAM. Best balance of quality and performance.",
-        recommended=True,  # Default recommendation for 16GB+ systems
+        recommended=False,
         performance_tier="quality"
     ),
     GemmaModel(
@@ -123,23 +123,27 @@ def get_recommended_model(hw_info: hardware.HardwareInfo) -> GemmaModel:
         else:
             return GEMMA4_MODELS[-1]  # gemma4:31b (31B)
 
-    # Prefer models marked as recommended
-    recommended = [m for m in suitable_models if m.recommended]
-    if recommended:
-        return recommended[0]
-
-    # Otherwise, pick the largest suitable model
+    # Pick the largest model that fits within RAM constraints
+    # This ensures we maximize quality while staying within hardware limits
     return max(suitable_models, key=lambda m: m.ram_gb)
 
 
-def display_model_menu(hw_info: hardware.HardwareInfo, recommended_model: GemmaModel) -> None:
+def display_model_menu(
+    hw_info: hardware.HardwareInfo,
+    recommended_model: GemmaModel,
+    installed_models: List[str] = None
+) -> None:
     """
-    Display the model selection menu with hardware info.
+    Display the model selection menu with hardware info and installation status.
 
     Args:
         hw_info: Hardware information
         recommended_model: The recommended model for this hardware
+        installed_models: List of already installed model names (optional)
     """
+    if installed_models is None:
+        installed_models = []
+
     print()
     ui.print_header("📦 Model Selection")
     print()
@@ -159,28 +163,39 @@ def display_model_menu(hw_info: hardware.HardwareInfo, recommended_model: GemmaM
         # Mark recommended model
         marker = ui.colorize(" ★ RECOMMENDED", ui.Colors.GREEN) if model == recommended_model else ""
 
+        # Check if already installed
+        is_installed = model.ollama_name in installed_models
+        installed_marker = ui.colorize(" - ALREADY INSTALLED", ui.Colors.BLUE) if is_installed else ""
+
         # Check if RAM is suitable
         ram_ok = hw_info.ram_gb >= model.min_ram_required
         ram_indicator = "✓" if ram_ok else "✗"
         ram_color = ui.Colors.GREEN if ram_ok else ui.Colors.RED
 
-        print(f"  {i}. {ui.colorize(model.name, ui.Colors.CYAN)}{marker}")
+        print(f"  {i}. {ui.colorize(model.name, ui.Colors.CYAN)}{marker}{installed_marker}")
         print(f"     {model.ollama_name}")
         print(f"     {ui.colorize(ram_indicator, ram_color)} RAM: {model.ram_gb:.1f} GB (requires {model.min_ram_required}+ GB system RAM)")
         print(f"     {model.description}")
         print()
 
 
-def select_model_interactive(hw_info: hardware.HardwareInfo) -> GemmaModel:
+def select_model_interactive(
+    hw_info: hardware.HardwareInfo,
+    installed_models: List[str] = None
+) -> GemmaModel:
     """
     Interactive model selection with hardware-based recommendation.
 
     Args:
         hw_info: Hardware information
+        installed_models: List of already installed model names (optional)
 
     Returns:
         Selected GemmaModel
     """
+    if installed_models is None:
+        installed_models = []
+
     # Validate Apple Silicon support
     is_supported, error_msg = hardware.validate_apple_silicon_support(hw_info)
     if not is_supported:
@@ -190,8 +205,8 @@ def select_model_interactive(hw_info: hardware.HardwareInfo) -> GemmaModel:
     # Get recommendation
     recommended_model = get_recommended_model(hw_info)
 
-    # Display menu
-    display_model_menu(hw_info, recommended_model)
+    # Display menu with installation status
+    display_model_menu(hw_info, recommended_model, installed_models)
 
     # Prompt for selection
     recommended_index = GEMMA4_MODELS.index(recommended_model) + 1

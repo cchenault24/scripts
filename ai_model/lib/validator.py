@@ -54,9 +54,9 @@ def is_restricted_model_name(model_name: str) -> bool:
 API_TIMEOUT = 5  # Timeout for API health checks
 API_TIMEOUT_LONG = 10  # Timeout for longer API operations
 OLLAMA_LIST_TIMEOUT = 10  # Timeout for 'ollama list' command
-MODEL_PULL_TIMEOUT = 3600  # Timeout for model pull (1 hour)
+MODEL_PULL_TIMEOUT = 7200  # Timeout for model pull (2 hours - increased for large models like 31B)
 PROCESS_KILL_TIMEOUT = 5  # Timeout for process termination
-VERIFICATION_DELAY = 1  # Delay before verifying model after pull
+VERIFICATION_DELAY = 2  # Delay before verifying model after pull (increased for reliability)
 
 # Retry configuration
 MAX_PULL_RETRIES = 3
@@ -337,7 +337,7 @@ def pull_model_with_verification(
     if is_restricted_model_name(model_name):
         error_msg = f"Model {model_name} is from a restricted country and cannot be downloaded"
         if show_progress:
-            ui.print_error(f"✗ Blocked: {model_name}")
+            ui.print_error(f" Blocked: {model_name}")
             ui.print_error(f"  Reason: Chinese-based LLMs are not allowed")
         return False, error_msg
 
@@ -352,15 +352,15 @@ def pull_model_with_verification(
         time.sleep(VERIFICATION_DELAY)  # Brief pause for Ollama to update
         if verify_model_exists(model_name):
             if show_progress:
-                ui.print_success(f"✓ {model_name} downloaded and verified")
+                ui.print_success(f"{model_name} downloaded and verified")
             return True, ""
         else:
             if show_progress:
-                ui.print_warning(f"⚠ {model_name} pull succeeded but verification failed")
+                ui.print_warning(f"{model_name} pull succeeded but verification failed")
             return False, "Pull appeared to succeed but model not found in Ollama"
     else:
         if show_progress:
-            ui.print_error(f"✗ Failed to pull {model_name}")
+            ui.print_error(f" Failed to pull {model_name}")
             if error_msg:
                 # Show truncated error for readability
                 display_error = error_msg[:300] if len(error_msg) > 300 else error_msg
@@ -371,43 +371,47 @@ def pull_model_with_verification(
 def run_preflight_check(show_progress: bool = True) -> Tuple[bool, str, Optional[str]]:
     """
     Run a pre-flight check by pulling a tiny test model.
-    
+
     This helps identify issues before attempting larger downloads.
-    
+
     Returns:
-        Tuple of (success, message, error_type):
+        Tuple of (success, message, ollama_version):
         - success: True if pre-flight check passed
         - message: Status or error message
-        - error_type: PullErrorType if failed, None if successful
+        - ollama_version: Ollama version string if successful, None if failed
     """
     if show_progress:
         ui.print_info(f"Running pre-flight check with {PREFLIGHT_TEST_MODEL}...")
-    
+
     # First check if Ollama API is responding
     if not is_ollama_api_available():
-        return False, "Ollama API not responding. Is Ollama running?", PullErrorType.SERVICE
-    
+        return False, "Ollama API not responding. Is Ollama running?", None
+
+    # Get Ollama version
+    from . import ollama as ollama_module
+    ollama_version = ollama_module.get_ollama_version()
+
     # Try pulling the tiny test model
     success, error_msg = _pull_model_single_attempt(PREFLIGHT_TEST_MODEL, show_progress=False)
-    
+
     if success:
         # Clean up test model to save space
         utils.run_command(["ollama", "rm", PREFLIGHT_TEST_MODEL], timeout=30, clean_env=True)
         if show_progress:
             ui.print_success("Pre-flight check passed!")
-        return True, "Pre-flight check passed", None
-    
-    # Classify the error
+        return True, "Pre-flight check passed", ollama_version
+
+    # Classify the error for troubleshooting
     error_type = classify_pull_error(error_msg)
-    
+
     if show_progress:
         ui.print_error(f"Pre-flight check failed: {error_msg[:150]}")
         ui.print_warning(f"Error type: {error_type}")
         print()
         for step in get_troubleshooting_steps(error_type):
             print(f"  {step}")
-    
-    return False, error_msg, error_type
+
+    return False, error_msg, None
 
 
 def _pull_model_via_api(model_name: str, show_progress: bool = True) -> Tuple[bool, str]:
@@ -540,7 +544,7 @@ def _pull_model_via_api(model_name: str, show_progress: bool = True) -> Tuple[bo
                     return False, error_msg
                 except Exception as e:
                     return False, str(e)
-        
+
         else:
             # Fallback: simple progress without rich
             try:
@@ -551,12 +555,12 @@ def _pull_model_via_api(model_name: str, show_progress: bool = True) -> Tuple[bo
                             line = line_bytes.decode('utf-8').strip()
                             if not line:
                                 continue
-                            
+
                             data = json_module.loads(line)
                             status = data.get("status", "")
                             total = data.get("total")
                             completed = data.get("completed", 0)
-                            
+
                             if status.startswith("pulling ") and total and completed:
                                 percent = int((completed / total) * 100) if total > 0 else 0
                                 if percent != last_percent:
@@ -573,16 +577,26 @@ def _pull_model_via_api(model_name: str, show_progress: bool = True) -> Tuple[bo
                                 print()
                                 ui.print_error(f"Error: {error_msg}")
                                 return False, error_msg
-                        
+
                         except json_module.JSONDecodeError:
                             continue
                         except Exception:
                             continue
-            
+
             except Exception as e:
                 return False, str(e)
-        
-        return False, "Unexpected end of stream"
+
+        # Stream ended without explicit success message
+        # Verify if model was actually pulled successfully
+        print()
+        ui.print_info("Stream ended, verifying model...")
+        time.sleep(2)  # Give Ollama time to finalize
+
+        if verify_model_exists(model_name):
+            ui.print_success(f"{model_name} verified successfully")
+            return True, ""
+        else:
+            return False, "Unexpected end of stream - model not found after pull attempt"
 
     except Exception as e:
         return False, f"API error: {type(e).__name__}: {e}"
@@ -943,9 +957,9 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True, use_
     Execute a single Ollama pull attempt without retries.
 
     Strategy:
-    1. Try API method first (clean JSON progress)
-    2. Fall back to CLI with progress display
-    3. Or use silent CLI if progress disabled
+    1. For large models (>20GB), prefer CLI (more stable)
+    2. For smaller models, try API first (clean JSON progress)
+    3. Fall back to CLI if API fails
 
     Args:
         model_name: Model to pull (e.g., "gpt-oss:20b")
@@ -957,7 +971,24 @@ def _pull_model_single_attempt(model_name: str, show_progress: bool = True, use_
         - success: True if pull succeeded
         - error_message: Error details if failed, empty if successful
     """
-    # Try API first (preferred: clean JSON progress)
+    # Check if this is a large model - prefer CLI for stability
+    is_large_model = any(size in model_name.lower() for size in ['31b', '30b', '26b', '20b'])
+
+    # For large models, use CLI directly (API can be unstable for multi-GB downloads)
+    if is_large_model:
+        if show_progress:
+            ui.print_info(f"Using CLI method for large model {model_name}")
+        try:
+            if show_progress:
+                return _pull_via_cli_with_progress(model_name)
+            else:
+                return _pull_via_cli_silent(model_name)
+        except FileNotFoundError:
+            return False, "Ollama command not found - is Ollama installed?"
+        except (OSError, IOError, subprocess.SubprocessError) as e:
+            return False, f"Process error: {type(e).__name__}: {e}"
+
+    # For smaller models, try API first (preferred: clean JSON progress)
     if use_api:
         try:
             return _pull_model_via_api(model_name, show_progress)
