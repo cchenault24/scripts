@@ -280,7 +280,7 @@ cat > "$CONFIG_DIR/opencode.jsonc" <<'EOF'
   "model": "llama/gemma4-26b",
   "agent": {
     "build": {
-      "prompt": "{file:./.opencode/prompts/build.txt}",
+      "prompt": "{file:./prompts/build.txt}",
       "permission": {
         "edit": "allow",
         "bash": "allow",
