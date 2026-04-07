@@ -30,11 +30,16 @@ export OLLAMA_NUM_GPU=999             # All layers to GPU
 export OLLAMA_MAX_LOADED_MODELS=1     # Focus on single model
 export OLLAMA_FLASH_ATTENTION=1       # Fast attention
 
-# Apple Silicon specific optimizations
-export OLLAMA_NUM_THREAD=10           # Match P-core count (M4 Pro: 10 P-cores)
-export GOMAXPROCS=14                  # Total cores (10 P + 4 E cores)
-export OLLAMA_USE_MMAP=1              # Memory-mapped I/O for faster model loading
-export OLLAMA_MAX_VRAM=45000          # Reserve 45GB for models (leave 3GB for system)
+# Apple Silicon specific optimizations (dynamically detected)
+# Detect hardware specs
+DETECTED_P_CORES=$(detect_p_cores)
+DETECTED_TOTAL_CORES=$(detect_total_cores)
+DETECTED_OPTIMAL_VRAM=$(calculate_optimal_vram)
+
+export OLLAMA_NUM_THREAD="${OLLAMA_NUM_THREAD:-$DETECTED_P_CORES}"  # Match P-core count (auto-detected)
+export GOMAXPROCS="${GOMAXPROCS:-$DETECTED_TOTAL_CORES}"             # Total cores (auto-detected)
+export OLLAMA_USE_MMAP=1                                             # Memory-mapped I/O for faster model loading
+export OLLAMA_MAX_VRAM="${OLLAMA_MAX_VRAM:-$DETECTED_OPTIMAL_VRAM}" # Auto-calculated from RAM
 
 # Metal optimization (disable validation in production for speed)
 export MTL_SHADER_VALIDATION=0        # Disable Metal shader validation

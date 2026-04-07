@@ -123,6 +123,65 @@ get_ram_tier() {
     fi
 }
 
+# Detect Performance core count (Apple Silicon)
+detect_p_cores() {
+    local p_cores
+    p_cores=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)
+
+    if [[ -n "$p_cores" && "$p_cores" -gt 0 ]]; then
+        echo "$p_cores"
+    else
+        # Fallback: estimate based on total cores and chip
+        local total_cores
+        total_cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "4")
+
+        # Conservative estimate: ~50-70% are P-cores
+        echo $((total_cores * 2 / 3))
+    fi
+}
+
+# Detect Efficiency core count (Apple Silicon)
+detect_e_cores() {
+    local e_cores
+    e_cores=$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null)
+
+    if [[ -n "$e_cores" && "$e_cores" -gt 0 ]]; then
+        echo "$e_cores"
+    else
+        # Fallback: estimate from total - P-cores
+        local total_cores p_cores
+        total_cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "4")
+        p_cores=$(detect_p_cores)
+        echo $((total_cores - p_cores))
+    fi
+}
+
+# Detect total physical cores
+detect_total_cores() {
+    local total_cores
+    total_cores=$(sysctl -n hw.physicalcpu 2>/dev/null || echo "4")
+    echo "$total_cores"
+}
+
+# Calculate optimal VRAM limit (leave 3GB for system)
+calculate_optimal_vram() {
+    local ram_gb
+    ram_gb=$(detect_ram_gb)
+
+    # Reserve 3GB for macOS and other apps
+    local vram_gb=$((ram_gb - 3))
+
+    # Convert to MB
+    local vram_mb=$((vram_gb * 1000))
+
+    # Ensure minimum of 10GB
+    if [[ $vram_mb -lt 10000 ]]; then
+        vram_mb=10000
+    fi
+
+    echo "$vram_mb"
+}
+
 #############################################
 # Prerequisites Check Functions
 #############################################
@@ -255,6 +314,10 @@ export M_CHIP=$(detect_m_chip)
 export GPU_CORES=$(detect_gpu_cores)
 export TOTAL_RAM_GB=$(detect_ram_gb)
 export RAM_TIER=$(get_ram_tier)
+export P_CORES=$(detect_p_cores)
+export E_CORES=$(detect_e_cores)
+export TOTAL_CORES=$(detect_total_cores)
+export OPTIMAL_VRAM_MB=$(calculate_optimal_vram)
 
 # Display hardware info when sourced (optional, can be commented out)
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
