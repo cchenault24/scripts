@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 # Ollama configuration
-export OLLAMA_PORT="31434"
+export OLLAMA_PORT="11434"
 export OLLAMA_BUILD_DIR="/tmp/ollama-build"
 export OLLAMA_HOST="127.0.0.1:${OLLAMA_PORT}"
 

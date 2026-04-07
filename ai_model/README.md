@@ -137,7 +137,7 @@ ollama_status
 stop_ollama_server
 
 # Health check
-curl http://localhost:31434/api/tags
+curl http://localhost:11434/api/tags
 ```
 
 ### Model Operations
@@ -434,7 +434,7 @@ Approximate tokens/second on M3 Max 64GB:
 **3. Port Already in Use**
 - **Cause:** Another Ollama instance running
 - **Solution:** `pkill ollama` or use custom port
-- **Verify:** `lsof -i :31434`
+- **Verify:** `lsof -i :11434`
 
 **4. Model Download Fails**
 - **Cause:** Network issues or disk space

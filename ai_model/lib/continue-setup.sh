@@ -147,7 +147,7 @@ check_continue_installed() {
 
 # Get installed Ollama models dynamically
 get_installed_models() {
-    local ollama_url="${1:-http://127.0.0.1:31434}"
+    local ollama_url="${1:-http://127.0.0.1:11434}"
 
     # Query Ollama API for installed models
     if ! curl -s "${ollama_url}/api/tags" 2>/dev/null; then
@@ -158,7 +158,7 @@ get_installed_models() {
 
 # Generate Continue config with installed models
 generate_continue_config() {
-    local ollama_url="${1:-http://127.0.0.1:31434}"
+    local ollama_url="${1:-http://127.0.0.1:11434}"
 
     # Ensure URL has http:// prefix
     if [[ ! "$ollama_url" =~ ^https?:// ]]; then
@@ -333,8 +333,8 @@ setup_continue() {
 
     local config_dir="$HOME/.continue"
     local config_file="$config_dir/config.json"
-    # Use OLLAMA_PORT from environment/ollama-setup.sh, or default to 31434
-    local port="${OLLAMA_PORT:-31434}"
+    # Use OLLAMA_PORT from environment/ollama-setup.sh, or default to 11434
+    local port="${OLLAMA_PORT:-11434}"
     local ollama_url="http://127.0.0.1:${port}"
 
     # Ensure OLLAMA_HOST is set for model detection
@@ -408,7 +408,7 @@ with open('$config_file') as f:
     echo ""
     print_info "Next steps:"
     echo "  1. Install Continue.dev extension in your IDE (if not already installed)"
-    echo "  2. Ensure Ollama is running on port 31434 (http://127.0.0.1:31434)"
+    echo "  2. Ensure Ollama is running on port 11434 (http://127.0.0.1:11434)"
     echo "  3. Restart your IDE to load the new configuration"
 }
 

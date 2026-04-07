@@ -20,7 +20,7 @@ source "$LIB_DIR/webui-setup.sh"
 source "$LIB_DIR/opencode-setup.sh"
 
 # Configuration - ensure OLLAMA_PORT is set before anything else
-export OLLAMA_PORT="${OLLAMA_PORT:-31434}"
+export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
 export AUTO_START="${AUTO_START:-true}"
 export SETUP_CLIENTS="${SETUP_CLIENTS:-all}"
 export INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-false}"
@@ -180,10 +180,8 @@ EOF
     export OLLAMA_PORT="$OLLAMA_PORT"
     export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
 
-    # Source the config file to apply changes immediately
-    print_info "Applying changes to current session..."
-    # shellcheck disable=SC1090
-    source "$shell_config" 2>/dev/null || true
+    # Note: New terminal sessions will automatically load OLLAMA_HOST
+    # Current session already has OLLAMA_HOST exported above
 
     print_status "Environment configured: OLLAMA_PORT=$OLLAMA_PORT, OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT"
     print_info "Future terminals will automatically have these settings"

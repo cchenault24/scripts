@@ -15,7 +15,7 @@ source "$SCRIPT_DIR/model-families.sh"
 #############################################
 # Installation Configuration
 #############################################
-export OLLAMA_PORT="31434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
+export OLLAMA_PORT="11434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
 
 # Runtime configuration
 export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
@@ -60,7 +60,7 @@ install_ollama() {
         return 1
     fi
 
-    print_info "Homebrew version: $(brew --version | head -1)"
+    print_info "Homebrew version: $(brew --version 2>&1 | head -1)"
 
     # Check if Ollama is already installed
     if command -v ollama &> /dev/null; then
@@ -69,17 +69,29 @@ install_ollama() {
         print_status "Ollama is already installed: $installed_version"
         print_info "Location: $(which ollama)"
 
-        # Ask if user wants to upgrade
-        if [[ "${UNATTENDED:-false}" != "true" ]]; then
+        # Check if Homebrew is working properly (detect compatibility issues)
+        local brew_works=true
+        if ! brew --version &> /dev/null 2>&1; then
+            brew_works=false
+            print_warning "Homebrew has compatibility issues (possibly unsupported macOS version)"
+            print_info "Current Ollama installation will continue to work"
+        fi
+
+        # Ask if user wants to upgrade (only if Homebrew works and not unattended)
+        if [[ "${UNATTENDED:-false}" != "true" ]] && [[ "$brew_works" == "true" ]]; then
             read -p "Upgrade to latest version? (y/N): " upgrade
             if [[ "$upgrade" == "y" || "$upgrade" == "Y" ]]; then
                 print_info "Upgrading Ollama..."
-                if brew upgrade ollama 2>&1 | tee "$OLLAMA_LOG_FILE.install"; then
-                    print_status "Ollama upgraded successfully"
+                # Redirect stderr to check for errors
+                if brew upgrade ollama 2>&1 | tee "$OLLAMA_LOG_FILE.install" | grep -q "Error:"; then
+                    print_warning "Upgrade had issues, but current Ollama will continue to work"
+                    print_info "You can manually upgrade later when Homebrew is fixed"
                 else
-                    print_warning "Upgrade had issues, but Ollama may still work"
+                    print_status "Ollama upgraded successfully"
                 fi
             fi
+        elif [[ "$brew_works" == "false" ]]; then
+            print_info "Skipping upgrade check (Homebrew compatibility issues detected)"
         else
             print_info "Unattended mode: Skipping upgrade check"
         fi

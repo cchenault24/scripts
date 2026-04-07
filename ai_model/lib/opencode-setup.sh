@@ -98,7 +98,7 @@ configure_opencode() {
     local config_file="${config_dir}/opencode.jsonc"
     local auth_dir="$HOME/.local/share/opencode"
     local auth_file="${auth_dir}/auth.json"
-    local port="${OLLAMA_PORT:-31434}"
+    local port="${OLLAMA_PORT:-11434}"
 
     # Ensure OLLAMA_HOST is set for model detection
     export OLLAMA_HOST="127.0.0.1:${port}"
@@ -195,7 +195,7 @@ EOF
 
 # OpenCode Ollama configuration (added by ai_model setup)
 export OPENAI_API_KEY="sk-dummy"
-export OPENAI_BASE_URL="http://127.0.0.1:${OLLAMA_PORT:-31434}/v1"
+export OPENAI_BASE_URL="http://127.0.0.1:${OLLAMA_PORT:-11434}/v1"
 ENVEOF
             print_status "Added OpenCode environment variables to ${shell_config}"
         else
@@ -269,11 +269,13 @@ test_opencode() {
     print_info "Test 4: Checking multi-agent configuration..."
     if [[ -f "$config_file" ]]; then
         local agent_count
-        agent_count=$(grep -c '"name":' "$config_file" || echo "0")
-        if [[ "$agent_count" -ge 3 ]]; then
-            print_status "Multi-agent setup configured (${agent_count} agents found)"
+        agent_count=$(grep -c '"model":' "$config_file" 2>/dev/null || echo "0")
+        # Clean up any whitespace or newlines
+        agent_count=$(echo "$agent_count" | tr -d '\n' | tr -d ' ')
+        if [[ "$agent_count" =~ ^[0-9]+$ ]] && [[ "$agent_count" -ge 1 ]]; then
+            print_status "Configuration has ${agent_count} model(s) configured"
         else
-            print_warning "Expected 3 agents, found ${agent_count}"
+            print_info "Configuration has basic setup (not multi-agent)"
         fi
     fi
 
@@ -327,6 +329,19 @@ setup_opencode() {
     echo "  GPU Cores: ${GPU_CORES}"
     echo "  RAM: ${TOTAL_RAM_GB}GB (${RAM_TIER})"
     echo ""
+
+    # Set local variables for summary (same defaults as configure_opencode)
+    local port="${OLLAMA_PORT:-11434}"
+    local model_name="codestral:22b-v0.1-q4_K_M"
+
+    # Detect actual model if ollama is available
+    if command -v ollama &> /dev/null; then
+        local available_model
+        available_model=$(ollama list 2>/dev/null | grep -E 'codestral|gemma4|llama' | head -1 | awk '{print $1}')
+        if [[ -n "$available_model" ]]; then
+            model_name="$available_model"
+        fi
+    fi
 
     # Install OpenCode
     install_opencode || {

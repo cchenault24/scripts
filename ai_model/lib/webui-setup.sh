@@ -27,7 +27,7 @@ fi
 
 # Configuration
 WEBUI_PORT=38080
-OLLAMA_URL="http://host.docker.internal:31434"
+OLLAMA_URL="http://host.docker.internal:11434"
 CONTAINER_NAME="open-webui"
 WEBUI_IMAGE="ghcr.io/open-webui/open-webui:webui_main"
 HEALTH_CHECK_TIMEOUT=60
