@@ -145,74 +145,118 @@ check_continue_installed() {
 # Continue.dev Configuration
 #############################################
 
-# Setup Continue.dev configuration
-setup_continue() {
-    set -euo pipefail
+# Get installed Ollama models dynamically
+get_installed_models() {
+    local ollama_url="${1:-http://127.0.0.1:31434}"
 
-    print_header "Setting up Continue.dev Configuration"
+    # Query Ollama API for installed models
+    if ! curl -s "${ollama_url}/api/tags" 2>/dev/null; then
+        print_warning "Could not fetch models from Ollama (is it running?)"
+        return 1
+    fi
+}
 
-    local config_dir="$HOME/.continue"
-    local config_file="$config_dir/config.json"
+# Generate Continue config with installed models
+generate_continue_config() {
+    local ollama_url="${1:-http://127.0.0.1:31434}"
 
-    # Create config directory if it doesn't exist
-    if [[ ! -d "$config_dir" ]]; then
-        print_info "Creating Continue.dev config directory..."
-        mkdir -p "$config_dir" || {
-            print_error "Failed to create directory: $config_dir"
+    print_info "Detecting installed models..." >&2
+
+    # Fetch models from Ollama
+    local models_json
+    models_json=$(curl -s "${ollama_url}/api/tags" 2>/dev/null || echo '{"models":[]}')
+
+    # Parse model names using python (more reliable than jq/sed)
+    local model_list
+    model_list=$(python3 -c "
+import json, sys
+data = json.loads('''${models_json}''')
+for model in data.get('models', []):
+    print(model['name'])
+" 2>/dev/null || echo "")
+
+    if [[ -z "$model_list" ]]; then
+        print_warning "No models found, creating default config" >&2
+        # Use the model from OLLAMA_MODEL if set
+        if [[ -n "${OLLAMA_MODEL:-}" ]]; then
+            model_list="$OLLAMA_MODEL"
+        else
+            print_error "No models available and OLLAMA_MODEL not set" >&2
             return 1
-        }
+        fi
     fi
 
-    # Backup existing config if it exists
-    if [[ -f "$config_file" ]]; then
-        local backup_file="$config_file.backup.$(date +%Y%m%d_%H%M%S)"
-        print_warning "Existing config found, backing up to: $backup_file"
-        cp "$config_file" "$backup_file" || {
-            print_error "Failed to backup existing config"
-            return 1
-        }
-    fi
+    # Build models JSON array
+    local models_json_array="["
+    local first=true
+    local autocomplete_model=""
 
-    # Create the config file
-    print_info "Creating Continue.dev config.json..."
-    cat > "$config_file" <<'EOF'
-{
-  "models": [
+    while IFS= read -r model_name; do
+        [[ -z "$model_name" ]] && continue
+
+        # Determine title based on model family
+        local title="$model_name"
+        if [[ "$model_name" =~ llama ]]; then
+            title="Llama (${model_name##*:})"
+        elif [[ "$model_name" =~ codestral ]]; then
+            title="Codestral (Code)"
+        elif [[ "$model_name" =~ gemma ]]; then
+            title="Gemma (${model_name##*:})"
+        elif [[ "$model_name" =~ phi ]]; then
+            title="Phi (${model_name##*:})"
+        elif [[ "$model_name" =~ qwen ]]; then
+            title="Qwen (${model_name##*:})"
+        fi
+
+        # Use smaller models for autocomplete
+        if [[ "$model_name" =~ (1b|2b|3b) ]] && [[ -z "$autocomplete_model" ]]; then
+            autocomplete_model="$model_name"
+        fi
+
+        # Add to models array
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            models_json_array+=","
+        fi
+
+        models_json_array+=$(cat <<EOF
+
     {
-      "title": "Llama 3.3 70B",
+      "title": "$title",
       "provider": "ollama",
-      "model": "llama3.3:70b-instruct-q4_K_M",
-      "apiBase": "http://127.0.0.1:31434"
-    },
-    {
-      "title": "Codestral 22B (Code)",
-      "provider": "ollama",
-      "model": "codestral:22b-v0.1-q8_0",
-      "apiBase": "http://127.0.0.1:31434"
-    },
-    {
-      "title": "Gemma 4 31B",
-      "provider": "ollama",
-      "model": "gemma4:31b-it-q8_0",
-      "apiBase": "http://127.0.0.1:31434"
-    },
-    {
-      "title": "Phi 4 14B",
-      "provider": "ollama",
-      "model": "phi4:14b-q8_0",
-      "apiBase": "http://127.0.0.1:31434"
+      "model": "$model_name",
+      "apiBase": "$ollama_url"
     }
-  ],
+EOF
+)
+    done <<< "$model_list"
+
+    models_json_array+=$'\n  ]'
+
+    # Autocomplete model section
+    local autocomplete_section=""
+    if [[ -n "$autocomplete_model" ]]; then
+        autocomplete_section=$(cat <<EOF
+,
   "tabAutocompleteModel": {
     "title": "Fast Autocomplete",
     "provider": "ollama",
-    "model": "llama3.2:3b-instruct-q8_0",
-    "apiBase": "http://127.0.0.1:31434"
-  },
+    "model": "$autocomplete_model",
+    "apiBase": "$ollama_url"
+  }
+EOF
+)
+    fi
+
+    # Generate full config
+    cat <<EOF
+{
+  "models": ${models_json_array}${autocomplete_section},
   "embeddingsProvider": {
     "provider": "ollama",
     "model": "nomic-embed-text",
-    "apiBase": "http://127.0.0.1:31434"
+    "apiBase": "$ollama_url"
   },
   "reranker": {
     "name": "free-trial"
@@ -271,6 +315,43 @@ setup_continue() {
   ]
 }
 EOF
+}
+
+# Setup Continue.dev configuration
+setup_continue() {
+    set -euo pipefail
+
+    print_header "Setting up Continue.dev Configuration"
+
+    local config_dir="$HOME/.continue"
+    local config_file="$config_dir/config.json"
+    local ollama_url="${OLLAMA_HOST:-http://127.0.0.1:31434}"
+
+    # Create config directory if it doesn't exist
+    if [[ ! -d "$config_dir" ]]; then
+        print_info "Creating Continue.dev config directory..."
+        mkdir -p "$config_dir" || {
+            print_error "Failed to create directory: $config_dir"
+            return 1
+        }
+    fi
+
+    # Backup existing config if it exists
+    if [[ -f "$config_file" ]]; then
+        local backup_file="$config_file.backup.$(date +%Y%m%d_%H%M%S)"
+        print_warning "Existing config found, backing up to: $backup_file"
+        cp "$config_file" "$backup_file" || {
+            print_error "Failed to backup existing config"
+            return 1
+        }
+    fi
+
+    # Generate dynamic config based on installed models
+    print_info "Generating config from installed models..."
+    if ! generate_continue_config "$ollama_url" > "$config_file"; then
+        print_error "Failed to generate config"
+        return 1
+    fi
 
     if [[ ! -f "$config_file" ]]; then
         print_error "Failed to create config file"
@@ -284,21 +365,27 @@ EOF
             print_status "Configuration file is valid JSON"
         else
             print_error "Configuration file contains invalid JSON"
+            cat "$config_file"
             return 1
         fi
     else
         print_warning "Python3 not found, skipping JSON validation"
     fi
 
+    # Show installed models
     print_status "Continue.dev configuration created successfully"
     print_info "Config location: $config_file"
     echo ""
-    print_info "Configuration includes:"
-    echo "  • Llama 3.3 70B (General purpose)"
-    echo "  • Codestral 22B (Code-focused)"
-    echo "  • Gemma 4 31B (Google's model)"
-    echo "  • Phi 4 14B (Microsoft's model)"
-    echo "  • Llama 3.2 3B (Fast autocomplete)"
+    print_info "Configured models:"
+    python3 -c "
+import json
+with open('$config_file') as f:
+    config = json.load(f)
+    for model in config.get('models', []):
+        print(f\"  • {model['title']}\")
+    if 'tabAutocompleteModel' in config:
+        print(f\"  • {config['tabAutocompleteModel']['title']} (autocomplete)\")
+" 2>/dev/null || echo "  (Could not parse config)"
     echo ""
 
     # Check IDE installation status
