@@ -230,13 +230,14 @@ EOF
 show_status() {
     print_header "Ollama Server Status"
 
-    # Check binary
-    if [[ -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        local binary_size
-        binary_size=$(du -h "$OLLAMA_BUILD_DIR/ollama" | cut -f1)
-        print_status "Binary: $OLLAMA_BUILD_DIR/ollama ($binary_size)"
+    # Check Ollama installation
+    if command -v ollama &> /dev/null; then
+        local version
+        version=$(ollama --version 2>&1 | head -1)
+        print_status "Ollama installed: $version"
+        print_info "Location: $(which ollama)"
     else
-        print_warning "Binary not found at $OLLAMA_BUILD_DIR/ollama"
+        print_warning "Ollama not installed"
     fi
 
     # Check server process
@@ -317,13 +318,13 @@ list_installed_models() {
         return 1
     fi
 
-    # Check if binary exists
-    if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        print_error "Ollama binary not found"
+    # Check if Ollama is installed
+    if ! command -v ollama &> /dev/null; then
+        print_error "Ollama is not installed"
         return 1
     fi
 
-    "$OLLAMA_BUILD_DIR/ollama" list
+    ollama list
 }
 
 #############################################
@@ -378,7 +379,6 @@ ${BLUE}EXAMPLES:${NC}
     $SCRIPT_NAME stop               # Stop the server
 
 ${BLUE}CONFIGURATION:${NC}
-    Build directory:    $OLLAMA_BUILD_DIR
     Port:               $PORT
     Host:               $OLLAMA_HOST
     PID file:           $OLLAMA_PID_FILE

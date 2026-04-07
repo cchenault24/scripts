@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
 
+# Protect SCRIPT_DIR from being overwritten by sourced libraries
+SETUP_SCRIPT_DIR="$SCRIPT_DIR"
+export SETUP_SCRIPT_DIR
+
 # Source common utilities first
 source "$LIB_DIR/common.sh"
 
@@ -71,13 +75,13 @@ done
 
 load_preset() {
     local preset_name="$1"
-    local preset_file="$SCRIPT_DIR/presets/${preset_name}.env"
+    local preset_file="$SETUP_SCRIPT_DIR/presets/${preset_name}.env"
 
     if [[ ! -f "$preset_file" ]]; then
         print_error "Preset not found: $preset_name"
         print_info "Available presets:"
-        if [[ -d "$SCRIPT_DIR/presets" ]]; then
-            find "$SCRIPT_DIR/presets" -maxdepth 1 -name "*.env" -print0 2>/dev/null | \
+        if [[ -d "$SETUP_SCRIPT_DIR/presets" ]]; then
+            find "$SETUP_SCRIPT_DIR/presets" -maxdepth 1 -name "*.env" -print0 2>/dev/null | \
                 xargs -0 -n1 basename | \
                 sed 's/.env$//' || echo "  (none)"
         else
