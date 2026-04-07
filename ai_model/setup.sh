@@ -301,7 +301,9 @@ main() {
             print_error "Unattended mode requires OLLAMA_MODEL to be set"
             exit 1
         fi
-        select_model  # From lib/model-selection.sh
+        run_model_selection  # From lib/model-selection.sh
+        # Export selected model to OLLAMA_MODEL
+        export OLLAMA_MODEL="$SELECTED_MODEL"
     else
         print_info "Using model: $OLLAMA_MODEL"
     fi
