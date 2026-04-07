@@ -179,22 +179,44 @@ export MODEL=llama3.2:11b-instruct-q8_0
 
 ## Utilities
 
+### Main Scripts (Root Directory)
+
+| Script | Purpose |
+|--------|---------|
+| `setup.sh` | Main installation orchestrator - ONE command setup |
+| `llama-control.sh` | Server management: start, stop, status, health, metrics |
+| `switch-model.sh` | Change active model + auto-update all client configs |
+| `compare-models.sh` | Display installed models in table format |
+| `install-model-pack.sh` | Install preset model packs (minimal/balanced/comprehensive) |
+| `benchmark.sh` | Performance testing with 4 standard tests |
+| `diagnose.sh` | Automated troubleshooting with 8 diagnostic checks |
+| `uninstall.sh` | Comprehensive uninstaller with selective removal |
+
 ### Library Scripts (`lib/`)
 
 | Script | Purpose |
 |--------|---------|
 | `common.sh` | Core utilities, hardware detection, print functions |
-| `model-families.sh` | Model definitions, security filters, recommendations |
-| `ollama-setup.sh` | Build Ollama, server management, optimizations |
-| `continue-setup.sh` | Configure Continue.dev plugin for IDEs |
+| `model-families.sh` | 13 models across 4 families, security filters |
+| `model-selection.sh` | Intelligent 2-stage selection with RAM filtering |
+| `ollama-setup.sh` | Build Ollama with Apple Silicon optimizations |
+| `continue-setup.sh` | Configure Continue.dev for JetBrains/VS Code |
 | `webui-setup.sh` | Setup Open WebUI Docker container |
-| `opencode-setup.sh` | Install OpenCode CLI tool |
+| `opencode-setup.sh` | Install and configure OpenCode CLI |
 
-### Testing
+### Testing Suite (`tests/`)
 
 ```bash
-# Test Ollama installation
-./test-ollama-setup.sh
+# Run all quality checks
+./tests/quality-checks.sh
+
+# Run integration tests
+./tests/integration-test.sh
+
+# Run specific component tests
+./tests/test-ollama-setup.sh
+./tests/test-model-selection.sh
+./tests/test-switch-model.sh
 ```
 
 ---
@@ -214,30 +236,58 @@ Comprehensive guides available in `docs/`:
 
 ```
 ai_model/
-├── lib/                      # Core libraries (modular design)
-│   ├── common.sh            # Utilities, hardware detection
-│   ├── model-families.sh    # Model definitions, security
-│   ├── ollama-setup.sh      # Ollama build & management
-│   ├── continue-setup.sh    # IDE plugin configuration
-│   ├── webui-setup.sh       # Browser UI setup
-│   └── opencode-setup.sh    # CLI tool setup
-├── docs/                     # Comprehensive documentation
-│   ├── MODEL_GUIDE.md       # Model selection help
-│   ├── CLIENT_SETUP.md      # Client configuration
-│   ├── TROUBLESHOOTING.md   # Problem solving
-│   └── TEAM_DEPLOYMENT.md   # Enterprise guide
-├── presets/                  # Pre-configured setups
-│   ├── developer.env        # Code-focused
-│   ├── researcher.env       # Quality-focused
-│   └── production.env       # Balanced
-└── test-ollama-setup.sh     # Integration tests
+├── 🚀 Main Scripts (User-facing)
+│   ├── setup.sh                  # Main installation script
+│   ├── llama-control.sh          # Server management
+│   ├── switch-model.sh           # Model switching
+│   ├── compare-models.sh         # Model comparison
+│   ├── install-model-pack.sh     # Preset installation
+│   ├── benchmark.sh              # Performance testing
+│   ├── diagnose.sh               # Troubleshooting
+│   └── uninstall.sh              # Clean removal
+│
+├── 📚 lib/                       # Core libraries (modular design)
+│   ├── common.sh                 # Utilities, hardware detection
+│   ├── model-families.sh         # Model definitions, security
+│   ├── model-selection.sh        # Intelligent model chooser
+│   ├── ollama-setup.sh           # Ollama build & management
+│   ├── continue-setup.sh         # IDE plugin configuration
+│   ├── webui-setup.sh            # Browser UI setup
+│   └── opencode-setup.sh         # CLI tool setup
+│
+├── 📖 docs/                      # Comprehensive documentation
+│   ├── MODEL_GUIDE.md            # Model selection help
+│   ├── CLIENT_SETUP.md           # Client configuration
+│   ├── TROUBLESHOOTING.md        # Problem solving
+│   └── TEAM_DEPLOYMENT.md        # Enterprise guide
+│
+├── ⚙️  presets/                  # Pre-configured setups
+│   ├── README.md                 # Preset usage guide
+│   ├── developer.env             # Code-focused
+│   ├── researcher.env            # Quality-focused
+│   └── production.env            # Balanced
+│
+├── 🧪 tests/                     # Testing suite
+│   ├── quality-checks.sh         # Shellcheck, security audits
+│   ├── integration-test.sh       # End-to-end testing
+│   └── test-*.sh                 # Component tests
+│
+├── 💡 examples/                  # Example scripts
+│   └── demo-model-selection.sh   # Interactive demo
+│
+├── 📄 README.md                  # This file
+├── 📄 STRUCTURE.md               # Detailed organization guide
+└── 📄 .gitignore                 # Git ignore rules
 ```
 
 **Design Philosophy:**
-- Modular library structure (`lib/`) for maintainability
-- Comprehensive documentation (`docs/`) for self-service
-- Preset configurations for quick deployment
-- Source-first approach for latest features
+- **Modular library structure** (`lib/`) for maintainability
+- **Comprehensive documentation** (`docs/`) for self-service
+- **Preset configurations** for quick deployment
+- **Testing built-in** (`tests/`) for quality assurance
+- **Source-first approach** for latest features
+
+> 📘 **See [STRUCTURE.md](STRUCTURE.md)** for detailed directory organization, file categories, and maintenance guidelines.
 
 ---
 
