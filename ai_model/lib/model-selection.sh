@@ -235,8 +235,8 @@ display_model_menu() {
     echo -e "${BLUE}Context Windows:${NC} Llama/Mistral/Phi (128K), Gemma (256K)"
     echo ""
 
-    # Return model names array (store in global)
-    export MODEL_MENU_OPTIONS=("${model_names[@]}")
+    # Return model names array (store in global, don't export - arrays can't be exported)
+    MODEL_MENU_OPTIONS=("${model_names[@]}")
 }
 
 # Select model from family
@@ -245,6 +245,9 @@ display_model_menu() {
 select_model_from_family() {
     local family="$1"
     local ram_gb="$TOTAL_RAM_GB"
+
+    # Initialize array to avoid unbound variable error
+    MODEL_MENU_OPTIONS=()
 
     # Display menu
     display_model_menu "$family" "$ram_gb" || return 1
