@@ -109,6 +109,74 @@ check_prerequisites() {
     print_status "All prerequisites met"
 }
 
+configure_shell_environment() {
+    print_header "Configuring Shell Environment"
+
+    local shell_config=""
+    local current_shell="${SHELL##*/}"
+
+    # Detect shell configuration file
+    case "$current_shell" in
+        zsh)
+            shell_config="$HOME/.zshrc"
+            ;;
+        bash)
+            # macOS uses .bash_profile, Linux uses .bashrc
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                shell_config="$HOME/.bash_profile"
+            else
+                shell_config="$HOME/.bashrc"
+            fi
+            ;;
+        *)
+            print_warning "Unknown shell: $current_shell"
+            print_info "Please manually add: export OLLAMA_HOST=\"127.0.0.1:$PORT\""
+            return 0
+            ;;
+    esac
+
+    print_info "Shell: $current_shell"
+    print_info "Config file: $shell_config"
+
+    # Check if OLLAMA_HOST is already configured
+    if grep -q "export OLLAMA_HOST=" "$shell_config" 2>/dev/null; then
+        # Check if it has the correct value
+        if grep -q "export OLLAMA_HOST=\"127.0.0.1:$PORT\"" "$shell_config"; then
+            print_status "OLLAMA_HOST already configured correctly"
+            return 0
+        else
+            print_warning "OLLAMA_HOST exists with different value"
+            # Update the existing line
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s|export OLLAMA_HOST=.*|export OLLAMA_HOST=\"127.0.0.1:$PORT\"|" "$shell_config"
+            else
+                sed -i "s|export OLLAMA_HOST=.*|export OLLAMA_HOST=\"127.0.0.1:$PORT\"|" "$shell_config"
+            fi
+            print_status "Updated OLLAMA_HOST to: 127.0.0.1:$PORT"
+        fi
+    else
+        # Add OLLAMA_HOST configuration
+        print_info "Adding OLLAMA_HOST to $shell_config..."
+        cat >> "$shell_config" <<EOF
+
+# Ollama custom port configuration (added by ai_model setup)
+export OLLAMA_HOST="127.0.0.1:$PORT"
+EOF
+        print_status "Added OLLAMA_HOST=127.0.0.1:$PORT"
+    fi
+
+    # Export for current session
+    export OLLAMA_HOST="127.0.0.1:$PORT"
+    print_status "Environment variable set for current session"
+
+    echo ""
+    print_warning "⚠️  Shell configuration updated"
+    print_info "To use ollama CLI in existing terminals, run:"
+    echo "  source $shell_config"
+    echo ""
+    print_info "Or open a new terminal (OLLAMA_HOST will be set automatically)"
+}
+
 setup_clients() {
     local clients="$1"
 
@@ -210,22 +278,36 @@ show_final_summary() {
     # Show next steps
     print_header "Next Steps"
     echo ""
-    echo "1. Test your installation:"
+
+    # Detect shell config file for user instruction
+    local shell_config=""
+    case "${SHELL##*/}" in
+        zsh) shell_config="~/.zshrc" ;;
+        bash) shell_config="~/.bash_profile" ;;
+        *) shell_config="your shell config" ;;
+    esac
+
+    echo "1. Reload your shell to activate OLLAMA_HOST:"
+    echo "   source $shell_config"
+    echo "   (or open a new terminal window)"
+    echo ""
+    echo "2. Test your installation:"
     echo "   ollama run ${OLLAMA_MODEL:-$(cat ~/.ollama-model 2>/dev/null || echo 'llama3.3:70b')}"
     echo ""
-    echo "2. Check server status:"
+    echo "3. Check server status:"
     echo "   ./llama-control.sh status"
     echo ""
 
     if [[ "$SETUP_CLIENTS" =~ "webui" ]] || [[ "$SETUP_CLIENTS" == "all" ]]; then
-        echo "3. Access Open WebUI:"
+        echo "4. Access Open WebUI:"
         echo "   Open http://localhost:38080 in your browser"
         echo ""
     fi
 
     if [[ "$SETUP_CLIENTS" =~ "opencode" ]] || [[ "$SETUP_CLIENTS" == "all" ]]; then
-        echo "4. Try OpenCode CLI:"
-        echo "   opencode chat"
+        echo "5. Try OpenCode CLI:"
+        echo "   opencode        # Start TUI"
+        echo "   opencode run \"your message here\""
         echo ""
     fi
 }
@@ -288,6 +370,9 @@ main() {
     else
         print_info "Using existing Ollama server"
     fi
+
+    # Step 3.5: Configure shell environment
+    configure_shell_environment
 
     # Step 4: Model selection (unless preset specifies one)
     if [[ -z "${OLLAMA_MODEL:-}" ]]; then
