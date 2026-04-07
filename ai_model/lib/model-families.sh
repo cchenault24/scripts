@@ -2,8 +2,10 @@
 # model-families.sh - Model family definitions and management
 # This file should be sourced, not executed directly
 
-# Source common utilities
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# Source common utilities if not already loaded
+if ! declare -f print_header >/dev/null 2>&1; then
+    source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+fi
 
 #############################################
 # Model Family Definitions

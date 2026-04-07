@@ -2,10 +2,12 @@
 # model-selection.sh - Intelligent two-stage model selection
 # This file should be sourced, not executed directly
 
-# Source required libraries
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$SCRIPT_DIR/common.sh"
-source "$SCRIPT_DIR/model-families.sh"
+# Source required libraries if not already loaded
+if ! declare -f print_header >/dev/null 2>&1; then
+    SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+    source "$SCRIPT_DIR/common.sh"
+    source "$SCRIPT_DIR/model-families.sh"
+fi
 
 #############################################
 # Global Variables
