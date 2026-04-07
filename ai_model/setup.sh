@@ -19,7 +19,8 @@ source "$LIB_DIR/continue-setup.sh"
 source "$LIB_DIR/webui-setup.sh"
 source "$LIB_DIR/opencode-setup.sh"
 
-# Configuration
+# Configuration - ensure PORT is set before anything else
+export PORT="${PORT:-31434}"
 export AUTO_START="${AUTO_START:-true}"
 export SETUP_CLIENTS="${SETUP_CLIENTS:-all}"
 export INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-false}"

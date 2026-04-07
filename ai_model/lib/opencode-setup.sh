@@ -100,6 +100,9 @@ configure_opencode() {
     local auth_file="${auth_dir}/auth.json"
     local port="${PORT:-31434}"
 
+    # Ensure OLLAMA_HOST is set for model detection
+    export OLLAMA_HOST="127.0.0.1:${port}"
+
     # Detect installed model (prefer codestral, fallback to any model)
     local model_name="codestral:22b-v0.1-q4_K_M"
     if command -v ollama &> /dev/null; then
