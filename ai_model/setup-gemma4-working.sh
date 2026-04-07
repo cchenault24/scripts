@@ -399,18 +399,117 @@ fi
 
 echo ""
 
-# Step 1.5: Model Selection (after Ollama is built so we can detect installed models)
+# Step 2: Start Ollama Server
+echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}  Step 2: Starting Ollama Server${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+print_info "Ollama server started during build - verifying it's ready..."
+if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+    print_status "Server is running and ready!"
+else
+    print_warning "Server not responding, may need manual start"
+fi
+
+echo ""
+
+# Step 3: Model Selection
+echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}  Step 3: Model Selection${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+echo ""
+
 if [ -z "$OLLAMA_MODEL" ]; then
     select_model
 else
     print_info "Using model from environment: $OLLAMA_MODEL"
 fi
 
+# Determine context size based on model
+if [[ "$OLLAMA_MODEL" == *"26b"* ]] || [[ "$OLLAMA_MODEL" == *"31b"* ]]; then
+    CONTEXT_SIZE=256000
+else
+    CONTEXT_SIZE=128000
+fi
+
 echo ""
 
-# Step 2: Install OpenCode
+# Step 4: Download and Install Model
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}  Step 2: Installing OpenCode${NC}"
+echo -e "${BLUE}  Step 4: Download and Install Model${NC}"
+echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+print_info "Checking if model is already available..."
+export OLLAMA_HOST="127.0.0.1:$PORT"
+
+if "$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep -q "^$OLLAMA_MODEL"; then
+    print_status "Model $OLLAMA_MODEL already installed"
+    print_info "Skipping download..."
+else
+    # Estimate size based on model name
+    MODEL_SIZE="unknown size"
+    case "$OLLAMA_MODEL" in
+        *e2b*q4*)  MODEL_SIZE="~7GB" ;;
+        *e2b*q8*)  MODEL_SIZE="~8GB" ;;
+        *e4b*q4*)  MODEL_SIZE="~10GB" ;;
+        *e4b*q8*)  MODEL_SIZE="~12GB" ;;
+        *26b*q4*)  MODEL_SIZE="~18GB" ;;
+        *26b*q8*)  MODEL_SIZE="~28GB" ;;
+        *31b*q4*)  MODEL_SIZE="~20GB" ;;
+        *31b*q8*)  MODEL_SIZE="~34GB" ;;
+    esac
+
+    print_info "Pulling model $OLLAMA_MODEL ($MODEL_SIZE)..."
+    print_info "This may take 10-30 minutes depending on your connection"
+    echo ""
+
+    if "$OLLAMA_BUILD_DIR/ollama" pull "$OLLAMA_MODEL"; then
+        echo ""
+        print_status "Model $OLLAMA_MODEL pulled successfully"
+    else
+        echo ""
+        print_error "Failed to pull model"
+        print_info "You can pull it manually later with:"
+        print_info "  OLLAMA_HOST=127.0.0.1:$PORT $OLLAMA_BUILD_DIR/ollama pull $OLLAMA_MODEL"
+        exit 1
+    fi
+fi
+
+# Create optimized model with proper context size
+echo ""
+print_info "Creating optimized model with $CONTEXT_SIZE token context..."
+MODEL_SUFFIX=$(echo "$OLLAMA_MODEL" | grep -q "26b\|31b" && echo "256k" || echo "128k")
+OPTIMIZED_MODEL="${OLLAMA_MODEL}-${MODEL_SUFFIX}"
+
+# Check if optimized model already exists
+if "$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep -q "^$OPTIMIZED_MODEL"; then
+    print_info "Optimized model already exists, recreating with latest settings..."
+fi
+
+cat > /tmp/modelfile-$$ << EOF
+FROM $OLLAMA_MODEL
+PARAMETER num_ctx $CONTEXT_SIZE
+PARAMETER temperature 0.7
+PARAMETER top_k 64
+PARAMETER top_p 0.95
+EOF
+
+if "$OLLAMA_BUILD_DIR/ollama" create "$OPTIMIZED_MODEL" -f /tmp/modelfile-$$ >/dev/null 2>&1; then
+    rm -f /tmp/modelfile-$$
+    print_status "Created optimized model: $OPTIMIZED_MODEL"
+    OLLAMA_MODEL="$OPTIMIZED_MODEL"
+else
+    rm -f /tmp/modelfile-$$
+    print_warning "Could not create optimized model, using base model"
+fi
+
+echo ""
+
+# Step 5: Install OpenCode
+echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}  Step 5: Installing OpenCode${NC}"
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -537,9 +636,9 @@ fi
 
 echo ""
 
-# Step 3: Configure OpenCode for Ollama
+# Step 6: Configure OpenCode for Ollama
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}  Step 3: Creating OpenCode configuration for Ollama${NC}"
+echo -e "${BLUE}  Step 6: Creating OpenCode configuration for Ollama${NC}"
 echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -1027,8 +1126,22 @@ print_status "Created: $CONFIG_DIR/prompts/refactor.txt"
 
 echo ""
 
-# Step 4: Start Ollama server (if AUTO_START is true)
-if [ "$AUTO_START" = "true" ]; then
+# Update OpenCode config with optimized model
+CONFIG_FILE="$HOME/.config/opencode/opencode.jsonc"
+if [ -f "$CONFIG_FILE" ]; then
+    print_info "Updating OpenCode config to use optimized model..."
+    # Update the model references in the config
+    BASE_MODEL="${OLLAMA_MODEL%-*}"
+    sed -i.bak "s|\"${BASE_MODEL}\":|\"$OLLAMA_MODEL\":|g" "$CONFIG_FILE"
+    sed -i.bak "s|ollama/${BASE_MODEL}\"|ollama/$OLLAMA_MODEL\"|g" "$CONFIG_FILE"
+    rm -f "$CONFIG_FILE.bak"
+    print_status "Config updated to use: $OLLAMA_MODEL"
+fi
+
+echo ""
+
+# Final instructions
+if false; then  # Placeholder to close the removed AUTO_START block
     echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}  Step 4: Starting Ollama server${NC}"
     echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
