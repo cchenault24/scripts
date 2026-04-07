@@ -54,6 +54,7 @@ from lib import ide
 from lib import ui
 from lib import model_selector
 from lib import validator
+from lib import openwebui
 
 # =============================================================================
 # VPN Resilience: Configure environment at startup
@@ -259,11 +260,27 @@ def main() -> int:
     if summary_path:
         created_files_set.add(summary_path)
     
+    # Track OpenWebUI info for manifest (will be populated later if user chooses to install)
+    openwebui_manifest_info = None
+    
     # Step 13: Create installation manifest for uninstaller
+    # Note: This will be updated at the end if OpenWebUI is installed
     print()
     ui.print_subheader("Creating Installation Manifest")
     # Convert set to list for manifest creation
     created_files = list(created_files_set)
+    
+    def update_manifest_with_openwebui():
+        """Helper to update manifest with OpenWebUI info."""
+        config.create_installation_manifest(
+            installed_models=models_for_config,
+            created_files=created_files,
+            hw_info=hw_info,
+            target_ide=target_ide,
+            pre_existing_models=pre_existing_models,
+            openwebui_info=openwebui_manifest_info
+        )
+    
     config.create_installation_manifest(
         installed_models=models_for_config,
         created_files=created_files,
@@ -352,7 +369,56 @@ def main() -> int:
             ui.print_info('  export OLLAMA_HOST="127.0.0.1:11434"')
             ui.print_info('  export NO_PROXY="localhost,127.0.0.1,::1"')
     
+    # Step 17: Open WebUI Setup (optional)
     print()
+    ui.print_subheader("Open WebUI Setup (Optional)")
+    ui.print_info("Open WebUI provides a ChatGPT-like web interface for your local LLM")
+    ui.print_info("Features:")
+    print("  • 💬 Beautiful chat interface in your browser")
+    print("  • 📁 File upload and document analysis")
+    print("  • 🔍 RAG: Index documents for Q&A (uses your embedding model)")
+    print("  • 💾 Conversation history")
+    print("  • 🔒 100% local - no data leaves your machine")
+    print()
+    ui.print_info("Requirements: Docker Desktop (will help you install if needed)")
+    print()
+    
+    openwebui_installed = False
+    openwebui_url = None
+    
+    if ui.prompt_yes_no("Would you like to set up Open WebUI?", default=True):
+        print()
+        success, url = openwebui.setup_openwebui(hw_info)
+        openwebui_installed = success
+        openwebui_url = url
+        
+        if success and url:
+            # Track in manifest
+            openwebui_manifest_info = openwebui.get_openwebui_manifest_entry()
+            
+            # Update the manifest with OpenWebUI info
+            update_manifest_with_openwebui()
+            
+            # Show next steps
+            openwebui.show_openwebui_next_steps(url, models_for_config[0].ollama_name if models_for_config else "gpt-oss:20b")
+    else:
+        print()
+        ui.print_info("Skipping Open WebUI setup")
+        ui.print_info("You can set it up later by running this script again")
+        ui.print_info("Or install manually: https://docs.openwebui.com/getting-started/")
+    
+    # Final summary
+    print()
+    ui.print_header("🎉 Setup Complete!")
+    print()
+    ui.print_success("Your local AI development environment is ready!")
+    print()
+    print("  📝 Continue.dev: IDE integration for coding assistance")
+    if openwebui_installed and openwebui_url:
+        print(f"  🌐 Open WebUI: {openwebui_url}")
+    print(f"  🤖 Model: {models_for_config[0].ollama_name if models_for_config else 'gpt-oss:20b'}")
+    print()
+    
     return 0
 
 

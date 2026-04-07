@@ -23,6 +23,7 @@ from . import ui
 from . import utils
 from .utils import get_unverified_ssl_context
 from . import config as config_module
+from . import openwebui
 
 # Module logger
 _logger = logging.getLogger(__name__)
@@ -778,6 +779,65 @@ def handle_ide_extensions() -> Dict[str, bool]:
     return removed
 
 
+def handle_openwebui_removal(manifest: Dict[str, Any]) -> Dict[str, bool]:
+    """
+    Handle Open WebUI removal with user choice.
+    
+    Args:
+        manifest: Installation manifest
+    
+    Returns:
+        Dict with removal status
+    """
+    results = {
+        "container_removed": False,
+        "data_removed": False,
+        "image_removed": False,
+    }
+    
+    # Check if OpenWebUI was installed
+    openwebui_info = manifest.get("installed", {}).get("openwebui")
+    
+    # Also check current status
+    status = openwebui.get_openwebui_status()
+    
+    if not openwebui_info and not status.get("container_exists"):
+        ui.print_info("Open WebUI was not installed")
+        return results
+    
+    ui.print_subheader("Open WebUI")
+    
+    if status.get("container_running"):
+        ui.print_info("Open WebUI container is currently running")
+    elif status.get("container_exists"):
+        ui.print_info("Open WebUI container exists (not running)")
+    
+    if status.get("container_exists"):
+        print()
+        if ui.prompt_yes_no("Remove Open WebUI container?", default=True):
+            # Ask about data
+            remove_data = ui.prompt_yes_no(
+                "Also remove Open WebUI data (chat history, settings)?", 
+                default=False
+            )
+            
+            uninstall_results = openwebui.uninstall_openwebui(
+                remove_data=remove_data,
+                remove_image=False  # Keep image by default
+            )
+            
+            results.update(uninstall_results)
+            
+            # Ask about removing image
+            if results["container_removed"]:
+                if ui.prompt_yes_no("Remove Docker image to free disk space (~2GB)?", default=False):
+                    results["image_removed"] = openwebui.remove_openwebui_image()
+        else:
+            ui.print_info("Keeping Open WebUI container")
+    
+    return results
+
+
 def show_uninstall_summary(
     models_removed: int,
     config_removed: int,
@@ -785,7 +845,8 @@ def show_uninstall_summary(
     vscode_removed: bool,
     intellij_removed: bool,
     autostart_removed: bool = False,
-    ollama_removed: bool = False
+    ollama_removed: bool = False,
+    openwebui_results: Optional[Dict[str, bool]] = None
 ) -> None:
     """Show uninstallation summary."""
     ui.print_header("✅ Uninstallation Complete!")
@@ -800,6 +861,13 @@ def show_uninstall_summary(
     print(f"  IntelliJ Plugin Removed: {'Yes' if intellij_removed else 'No'}")
     print(f"  Auto-Start Removed: {'Yes' if autostart_removed else 'No'}")
     print(f"  Ollama Application Removed: {'Yes' if ollama_removed else 'No'}")
+    
+    # Show OpenWebUI status
+    if openwebui_results:
+        print(f"  Open WebUI Container Removed: {'Yes' if openwebui_results.get('container_removed') else 'No'}")
+        print(f"  Open WebUI Data Removed: {'Yes' if openwebui_results.get('data_removed') else 'No'}")
+        print(f"  Open WebUI Image Removed: {'Yes' if openwebui_results.get('image_removed') else 'No'}")
+    
     print()
     
     print(ui.colorize("━" * 60, ui.Colors.DIM))
