@@ -5,10 +5,7 @@ Automated setup for running Gemma 4 models locally with Ollama and OpenCode on A
 ## Quick Start
 
 ```bash
-# Interactive setup (recommended)
-./setup-gemma4-working.sh
-
-# Or use new modular version
+# Interactive setup
 ./setup.sh
 ```
 
@@ -16,15 +13,11 @@ Automated setup for running Gemma 4 models locally with Ollama and OpenCode on A
 
 ### Main Scripts
 
-- **`setup-gemma4-working.sh`** - Complete all-in-one setup (952 lines)
-  - Full-featured with all configuration options
-  - Includes OpenCode installation and configuration
-  - Recommended for first-time setup
-
-- **`setup.sh`** - Modular setup orchestrator (new)
-  - Cleaner, focused implementation
+- **`setup.sh`** - Modular setup orchestrator
+  - Clean, focused implementation
   - Sources functionality from `lib/` modules
-  - Easier to maintain and extend
+  - Easy to maintain and extend
+  - Recommended for all setups
 
 - **`llama-control.sh`** - Server management
   ```bash
@@ -101,7 +94,6 @@ setup.sh (orchestrator)
 ├── lib/ollama-setup.sh    # Ollama build & management
 └── lib/opencode-setup.sh  # OpenCode install & config
 
-setup-gemma4-working.sh    # All-in-one (legacy)
 llama-control.sh           # Server control
 uninstall-gemma4-working.sh # Cleanup
 ```

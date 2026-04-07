@@ -2,7 +2,7 @@
 #
 # Uninstaller for Gemma 4 + Ollama + OpenCode Setup
 #
-# Removes all components installed by setup-gemma4-working.sh:
+# Removes all components installed by setup.sh:
 # - Ollama build directory
 # - OpenCode custom build (restores backup)
 # - OpenCode build directory
@@ -112,7 +112,7 @@ format_size() {
 # Main header
 print_header "Gemma 4 + Ollama + OpenCode Uninstaller"
 
-echo "This script will remove components installed by setup-gemma4-working.sh"
+echo "This script will remove components installed by setup.sh"
 echo ""
 
 # Scan system
@@ -565,7 +565,7 @@ if [ $ERROR_COUNT -gt 0 ]; then
 fi
 
 echo ""
-print_info "You can run setup-gemma4-working.sh to reinstall"
+print_info "You can run ./setup.sh to reinstall"
 echo ""
 
 exit 0
