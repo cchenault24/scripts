@@ -167,14 +167,14 @@ EOF
 
     # Export for current session
     export OLLAMA_HOST="127.0.0.1:$PORT"
-    print_status "Environment variable set for current session"
 
-    echo ""
-    print_warning "⚠️  Shell configuration updated"
-    print_info "To use ollama CLI in existing terminals, run:"
-    echo "  source $shell_config"
-    echo ""
-    print_info "Or open a new terminal (OLLAMA_HOST will be set automatically)"
+    # Source the config file to apply changes immediately
+    print_info "Applying changes to current session..."
+    # shellcheck disable=SC1090
+    source "$shell_config" 2>/dev/null || true
+
+    print_status "Environment configured: OLLAMA_HOST=127.0.0.1:$PORT"
+    print_info "Future terminals will automatically have this setting"
 }
 
 setup_clients() {
@@ -287,25 +287,21 @@ show_final_summary() {
         *) shell_config="your shell config" ;;
     esac
 
-    echo "1. Reload your shell to activate OLLAMA_HOST:"
-    echo "   source $shell_config"
-    echo "   (or open a new terminal window)"
-    echo ""
-    echo "2. Test your installation:"
+    echo "1. Test your installation:"
     echo "   ollama run ${OLLAMA_MODEL:-$(cat ~/.ollama-model 2>/dev/null || echo 'llama3.3:70b')}"
     echo ""
-    echo "3. Check server status:"
+    echo "2. Check server status:"
     echo "   ./llama-control.sh status"
     echo ""
 
     if [[ "$SETUP_CLIENTS" =~ "webui" ]] || [[ "$SETUP_CLIENTS" == "all" ]]; then
-        echo "4. Access Open WebUI:"
+        echo "3. Access Open WebUI:"
         echo "   Open http://localhost:38080 in your browser"
         echo ""
     fi
 
     if [[ "$SETUP_CLIENTS" =~ "opencode" ]] || [[ "$SETUP_CLIENTS" == "all" ]]; then
-        echo "5. Try OpenCode CLI:"
+        echo "4. Try OpenCode CLI:"
         echo "   opencode        # Start TUI"
         echo "   opencode run \"your message here\""
         echo ""
