@@ -15,8 +15,13 @@ export OLLAMA_BUILD_DIR="/tmp/ollama-build"
 export PORT="31434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
 
 # Build flags for Apple Silicon optimization
-export CGO_CFLAGS="-O3 -march=native -mtune=native -flto -fomit-frame-pointer -DNDEBUG"
+export CGO_CFLAGS="-O3 -march=native -mtune=native -flto -fomit-frame-pointer -DNDEBUG -funroll-loops -fvectorize"
 export CGO_LDFLAGS="-flto -framework Metal -framework Foundation -framework Accelerate"
+
+# Go build optimization
+export CGO_ENABLED=1
+export GOARCH=arm64
+export GOOS=darwin
 
 # Runtime configuration
 export OLLAMA_HOST="127.0.0.1:$PORT"
@@ -24,6 +29,16 @@ export OLLAMA_KEEP_ALIVE=-1           # Keep models loaded
 export OLLAMA_NUM_GPU=999             # All layers to GPU
 export OLLAMA_MAX_LOADED_MODELS=1     # Focus on single model
 export OLLAMA_FLASH_ATTENTION=1       # Fast attention
+
+# Apple Silicon specific optimizations
+export OLLAMA_NUM_THREAD=10           # Match P-core count (M4 Pro: 10 P-cores)
+export GOMAXPROCS=14                  # Total cores (10 P + 4 E cores)
+export OLLAMA_USE_MMAP=1              # Memory-mapped I/O for faster model loading
+export OLLAMA_MAX_VRAM=45000          # Reserve 45GB for models (leave 3GB for system)
+
+# Metal optimization (disable validation in production for speed)
+export MTL_SHADER_VALIDATION=0        # Disable Metal shader validation
+export MTL_DEBUG_LAYER=0              # Disable Metal debug overhead
 
 # PID and log file locations
 OLLAMA_PID_FILE="$HOME/.local/var/ollama-server.pid"
