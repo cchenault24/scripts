@@ -108,36 +108,19 @@ select_model() {
 
     # Try 1: Check if server is already running
     if curl -s -m 2 http://127.0.0.1:$PORT/api/tags >/dev/null 2>&1; then
-        print_info "Checking already installed models (server running)..."
         INSTALLED_MODELS=$(curl -s http://127.0.0.1:$PORT/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | grep "^gemma4:" || true)
     # Try 2: Check Ollama model directory directly
-    elif [ -d "$HOME/.ollama/models/manifests/registry.ollama.ai/library" ]; then
-        print_info "Checking already installed models (local storage)..."
-        INSTALLED_MODELS=$(find "$HOME/.ollama/models/manifests/registry.ollama.ai/library" -type d -name "gemma4" 2>/dev/null | while read -r dir; do
-            if [ -d "$dir" ]; then
-                find "$dir" -type f 2>/dev/null | while read -r file; do
-                    basename "$(dirname "$file")" | sed 's/^/gemma4:/'
-                done
+    elif [ -d "$HOME/.ollama/models/manifests/registry.ollama.ai/library/gemma4" ]; then
+        INSTALLED_MODELS=$(find "$HOME/.ollama/models/manifests/registry.ollama.ai/library/gemma4" -type f 2>/dev/null | while read -r file; do
+            tag=$(basename "$(dirname "$file")")
+            # Skip 'latest' tag and only show actual version tags
+            if [ "$tag" != "latest" ] && [ "$tag" != "gemma4" ]; then
+                echo "gemma4:$tag"
             fi
         done | sort -u || true)
     # Try 3: Use ollama binary if it exists
     elif [ -f "$OLLAMA_BUILD_DIR/ollama" ]; then
-        print_info "Checking already installed models (ollama list)..."
         INSTALLED_MODELS=$("$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep "^gemma4:" | awk '{print $1}' || true)
-    fi
-
-    if [ -n "$INSTALLED_MODELS" ]; then
-        echo ""
-        echo -e "${GREEN}Already Installed:${NC}"
-        echo "$INSTALLED_MODELS" | while IFS= read -r model; do
-            # Check if optimized variant exists
-            if echo "$model" | grep -q "\-128k\|\-256k"; then
-                echo "  ✓ $model ${DIM}(optimized)${NC}"
-            else
-                echo "  ✓ $model ${DIM}(base)${NC}"
-            fi
-        done
-        echo ""
     fi
 
     # Define available models with sizes and recommendations
@@ -160,31 +143,31 @@ select_model() {
             has_optimized=true
         fi
 
-        # Display status
+        # Return simple inline status
         if [ "$has_optimized" = true ]; then
-            echo " ${GREEN}[INSTALLED - OPTIMIZED]${NC}"
+            echo " (ALREADY INSTALLED)"
         elif [ "$has_base" = true ]; then
-            echo " ${GREEN}[INSTALLED - BASE]${NC}"
+            echo " (ALREADY INSTALLED)"
         else
             echo ""
         fi
     }
 
     echo -e "${BLUE}Small Models (128K context):${NC}"
-    echo -e "  1)  gemma4:e2b-it-q4_K_M    (7.2GB)  - Smallest quantized$(is_installed 'gemma4:e2b-it-q4_K_M')"
-    echo -e "  2)  gemma4:e2b-it-q8_0      (8.1GB)  - Better quality$(is_installed 'gemma4:e2b-it-q8_0')"
+    echo    "  1)  gemma4:e2b-it-q4_K_M    (7.2GB)  - Smallest quantized$(is_installed 'gemma4:e2b-it-q4_K_M')"
+    echo    "  2)  gemma4:e2b-it-q8_0      (8.1GB)  - Better quality$(is_installed 'gemma4:e2b-it-q8_0')"
     echo ""
     echo -e "${BLUE}Medium Models (128K context):${NC}"
-    echo -e "  3)  gemma4:e4b-it-q4_K_M    (9.6GB)  - Balanced size/quality$(is_installed 'gemma4:e4b-it-q4_K_M')"
-    echo -e "  4)  gemma4:e4b-it-q8_0      (12GB)   - Higher quality$(is_installed 'gemma4:e4b-it-q8_0')"
+    echo    "  3)  gemma4:e4b-it-q4_K_M    (9.6GB)  - Balanced size/quality$(is_installed 'gemma4:e4b-it-q4_K_M')"
+    echo    "  4)  gemma4:e4b-it-q8_0      (12GB)   - Higher quality$(is_installed 'gemma4:e4b-it-q8_0')"
     echo ""
     echo -e "${BLUE}Large Models (256K context):${NC}"
-    echo -e "  5)  gemma4:26b-a4b-it-q4_K_M (18GB)  - Large quantized$(is_installed 'gemma4:26b-a4b-it-q4_K_M')"
-    echo -e "  6)  gemma4:26b-a4b-it-q8_0   (28GB)  - Large high quality$(is_installed 'gemma4:26b-a4b-it-q8_0')"
+    echo    "  5)  gemma4:26b-a4b-it-q4_K_M (18GB)  - Large quantized$(is_installed 'gemma4:26b-a4b-it-q4_K_M')"
+    echo    "  6)  gemma4:26b-a4b-it-q8_0   (28GB)  - Large high quality$(is_installed 'gemma4:26b-a4b-it-q8_0')"
     echo ""
     echo -e "${BLUE}Extra Large Models (256K context):${NC}"
-    echo -e "  7)  gemma4:31b-it-q4_K_M    (20GB)  - XL quantized$(is_installed 'gemma4:31b-it-q4_K_M')"
-    echo -e "  8)  gemma4:31b-it-q8_0      (34GB)  - XL high quality$(is_installed 'gemma4:31b-it-q8_0')"
+    echo    "  7)  gemma4:31b-it-q4_K_M    (20GB)  - XL quantized$(is_installed 'gemma4:31b-it-q4_K_M')"
+    echo    "  8)  gemma4:31b-it-q8_0      (34GB)  - XL high quality$(is_installed 'gemma4:31b-it-q8_0')"
     echo ""
 
     # Provide recommendations based on RAM
