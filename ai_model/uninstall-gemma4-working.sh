@@ -1,16 +1,15 @@
 #!/bin/bash
 #
-# Uninstaller for Gemma 4 26B + llama.cpp + OpenCode Setup
+# Uninstaller for Gemma 4 + Ollama + OpenCode Setup
 #
 # Removes all components installed by setup-gemma4-working.sh:
-# - llama.cpp build directory
+# - Ollama build directory
 # - OpenCode custom build (restores backup)
 # - OpenCode build directory
 # - Configuration files
-# - Downloaded Gemma 4 models
-# - HuggingFace CLI (pipx installation)
+# - Ollama models
 # - launchd service
-# - Running llama-server processes
+# - Running Ollama server processes
 # - Log files and PID files
 #
 # Author: AI-Generated
@@ -28,10 +27,9 @@ DIM='\033[2m'
 NC='\033[0m' # No Color
 
 # Configuration (must match setup script)
-LLAMA_BUILD_DIR="/tmp/llama-cpp-build"
+OLLAMA_BUILD_DIR="/tmp/ollama-build"
 OPENCODE_BUILD_DIR="/tmp/opencode-build"
 PORT="3456"
-MODEL_REPO="ggml-org/gemma-4-26B-A4B-it-GGUF"
 
 # Print functions
 print_header() {
@@ -112,7 +110,7 @@ format_size() {
 }
 
 # Main header
-print_header "Gemma 4 Working Setup Uninstaller"
+print_header "Gemma 4 + Ollama + OpenCode Uninstaller"
 
 echo "This script will remove components installed by setup-gemma4-working.sh"
 echo ""
@@ -122,27 +120,26 @@ print_info "Scanning system for installed components..."
 echo ""
 
 # Track what we find (simple variables for bash 3.2 compatibility)
-FOUND_LLAMA_BUILD=""
+FOUND_OLLAMA_BUILD=""
 FOUND_OPENCODE_BUILD=""
 FOUND_OPENCODE_CUSTOM=false
 FOUND_OPENCODE_BACKUP=false
 FOUND_CONFIG_FILES=0
-FOUND_MODEL=""
-FOUND_LLAMA_RUNNING=false
+FOUND_OLLAMA_MODELS=""
+FOUND_OLLAMA_RUNNING=false
 FOUND_PID_FILE=false
 FOUND_LOG_FILE=""
 FOUND_LAUNCHD=false
-FOUND_PIPX_HF=false
 TOTAL_SIZE_MB=0
 COMPONENT_COUNT=0
 
-# Check llama.cpp build
-if [ -d "$LLAMA_BUILD_DIR" ]; then
-    SIZE=$(get_size_mb "$LLAMA_BUILD_DIR")
+# Check Ollama build
+if [ -d "$OLLAMA_BUILD_DIR" ]; then
+    SIZE=$(get_size_mb "$OLLAMA_BUILD_DIR")
     TOTAL_SIZE_MB=$((TOTAL_SIZE_MB + SIZE))
-    FOUND_LLAMA_BUILD="$SIZE"
+    FOUND_OLLAMA_BUILD="$SIZE"
     COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-    print_status "llama.cpp build found ($(format_size $SIZE)): $LLAMA_BUILD_DIR"
+    print_status "Ollama build found ($(format_size $SIZE)): $OLLAMA_BUILD_DIR"
 fi
 
 # Check OpenCode build directory
@@ -155,11 +152,11 @@ if [ -d "$OPENCODE_BUILD_DIR" ]; then
 fi
 
 # Check OpenCode custom build
-CUSTOM_BUILD_MARKER="$HOME/.opencode/bin/.custom-build-pr16531"
+CUSTOM_BUILD_MARKER="$HOME/.opencode/bin/.custom-build-dev"
 if [ -f "$CUSTOM_BUILD_MARKER" ]; then
     FOUND_OPENCODE_CUSTOM=true
     COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-    print_status "OpenCode custom build marker found"
+    print_status "OpenCode custom build marker found (dev branch)"
 fi
 
 if [ -f "$HOME/.opencode/bin/opencode.backup" ]; then
@@ -185,57 +182,71 @@ if [ ${#CONFIG_FILES[@]} -gt 0 ]; then
     print_status "Configuration files found: ${#CONFIG_FILES[@]}"
 fi
 
-# Check for downloaded models
-HF_CACHE="$HOME/.cache/huggingface/hub"
-MODEL_CACHE_PATH="$HF_CACHE/models--ggml-org--gemma-4-26B-A4B-it-GGUF"
+# Check for Ollama models
+OLLAMA_MODELS_DIR="$HOME/.ollama/models"
+if [ -d "$OLLAMA_MODELS_DIR" ]; then
+    SIZE=$(get_size_mb "$OLLAMA_MODELS_DIR")
+    if [ "$SIZE" -gt 0 ]; then
+        TOTAL_SIZE_MB=$((TOTAL_SIZE_MB + SIZE))
+        FOUND_OLLAMA_MODELS="$SIZE"
+        COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
+        print_status "Ollama models found ($(format_size $SIZE)): $OLLAMA_MODELS_DIR"
 
-if [ -d "$MODEL_CACHE_PATH" ]; then
-    SIZE=$(get_size_mb "$MODEL_CACHE_PATH")
-    TOTAL_SIZE_MB=$((TOTAL_SIZE_MB + SIZE))
-    FOUND_MODEL="$SIZE"
-    COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-    print_status "Gemma 4 26B model found ($(format_size $SIZE)): $MODEL_CACHE_PATH"
+        # List models if Ollama binary exists
+        if [ -f "$OLLAMA_BUILD_DIR/ollama" ]; then
+            print_info "Installed models:"
+            # Temporarily disable exit on error for this command
+            set +e
+            MODEL_LIST=$("$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null)
+            LIST_EXIT=$?
+            set -e
+
+            if [ $LIST_EXIT -eq 0 ] && [ -n "$MODEL_LIST" ]; then
+                echo "$MODEL_LIST" | tail -n +2 | while IFS= read -r line; do
+                    if [ -n "$line" ]; then
+                        MODEL_NAME=$(echo "$line" | awk '{print $1}')
+                        if [ -n "$MODEL_NAME" ]; then
+                            echo "    - $MODEL_NAME"
+                        fi
+                    fi
+                done
+            else
+                print_info "    (Unable to list models - use 'ollama list' to view)"
+            fi
+        fi
+    fi
 fi
 
-# Check for running llama-server
-LLAMA_RUNNING=false
+# Check for running Ollama server
+OLLAMA_RUNNING=false
 if lsof -ti:$PORT >/dev/null 2>&1; then
-    LLAMA_RUNNING=true
-    FOUND_LLAMA_RUNNING=true
+    OLLAMA_RUNNING=true
+    FOUND_OLLAMA_RUNNING=true
     COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-    print_status "llama-server running on port $PORT"
+    print_status "Ollama server running on port $PORT"
 fi
 
 # Check for PID file
-if [ -f "$HOME/.local/var/llama-server.pid" ]; then
+if [ -f "$HOME/.local/var/ollama-server.pid" ]; then
     FOUND_PID_FILE=true
     COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-    print_status "PID file found: $HOME/.local/var/llama-server.pid"
+    print_status "PID file found: $HOME/.local/var/ollama-server.pid"
 fi
 
 # Check for log file
-if [ -f "$HOME/.local/var/log/llama-server.log" ]; then
-    SIZE=$(get_size_mb "$HOME/.local/var/log/llama-server.log")
+if [ -f "$HOME/.local/var/log/ollama-server.log" ]; then
+    SIZE=$(get_size_mb "$HOME/.local/var/log/ollama-server.log")
     FOUND_LOG_FILE="$SIZE"
     COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-    print_status "Log file found ($(format_size $SIZE)): $HOME/.local/var/log/llama-server.log"
+    print_status "Log file found ($(format_size $SIZE)): $HOME/.local/var/log/ollama-server.log"
 fi
 
 # Check for launchd service
-LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.llamacpp.server.plist"
+LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.ollama.server.plist"
 if [ -f "$LAUNCHD_PLIST" ]; then
     FOUND_LAUNCHD=true
     COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
     print_status "launchd service found: $LAUNCHD_PLIST"
-fi
-
-# Check for pipx huggingface-hub
-if command -v pipx >/dev/null 2>&1; then
-    if pipx list 2>/dev/null | grep -q "huggingface-hub"; then
-        FOUND_PIPX_HF=true
-        COMPONENT_COUNT=$((COMPONENT_COUNT + 1))
-        print_status "HuggingFace CLI (pipx) installed"
-    fi
 fi
 
 echo ""
@@ -255,20 +266,19 @@ fi
 # Prompt for each component
 print_header "Select Components to Remove"
 
-REMOVE_LLAMA_BUILD=false
+REMOVE_OLLAMA_BUILD=false
 REMOVE_OPENCODE_BUILD=false
 REMOVE_OPENCODE_CUSTOM=false
 RESTORE_OPENCODE_BACKUP=false
 REMOVE_CONFIG=false
-REMOVE_MODEL=false
+REMOVE_MODELS=false
 REMOVE_LOGS=false
 REMOVE_LAUNCHD=false
-REMOVE_PIPX_HF=false
 
-# llama.cpp build
-if [ -n "$FOUND_LLAMA_BUILD" ]; then
-    if prompt_yes_no "Remove llama.cpp build? ($(format_size $FOUND_LLAMA_BUILD))" true; then
-        REMOVE_LLAMA_BUILD=true
+# Ollama build
+if [ -n "$FOUND_OLLAMA_BUILD" ]; then
+    if prompt_yes_no "Remove Ollama build? ($(format_size $FOUND_OLLAMA_BUILD))" true; then
+        REMOVE_OLLAMA_BUILD=true
     fi
 fi
 
@@ -306,13 +316,13 @@ if [ $FOUND_CONFIG_FILES -gt 0 ]; then
     fi
 fi
 
-# Model cache
-if [ -n "$FOUND_MODEL" ]; then
+# Ollama models
+if [ -n "$FOUND_OLLAMA_MODELS" ]; then
     echo ""
-    print_warning "Model cache: $(format_size $FOUND_MODEL)"
-    print_info "Models are stored in HuggingFace cache and can be reused"
-    if prompt_yes_no "Remove downloaded Gemma 4 26B model?" false; then
-        REMOVE_MODEL=true
+    print_warning "Ollama models: $(format_size $FOUND_OLLAMA_MODELS)"
+    print_info "Models can be large (16GB-52GB each) and take time to re-download"
+    if prompt_yes_no "Remove ALL Ollama models?" false; then
+        REMOVE_MODELS=true
     fi
 fi
 
@@ -332,22 +342,13 @@ if [ "$FOUND_LAUNCHD" = true ]; then
     fi
 fi
 
-# pipx huggingface-hub
-if [ "$FOUND_PIPX_HF" = true ]; then
-    echo ""
-    print_info "HuggingFace CLI may be used by other tools"
-    if prompt_yes_no "Uninstall HuggingFace CLI (pipx)?" false; then
-        REMOVE_PIPX_HF=true
-    fi
-fi
-
 # Show summary
 echo ""
 print_header "Uninstall Summary"
 
 ACTIONS=()
-if [ "$REMOVE_LLAMA_BUILD" = true ]; then
-    ACTIONS+=("Remove llama.cpp build ($(format_size $FOUND_LLAMA_BUILD))")
+if [ "$REMOVE_OLLAMA_BUILD" = true ]; then
+    ACTIONS+=("Remove Ollama build ($(format_size $FOUND_OLLAMA_BUILD))")
 fi
 if [ "$REMOVE_OPENCODE_BUILD" = true ]; then
     ACTIONS+=("Remove OpenCode build directory ($(format_size $FOUND_OPENCODE_BUILD))")
@@ -362,17 +363,14 @@ fi
 if [ "$REMOVE_CONFIG" = true ]; then
     ACTIONS+=("Remove $FOUND_CONFIG_FILES configuration files")
 fi
-if [ "$REMOVE_MODEL" = true ]; then
-    ACTIONS+=("Remove Gemma 4 26B model ($(format_size $FOUND_MODEL))")
+if [ "$REMOVE_MODELS" = true ]; then
+    ACTIONS+=("Remove ALL Ollama models ($(format_size $FOUND_OLLAMA_MODELS))")
 fi
 if [ "$REMOVE_LOGS" = true ]; then
     ACTIONS+=("Remove log files and PID files")
 fi
 if [ "$REMOVE_LAUNCHD" = true ]; then
     ACTIONS+=("Remove launchd service")
-fi
-if [ "$REMOVE_PIPX_HF" = true ]; then
-    ACTIONS+=("Uninstall HuggingFace CLI (pipx)")
 fi
 
 if [ ${#ACTIONS[@]} -eq 0 ]; then
@@ -397,14 +395,14 @@ echo ""
 SUCCESS_COUNT=0
 ERROR_COUNT=0
 
-# Stop llama-server if running
-if [ "$LLAMA_RUNNING" = true ]; then
-    print_header "Stopping llama-server"
+# Stop Ollama server if running
+if [ "$OLLAMA_RUNNING" = true ]; then
+    print_header "Stopping Ollama Server"
     if lsof -ti:$PORT | xargs kill -9 2>/dev/null; then
-        print_status "llama-server stopped"
+        print_status "Ollama server stopped"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
-        print_warning "Could not stop llama-server (may already be stopped)"
+        print_warning "Could not stop Ollama server (may already be stopped)"
     fi
     echo ""
 fi
@@ -414,7 +412,7 @@ if [ "$REMOVE_LAUNCHD" = true ]; then
     print_header "Removing launchd Service"
 
     # Unload if loaded
-    if launchctl list | grep -q "com.llamacpp.server" 2>/dev/null; then
+    if launchctl list | grep -q "com.ollama.server" 2>/dev/null; then
         if launchctl unload "$LAUNCHD_PLIST" 2>/dev/null; then
             print_status "Unloaded launchd service"
         fi
@@ -431,14 +429,14 @@ if [ "$REMOVE_LAUNCHD" = true ]; then
     echo ""
 fi
 
-# Remove llama.cpp build
-if [ "$REMOVE_LLAMA_BUILD" = true ]; then
-    print_header "Removing llama.cpp Build"
-    if rm -rf "$LLAMA_BUILD_DIR"; then
-        print_status "Removed: $LLAMA_BUILD_DIR"
+# Remove Ollama build
+if [ "$REMOVE_OLLAMA_BUILD" = true ]; then
+    print_header "Removing Ollama Build"
+    if rm -rf "$OLLAMA_BUILD_DIR"; then
+        print_status "Removed: $OLLAMA_BUILD_DIR"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
-        print_error "Failed to remove llama.cpp build"
+        print_error "Failed to remove Ollama build"
         ERROR_COUNT=$((ERROR_COUNT + 1))
     fi
     echo ""
@@ -517,14 +515,14 @@ if [ "$REMOVE_CONFIG" = true ]; then
     echo ""
 fi
 
-# Remove model cache
-if [ "$REMOVE_MODEL" = true ]; then
-    print_header "Removing Gemma 4 26B Model"
-    if rm -rf "$MODEL_CACHE_PATH"; then
-        print_status "Removed: $MODEL_CACHE_PATH"
+# Remove Ollama models
+if [ "$REMOVE_MODELS" = true ]; then
+    print_header "Removing Ollama Models"
+    if rm -rf "$OLLAMA_MODELS_DIR"; then
+        print_status "Removed: $OLLAMA_MODELS_DIR"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
-        print_error "Failed to remove model cache"
+        print_error "Failed to remove Ollama models"
         ERROR_COUNT=$((ERROR_COUNT + 1))
     fi
     echo ""
@@ -534,15 +532,15 @@ fi
 if [ "$REMOVE_LOGS" = true ]; then
     print_header "Removing Log Files"
 
-    if [ -f "$HOME/.local/var/llama-server.pid" ]; then
-        if rm -f "$HOME/.local/var/llama-server.pid"; then
+    if [ -f "$HOME/.local/var/ollama-server.pid" ]; then
+        if rm -f "$HOME/.local/var/ollama-server.pid"; then
             print_status "Removed PID file"
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
         fi
     fi
 
-    if [ -f "$HOME/.local/var/log/llama-server.log" ]; then
-        if rm -f "$HOME/.local/var/log/llama-server.log"; then
+    if [ -f "$HOME/.local/var/log/ollama-server.log" ]; then
+        if rm -f "$HOME/.local/var/log/ollama-server.log"; then
             print_status "Removed log file"
             SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
         fi
@@ -551,19 +549,6 @@ if [ "$REMOVE_LOGS" = true ]; then
     # Remove empty directories
     rmdir "$HOME/.local/var/log" 2>/dev/null || true
     rmdir "$HOME/.local/var" 2>/dev/null || true
-    echo ""
-fi
-
-# Uninstall pipx huggingface-hub
-if [ "$REMOVE_PIPX_HF" = true ]; then
-    print_header "Uninstalling HuggingFace CLI"
-    if pipx uninstall huggingface-hub 2>/dev/null; then
-        print_status "Uninstalled HuggingFace CLI (pipx)"
-        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-    else
-        print_error "Failed to uninstall HuggingFace CLI"
-        ERROR_COUNT=$((ERROR_COUNT + 1))
-    fi
     echo ""
 fi
 
