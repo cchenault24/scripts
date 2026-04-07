@@ -95,34 +95,43 @@ build_ollama() {
     LOG_DIR="$HOME/.local/var/log"
     mkdir -p "$LOG_DIR"
 
-    # Check if port is already in use
-    if lsof -ti:$PORT >/dev/null 2>&1; then
-        print_info "Server already running on port $PORT"
-    else
-        # Start server in background
-        OLLAMA_HOST=127.0.0.1:$PORT \
-        OLLAMA_KEEP_ALIVE=-1 \
-        OLLAMA_NUM_GPU=999 \
-        OLLAMA_MAX_LOADED_MODELS=1 \
-        OLLAMA_FLASH_ATTENTION=1 \
-        nohup "$OLLAMA_BUILD_DIR/ollama" serve \
-            > "$LOG_DIR/ollama-server.log" 2>&1 &
-
-        SERVER_PID=$!
-        echo "$SERVER_PID" > "$HOME/.local/var/ollama-server.pid"
-
-        print_status "Server started (PID: $SERVER_PID)"
-
-        # Wait for server to be ready
-        print_info "Waiting for server to be ready..."
-        for i in {1..30}; do
-            if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
-                print_status "Server is ready!"
-                break
-            fi
-            sleep 1
-        done
+    # Check if ANY ollama is running
+    if pgrep ollama >/dev/null 2>&1; then
+        print_warning "Existing ollama processes found, stopping them first..."
+        pkill -9 ollama 2>/dev/null || true
+        sleep 2
     fi
+
+    # Check if port is available
+    if lsof -ti:$PORT >/dev/null 2>&1; then
+        print_warning "Port $PORT in use, clearing it..."
+        lsof -ti:$PORT | xargs kill -9 2>/dev/null || true
+        sleep 2
+    fi
+
+    # Start server in background
+    OLLAMA_HOST=127.0.0.1:$PORT \
+    OLLAMA_KEEP_ALIVE=-1 \
+    OLLAMA_NUM_GPU=999 \
+    OLLAMA_MAX_LOADED_MODELS=1 \
+    OLLAMA_FLASH_ATTENTION=1 \
+    nohup "$OLLAMA_BUILD_DIR/ollama" serve \
+        > "$LOG_DIR/ollama-server.log" 2>&1 &
+
+    SERVER_PID=$!
+    echo "$SERVER_PID" > "$HOME/.local/var/ollama-server.pid"
+
+    print_status "Server started (PID: $SERVER_PID)"
+
+    # Wait for server to be ready
+    print_info "Waiting for server to be ready..."
+    for i in {1..30}; do
+        if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+            print_status "Server is ready!"
+            break
+        fi
+        sleep 1
+    done
 
     echo ""
 }
@@ -136,22 +145,33 @@ start_ollama_server() {
 
     print_header "Starting Ollama Server"
 
-    # Check if server is already running and healthy
-    if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
-        print_status "Server already running and responding"
-        echo ""
-        return 0
+    # Check if ANY ollama processes are already running
+    if pgrep ollama >/dev/null 2>&1; then
+        OLLAMA_PIDS=$(pgrep ollama)
+        print_warning "Found existing ollama processes: $OLLAMA_PIDS"
+
+        # Check if our configured port is responding
+        if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+            print_status "Server already running on port $PORT and responding"
+            echo ""
+            return 0
+        else
+            print_warning "Ollama processes running but not on port $PORT"
+            print_info "Killing all ollama processes to avoid conflicts..."
+            pkill -9 ollama 2>/dev/null || true
+            sleep 2
+        fi
     fi
 
     # Create log directory
     LOG_DIR="$HOME/.local/var/log"
     mkdir -p "$LOG_DIR"
 
-    # Check if port is in use but not responding (stale process)
+    # Double-check port is available
     if lsof -ti:$PORT >/dev/null 2>&1; then
-        print_warning "Port $PORT is in use but server not responding"
-        print_info "Killing stale process..."
-        lsof -ti:$PORT | xargs kill -9
+        print_warning "Port $PORT is in use"
+        print_info "Killing process on port $PORT..."
+        lsof -ti:$PORT | xargs kill -9 2>/dev/null || true
         sleep 2
     fi
 
@@ -270,6 +290,14 @@ EOF
             rm -f /tmp/modelfile-$$
             print_status "Created optimized model: $OPTIMIZED_MODEL"
             export OLLAMA_MODEL="$OPTIMIZED_MODEL"
+
+            # Remove base model to save space (only keep optimized version)
+            print_info "Removing base model (keeping only optimized version)..."
+            if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" rm "$model_name" >/dev/null 2>&1; then
+                print_status "Base model removed: $model_name"
+            else
+                print_warning "Could not remove base model (may not exist or already removed)"
+            fi
 
             # Update OpenCode config to use optimized model
             CONFIG_FILE="$HOME/.config/opencode/opencode.jsonc"

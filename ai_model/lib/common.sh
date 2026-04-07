@@ -62,6 +62,28 @@ check_prerequisites() {
     fi
     print_status "Apple Silicon detected (arm64)"
 
+    # Check for Homebrew Ollama installation
+    if brew list ollama &>/dev/null; then
+        echo ""
+        print_warning "Homebrew Ollama detected!"
+        print_warning "This conflicts with the custom-built Ollama."
+        echo ""
+        print_info "To remove Homebrew Ollama and continue, run:"
+        print_info "  ./kill-all-ollama.sh"
+        echo ""
+        read -p "Remove Homebrew Ollama now? (y/N) " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Uninstalling Homebrew Ollama..."
+            brew services stop ollama 2>/dev/null || true
+            brew uninstall ollama 2>/dev/null || true
+            print_status "Homebrew Ollama removed"
+        else
+            print_error "Cannot proceed with Homebrew Ollama installed"
+            exit 1
+        fi
+    fi
+
     # Check for missing dependencies
     MISSING_DEPS=()
     for cmd in git go bun; do
