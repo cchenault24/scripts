@@ -18,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/model-selection.sh"
 source "$SCRIPT_DIR/lib/ollama-setup.sh"
+source "$SCRIPT_DIR/lib/opencode-setup.sh"
 
 # Configuration
 export AUTO_START="${AUTO_START:-true}"
@@ -32,31 +33,19 @@ main() {
     # Step 0: Check prerequisites
     check_prerequisites
 
-    # Step 1: Build Ollama (before model selection so we can detect installed models)
+    # Step 1: Build Ollama
     build_ollama
 
-    # Step 2: Model Selection (after Ollama is built so we can use it to list models)
+    # Step 2: Start Ollama Server (verify it's running after build)
+    start_ollama_server "$AUTO_START"
+
+    # Step 3: Model Selection
     if [ -z "${OLLAMA_MODEL:-}" ]; then
         select_model
     else
         print_info "Using model from environment: $OLLAMA_MODEL"
         echo ""
     fi
-
-    # Step 3: Install/Configure OpenCode
-    # Call original setup script for OpenCode setup (Steps 2-3)
-    # This avoids duplicating complex OpenCode setup logic
-    print_info "Configuring OpenCode (calling original setup for Steps 2-3)..."
-    OLLAMA_MODEL="$OLLAMA_MODEL" \
-    BUILD_OPENCODE_FROM_SOURCE="$BUILD_OPENCODE_FROM_SOURCE" \
-    AUTO_START="false" \
-    "$SCRIPT_DIR/setup-gemma4-working.sh-opencode-only" 2>/dev/null || {
-        print_warning "OpenCode setup via modular path not available yet"
-        print_info "Using integrated setup..."
-    }
-
-    # Step 4: Start server and pull models
-    start_ollama_server "$AUTO_START"
 
     if [ "$AUTO_START" = "true" ]; then
         # Determine context size
@@ -66,9 +55,16 @@ main() {
             CONTEXT_SIZE=128000
         fi
 
+        # Step 4: Download and Install Model
         pull_and_optimize_model "$OLLAMA_MODEL" "$CONTEXT_SIZE"
 
-        # Step 5: Install embedding model (if enabled)
+        # Step 5: Install OpenCode
+        install_opencode
+
+        # Step 6: Configure OpenCode
+        configure_opencode "$OLLAMA_MODEL" "$CONTEXT_SIZE"
+
+        # Step 7: Install embedding model (if enabled)
         if [ "$INSTALL_EMBEDDING_MODEL" = "true" ]; then
             install_embedding_model
         fi

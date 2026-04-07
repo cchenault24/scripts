@@ -59,6 +59,12 @@ Automated setup for running Gemma 4 models locally with Ollama and OpenCode on A
   - Server startup with keep-alive
   - Model pulling and optimization (128K/256K context)
 
+- **`opencode-setup.sh`** - OpenCode installation and configuration
+  - Official release or dev branch build
+  - Multi-agent configuration (build, review, refactor)
+  - Gemma 4 optimizations (repeat_penalty, num_predict)
+  - Large codebase workflows and prompts
+
 ## Usage Examples
 
 ### Environment Variables
@@ -92,7 +98,8 @@ AUTO_START=false ./setup.sh
 setup.sh (orchestrator)
 ├── lib/common.sh          # Shared utilities
 ├── lib/model-selection.sh # Model selection
-└── lib/ollama-setup.sh    # Ollama build & management
+├── lib/ollama-setup.sh    # Ollama build & management
+└── lib/opencode-setup.sh  # OpenCode install & config
 
 setup-gemma4-working.sh    # All-in-one (legacy)
 llama-control.sh           # Server control
