@@ -5,13 +5,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/ollama-setup.sh"
 
 print_header "Configuration Diagnostics"
 
 # Check environment variables
 echo ""
 print_info "Environment Variables:"
-echo "  PORT: ${PORT:-<not set>}"
+echo "  OLLAMA_PORT: ${OLLAMA_PORT:-<not set>}"
 echo "  OLLAMA_HOST: ${OLLAMA_HOST:-<not set>}"
 echo "  OLLAMA_MODEL: ${OLLAMA_MODEL:-<not set>}"
 

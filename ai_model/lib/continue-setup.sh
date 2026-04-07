@@ -333,8 +333,8 @@ setup_continue() {
 
     local config_dir="$HOME/.continue"
     local config_file="$config_dir/config.json"
-    # Use PORT from environment/ollama-setup.sh, or default to 31434
-    local port="${PORT:-31434}"
+    # Use OLLAMA_PORT from environment/ollama-setup.sh, or default to 31434
+    local port="${OLLAMA_PORT:-31434}"
     local ollama_url="http://127.0.0.1:${port}"
 
     # Ensure OLLAMA_HOST is set for model detection

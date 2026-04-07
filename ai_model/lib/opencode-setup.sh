@@ -98,7 +98,7 @@ configure_opencode() {
     local config_file="${config_dir}/opencode.jsonc"
     local auth_dir="$HOME/.local/share/opencode"
     local auth_file="${auth_dir}/auth.json"
-    local port="${PORT:-31434}"
+    local port="${OLLAMA_PORT:-31434}"
 
     # Ensure OLLAMA_HOST is set for model detection
     export OLLAMA_HOST="127.0.0.1:${port}"
@@ -195,7 +195,7 @@ EOF
 
 # OpenCode Ollama configuration (added by ai_model setup)
 export OPENAI_API_KEY="sk-dummy"
-export OPENAI_BASE_URL="http://127.0.0.1:${PORT:-31434}/v1"
+export OPENAI_BASE_URL="http://127.0.0.1:${OLLAMA_PORT:-31434}/v1"
 ENVEOF
             print_status "Added OpenCode environment variables to ${shell_config}"
         else

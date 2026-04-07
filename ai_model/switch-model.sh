@@ -13,9 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 # Ollama configuration
-export PORT="31434"
+export OLLAMA_PORT="31434"
 export OLLAMA_BUILD_DIR="/tmp/ollama-build"
-export OLLAMA_HOST="127.0.0.1:${PORT}"
+export OLLAMA_HOST="127.0.0.1:${OLLAMA_PORT}"
 
 # Config file paths
 CONTINUE_CONFIG="$HOME/.continue/config.json"
@@ -51,8 +51,8 @@ EOF
 
 # Check if Ollama server is running
 check_ollama_running() {
-    if ! curl -s "http://127.0.0.1:${PORT}/api/tags" > /dev/null 2>&1; then
-        print_error "Ollama server is not running on port ${PORT}"
+    if ! curl -s "http://127.0.0.1:${OLLAMA_PORT}/api/tags" > /dev/null 2>&1; then
+        print_error "Ollama server is not running on port ${OLLAMA_PORT}"
         print_info "Start the server first with: cd ${SCRIPT_DIR} && source lib/ollama-setup.sh && start_ollama_server"
         return 1
     fi
@@ -94,7 +94,7 @@ verify_model_exists() {
 # Get currently loaded model
 get_current_model() {
     local response
-    response=$(curl -s "http://127.0.0.1:${PORT}/api/ps" 2>/dev/null || echo "")
+    response=$(curl -s "http://127.0.0.1:${OLLAMA_PORT}/api/ps" 2>/dev/null || echo "")
 
     if [[ -n "$response" ]]; then
         # Extract model name from JSON response
@@ -117,7 +117,7 @@ unload_current_model() {
     print_info "Unloading current model: ${current_model}"
 
     # Send request to unload model (set keep_alive to 0)
-    curl -s "http://127.0.0.1:${PORT}/api/generate" \
+    curl -s "http://127.0.0.1:${OLLAMA_PORT}/api/generate" \
         -d "{\"model\":\"${current_model}\",\"keep_alive\":0}" \
         > /dev/null 2>&1 || true
 
@@ -136,7 +136,7 @@ preload_model() {
 
     # Send a minimal prompt to load the model
     local response
-    response=$(curl -s "http://127.0.0.1:${PORT}/api/generate" \
+    response=$(curl -s "http://127.0.0.1:${OLLAMA_PORT}/api/generate" \
         -d "{\"model\":\"${model}\",\"prompt\":\"hi\",\"stream\":false}" 2>&1)
 
     if [[ $? -eq 0 ]]; then

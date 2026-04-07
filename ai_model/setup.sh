@@ -19,8 +19,8 @@ source "$LIB_DIR/continue-setup.sh"
 source "$LIB_DIR/webui-setup.sh"
 source "$LIB_DIR/opencode-setup.sh"
 
-# Configuration - ensure PORT is set before anything else
-export PORT="${PORT:-31434}"
+# Configuration - ensure OLLAMA_PORT is set before anything else
+export OLLAMA_PORT="${OLLAMA_PORT:-31434}"
 export AUTO_START="${AUTO_START:-true}"
 export SETUP_CLIENTS="${SETUP_CLIENTS:-all}"
 export INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-false}"
@@ -131,7 +131,7 @@ configure_shell_environment() {
             ;;
         *)
             print_warning "Unknown shell: $current_shell"
-            print_info "Please manually add: export OLLAMA_HOST=\"127.0.0.1:$PORT\""
+            print_info "Please manually add: export OLLAMA_HOST=\"127.0.0.1:$OLLAMA_PORT\""
             return 0
             ;;
     esac
@@ -139,21 +139,31 @@ configure_shell_environment() {
     print_info "Shell: $current_shell"
     print_info "Config file: $shell_config"
 
+    # Check if OLLAMA_PORT is already configured
+    if ! grep -q "export OLLAMA_PORT=" "$shell_config" 2>/dev/null; then
+        print_info "Adding OLLAMA_PORT to $shell_config..."
+        cat >> "$shell_config" <<EOF
+
+# Ollama custom port (added by ai_model setup)
+export OLLAMA_PORT="$OLLAMA_PORT"
+EOF
+        print_status "Added OLLAMA_PORT=$OLLAMA_PORT"
+    fi
+
     # Check if OLLAMA_HOST is already configured
     if grep -q "export OLLAMA_HOST=" "$shell_config" 2>/dev/null; then
         # Check if it has the correct value
-        if grep -q "export OLLAMA_HOST=\"127.0.0.1:$PORT\"" "$shell_config"; then
+        if grep -q "export OLLAMA_HOST=\"127.0.0.1:$OLLAMA_PORT\"" "$shell_config"; then
             print_status "OLLAMA_HOST already configured correctly"
-            return 0
         else
             print_warning "OLLAMA_HOST exists with different value"
             # Update the existing line
             if [[ "$OSTYPE" == "darwin"* ]]; then
-                sed -i '' "s|export OLLAMA_HOST=.*|export OLLAMA_HOST=\"127.0.0.1:$PORT\"|" "$shell_config"
+                sed -i '' "s|export OLLAMA_HOST=.*|export OLLAMA_HOST=\"127.0.0.1:$OLLAMA_PORT\"|" "$shell_config"
             else
-                sed -i "s|export OLLAMA_HOST=.*|export OLLAMA_HOST=\"127.0.0.1:$PORT\"|" "$shell_config"
+                sed -i "s|export OLLAMA_HOST=.*|export OLLAMA_HOST=\"127.0.0.1:$OLLAMA_PORT\"|" "$shell_config"
             fi
-            print_status "Updated OLLAMA_HOST to: 127.0.0.1:$PORT"
+            print_status "Updated OLLAMA_HOST to: 127.0.0.1:$OLLAMA_PORT"
         fi
     else
         # Add OLLAMA_HOST configuration
@@ -161,21 +171,22 @@ configure_shell_environment() {
         cat >> "$shell_config" <<EOF
 
 # Ollama custom port configuration (added by ai_model setup)
-export OLLAMA_HOST="127.0.0.1:$PORT"
+export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
 EOF
-        print_status "Added OLLAMA_HOST=127.0.0.1:$PORT"
+        print_status "Added OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT"
     fi
 
     # Export for current session
-    export OLLAMA_HOST="127.0.0.1:$PORT"
+    export OLLAMA_PORT="$OLLAMA_PORT"
+    export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
 
     # Source the config file to apply changes immediately
     print_info "Applying changes to current session..."
     # shellcheck disable=SC1090
     source "$shell_config" 2>/dev/null || true
 
-    print_status "Environment configured: OLLAMA_HOST=127.0.0.1:$PORT"
-    print_info "Future terminals will automatically have this setting"
+    print_status "Environment configured: OLLAMA_PORT=$OLLAMA_PORT, OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT"
+    print_info "Future terminals will automatically have these settings"
 }
 
 setup_clients() {
@@ -221,7 +232,7 @@ show_final_summary() {
     echo "INSTALLED COMPONENTS:"
     echo "====================="
     echo ""
-    echo "✓ Ollama Server: Running on port ${PORT:-11434}"
+    echo "✓ Ollama Server: Running on port ${OLLAMA_PORT:-11434}"
     echo "✓ Model: ${OLLAMA_MODEL:-$(cat ~/.ollama-model 2>/dev/null || echo 'N/A')}"
     echo ""
 

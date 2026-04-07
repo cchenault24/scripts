@@ -41,7 +41,7 @@ health_check() {
     echo -e "${GREEN}✓ Server process running (PID: $pid)${NC}"
 
     # Check if server is responding
-    if ! curl -sf "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+    if ! curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null 2>&1; then
         echo -e "${RED}✗ Server not responding to API requests${NC}"
         exit_code=1
     else
@@ -49,7 +49,7 @@ health_check() {
 
         # Check loaded models
         local models
-        models=$(curl -s "http://127.0.0.1:$PORT/api/tags" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | wc -l)
+        models=$(curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | wc -l)
         echo -e "${GREEN}✓ Models installed: $models${NC}"
     fi
 
@@ -63,7 +63,7 @@ health_check() {
     local start_time end_time duration
     start_time=$(date +%s%N)
 
-    if curl -sf -X POST "http://127.0.0.1:$PORT/api/generate" \
+    if curl -sf -X POST "http://127.0.0.1:$OLLAMA_PORT/api/generate" \
         -H "Content-Type: application/json" \
         -d '{"model":"qwen2.5-coder:7b","prompt":"test","stream":false}' \
         >/dev/null 2>&1; then
@@ -122,9 +122,9 @@ show_metrics() {
     # Get active models
     local model_count=0
     local active_models=""
-    if curl -sf "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
-        model_count=$(curl -s "http://127.0.0.1:$PORT/api/tags" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | wc -l | tr -d ' ')
-        active_models=$(curl -s "http://127.0.0.1:$PORT/api/tags" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | tr '\n' ',' | sed 's/,$//')
+    if curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null 2>&1; then
+        model_count=$(curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | wc -l | tr -d ' ')
+        active_models=$(curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | tr '\n' ',' | sed 's/,$//')
     fi
 
     # Test tokens/sec with a small prompt (if model loaded)
@@ -137,7 +137,7 @@ show_metrics() {
         local start_time end_time
         start_time=$(date +%s%N)
         local response
-        response=$(curl -sf -X POST "http://127.0.0.1:$PORT/api/generate" \
+        response=$(curl -sf -X POST "http://127.0.0.1:$OLLAMA_PORT/api/generate" \
             -H "Content-Type: application/json" \
             -d '{"model":"'$test_model'","prompt":"Hi","stream":false}' 2>/dev/null || echo "")
 
@@ -198,7 +198,7 @@ show_metrics() {
   "active_models": "$active_models",
   "tokens_per_sec": "$tokens_per_sec",
   "gpu_utilization": "$gpu_util",
-  "port": "$PORT",
+  "port": "$OLLAMA_PORT",
   "host": "$OLLAMA_HOST"
 }
 EOF
@@ -218,7 +218,7 @@ EOF
         echo -e "${GREEN}Tokens/sec:${NC}       $tokens_per_sec"
         echo "----------------------------------------"
         echo -e "${GREEN}GPU Util:${NC}         $gpu_util"
-        echo -e "${GREEN}Port:${NC}             $PORT"
+        echo -e "${GREEN}Port:${NC}             $OLLAMA_PORT"
         echo -e "${GREEN}Host:${NC}             $OLLAMA_HOST"
         echo "========================================"
     fi
@@ -258,11 +258,11 @@ show_status() {
             print_info "CPU usage: $cpu_usage"
 
             # Try to get loaded models
-            if curl -sf "http://127.0.0.1:$PORT/api/tags" > /dev/null 2>&1; then
-                print_status "Health check: Responding at http://127.0.0.1:$PORT"
+            if curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" > /dev/null 2>&1; then
+                print_status "Health check: Responding at http://127.0.0.1:$OLLAMA_PORT"
 
                 echo -e "\n${BLUE}Loaded Models:${NC}"
-                curl -s "http://127.0.0.1:$PORT/api/tags" | \
+                curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | \
                     grep -o '"name":"[^"]*"' | \
                     cut -d'"' -f4 | \
                     sed 's/^/  - /' || echo "  (none)"
@@ -379,7 +379,7 @@ ${BLUE}EXAMPLES:${NC}
     $SCRIPT_NAME stop               # Stop the server
 
 ${BLUE}CONFIGURATION:${NC}
-    Port:               $PORT
+    Port:               $OLLAMA_PORT
     Host:               $OLLAMA_HOST
     PID file:           $OLLAMA_PID_FILE
     Log file:           $OLLAMA_LOG_FILE

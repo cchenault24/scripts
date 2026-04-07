@@ -45,7 +45,7 @@ run_test() {
     local start=$(date +%s.%N)
 
     # Make API call
-    local response=$(curl -s "http://127.0.0.1:$PORT/api/generate" \
+    local response=$(curl -s "http://127.0.0.1:$OLLAMA_PORT/api/generate" \
         -d "{\"model\":\"$model\",\"prompt\":\"$prompt\",\"stream\":false}")
 
     # End time measurement
@@ -101,10 +101,10 @@ benchmark_model() {
 
     # Verify model exists
     print_info "Verifying model availability..."
-    if ! curl -s "http://127.0.0.1:$PORT/api/tags" | jq -r '.models[].name' | grep -q "^${model}$"; then
+    if ! curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | jq -r '.models[].name' | grep -q "^${model}$"; then
         print_error "Model not found: $model"
         print_info "Available models:"
-        curl -s "http://127.0.0.1:$PORT/api/tags" | jq -r '.models[].name'
+        curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | jq -r '.models[].name'
         return 1
     fi
 
@@ -175,7 +175,7 @@ compare_models() {
 
     # Verify both models exist
     print_info "Verifying models..."
-    local available_models=$(curl -s "http://127.0.0.1:$PORT/api/tags" | jq -r '.models[].name')
+    local available_models=$(curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" | jq -r '.models[].name')
 
     if ! echo "$available_models" | grep -q "^${model1}$"; then
         print_error "Model not found: $model1"

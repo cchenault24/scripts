@@ -33,11 +33,11 @@ check_server() {
 check_responsive() {
     print_info "Checking if server is responsive..."
 
-    if curl -sf "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+    if curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null 2>&1; then
         print_status "Server is responding to API calls"
         return 0
     else
-        print_error "Server not responding at http://127.0.0.1:$PORT"
+        print_error "Server not responding at http://127.0.0.1:$OLLAMA_PORT"
         echo "Fix: Restart server with: source lib/ollama-setup.sh && stop_ollama_server && start_ollama_server"
         return 1
     fi
@@ -45,23 +45,23 @@ check_responsive() {
 
 # Check for port conflicts
 check_port() {
-    print_info "Checking for port conflicts on port $PORT..."
+    print_info "Checking for port conflicts on port $OLLAMA_PORT..."
 
     # Check if anything is listening on the port
-    if lsof -i ":$PORT" >/dev/null 2>&1; then
+    if lsof -i ":$OLLAMA_PORT" >/dev/null 2>&1; then
         # Check if it's Ollama
-        if lsof -i ":$PORT" | grep -q ollama; then
-            print_status "Port $PORT is correctly used by Ollama"
+        if lsof -i ":$OLLAMA_PORT" | grep -q ollama; then
+            print_status "Port $OLLAMA_PORT is correctly used by Ollama"
             return 0
         else
-            print_error "Port $PORT is in use by another process"
+            print_error "Port $OLLAMA_PORT is in use by another process"
             echo "Conflicting process:"
-            lsof -i ":$PORT" | grep -v COMMAND
-            echo "Fix: Change PORT in lib/ollama-setup.sh or kill the other process"
+            lsof -i ":$OLLAMA_PORT" | grep -v COMMAND
+            echo "Fix: Change OLLAMA_PORT in lib/ollama-setup.sh or kill the other process"
             return 1
         fi
     else
-        print_warning "Port $PORT is not in use (server may not be running)"
+        print_warning "Port $OLLAMA_PORT is not in use (server may not be running)"
         return 1
     fi
 }
@@ -75,14 +75,14 @@ check_ram() {
     print_info "Available RAM: ${available_ram_gb}GB"
 
     # Check if server is running to get model list
-    if ! curl -sf "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+    if ! curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null 2>&1; then
         print_warning "Cannot check model sizes (server not responding)"
         return 1
     fi
 
     # Get list of models
     local models_json
-    models_json=$(curl -sf "http://127.0.0.1:$PORT/api/tags" 2>/dev/null || echo '{"models":[]}')
+    models_json=$(curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" 2>/dev/null || echo '{"models":[]}')
 
     # Check if we got valid JSON
     if ! echo "$models_json" | grep -q '"models"'; then
@@ -171,14 +171,14 @@ check_models() {
     print_info "Checking model integrity..."
 
     # Check if server is running
-    if ! curl -sf "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+    if ! curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null 2>&1; then
         print_warning "Cannot test models (server not responding)"
         return 1
     fi
 
     # Get list of models
     local models_json
-    models_json=$(curl -sf "http://127.0.0.1:$PORT/api/tags" 2>/dev/null || echo '{"models":[]}')
+    models_json=$(curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/tags" 2>/dev/null || echo '{"models":[]}')
 
     # Extract model names
     local model_names
@@ -199,7 +199,7 @@ check_models() {
 
         # Send a minimal test prompt with 5 second timeout
         local response
-        response=$(timeout 10 curl -sf "http://127.0.0.1:$PORT/api/generate" \
+        response=$(timeout 10 curl -sf "http://127.0.0.1:$OLLAMA_PORT/api/generate" \
             -d "{\"model\":\"$model\",\"prompt\":\"test\",\"stream\":false}" 2>/dev/null || echo "")
 
         if echo "$response" | grep -q '"response"'; then
@@ -284,7 +284,7 @@ show_system_info() {
     print_info "GPU Cores: $GPU_CORES"
     print_info "Total RAM: ${TOTAL_RAM_GB}GB"
     print_info "RAM Tier: $RAM_TIER"
-    print_info "Ollama Port: $PORT"
+    print_info "Ollama Port: $OLLAMA_PORT"
     print_info "Ollama Host: $OLLAMA_HOST"
 
     echo ""

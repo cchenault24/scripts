@@ -15,10 +15,10 @@ source "$SCRIPT_DIR/model-families.sh"
 #############################################
 # Installation Configuration
 #############################################
-export PORT="31434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
+export OLLAMA_PORT="31434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
 
 # Runtime configuration
-export OLLAMA_HOST="127.0.0.1:$PORT"
+export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
 export OLLAMA_KEEP_ALIVE=-1           # Keep models loaded
 export OLLAMA_NUM_GPU=999             # All layers to GPU
 export OLLAMA_MAX_LOADED_MODELS=1     # Focus on single model
@@ -198,9 +198,9 @@ start_ollama_server() {
         local attempt=0
 
         while [[ $attempt -lt $max_attempts ]]; do
-            if curl -s "http://127.0.0.1:$PORT/api/tags" > /dev/null 2>&1; then
+            if curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" > /dev/null 2>&1; then
                 print_status "Server is ready and responding"
-                print_info "Health check: http://127.0.0.1:$PORT/api/tags"
+                print_info "Health check: http://127.0.0.1:$OLLAMA_PORT/api/tags"
                 return 0
             fi
 
@@ -298,8 +298,8 @@ ollama_status() {
             print_status "Server: Running (PID: $pid)"
 
             # Try to get model list
-            if curl -s "http://127.0.0.1:$PORT/api/tags" > /dev/null 2>&1; then
-                print_status "Health check: Responding at http://127.0.0.1:$PORT"
+            if curl -s "http://127.0.0.1:$OLLAMA_PORT/api/tags" > /dev/null 2>&1; then
+                print_status "Health check: Responding at http://127.0.0.1:$OLLAMA_PORT"
             else
                 print_warning "Health check: Process running but not responding"
             fi

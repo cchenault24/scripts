@@ -94,7 +94,7 @@ is_model_active() {
 
     # Try to get running models from API
     local running_models
-    running_models=$(curl -s "http://127.0.0.1:$PORT/api/ps" 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | head -1)
+    running_models=$(curl -s "http://127.0.0.1:$OLLAMA_PORT/api/ps" 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | head -1)
 
     if [[ -n "$running_models" ]] && [[ "$running_models" == *"$model"* ]]; then
         echo "✓"
