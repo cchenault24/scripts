@@ -22,9 +22,14 @@ case "${1:-}" in
         fi
 
         echo "Starting Ollama server on port $PORT..."
-        echo "Keep-alive: enabled (models stay in memory)"
+        echo "Performance: Keep-alive enabled, all GPU layers, flash attention"
         mkdir -p "$(dirname "$LOG_FILE")"
-        OLLAMA_HOST=127.0.0.1:$PORT OLLAMA_KEEP_ALIVE=-1 nohup "$OLLAMA_BUILD_DIR/ollama" serve > "$LOG_FILE" 2>&1 &
+        OLLAMA_HOST=127.0.0.1:$PORT \
+        OLLAMA_KEEP_ALIVE=-1 \
+        OLLAMA_NUM_GPU=999 \
+        OLLAMA_MAX_LOADED_MODELS=1 \
+        OLLAMA_FLASH_ATTENTION=1 \
+        nohup "$OLLAMA_BUILD_DIR/ollama" serve > "$LOG_FILE" 2>&1 &
         echo $! > "$PID_FILE"
         echo "Server started (PID: $(cat "$PID_FILE"))"
         ;;

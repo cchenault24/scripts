@@ -290,24 +290,41 @@ else
     # Ensure Go bin is in PATH
     export PATH="$PATH:$(go env GOPATH)/bin"
 
+    # Detect CPU count for parallel compilation
+    NUM_CPUS=$(sysctl -n hw.ncpu)
+
     print_info "Building Ollama with Apple Silicon optimizations..."
     print_info "Enabling: Metal GPU, Accelerate Framework, Native CPU optimizations"
+    print_info "Additional: LTO, Frame Pointer Optimization, Parallel Build (${NUM_CPUS} cores)"
     print_info "This may take 5-10 minutes..."
     echo ""
 
     # Set build environment for maximum Apple Silicon performance
     export CGO_ENABLED=1
     export GOARCH=arm64
-    export CGO_CFLAGS="-O3 -march=native -mtune=native"
-    export CGO_LDFLAGS="-framework Metal -framework Foundation -framework Accelerate"
+    export GOMAXPROCS=$NUM_CPUS
+
+    # Aggressive CGO optimizations
+    # -O3: Maximum optimization level
+    # -march=native: Use all available CPU features
+    # -mtune=native: Tune for this specific CPU
+    # -flto: Link Time Optimization for cross-module optimization
+    # -fomit-frame-pointer: Free up register for better performance
+    # -DNDEBUG: Disable debug assertions
+    export CGO_CFLAGS="-O3 -march=native -mtune=native -flto -fomit-frame-pointer -DNDEBUG"
+    export CGO_LDFLAGS="-flto -framework Metal -framework Foundation -framework Accelerate"
 
     # Generate C++ components with Metal support
     go generate ./... || {
         print_warning "go generate had some warnings, continuing..."
     }
 
-    # Build with optimizations (trimpath removes file paths, -s -w strips debug info for smaller binary)
-    go build -trimpath -ldflags="-s -w" .
+    # Build with optimizations
+    # -p: Parallel compilation using all CPU cores
+    # -trimpath: Remove absolute paths for reproducible builds
+    # -ldflags="-s -w": Strip debug info and symbol table
+    # -ldflags="-linkmode=external": Use external linker for better LTO
+    go build -p $NUM_CPUS -trimpath -ldflags="-s -w -linkmode=external" .
 
     print_status "Ollama built successfully"
     "$OLLAMA_BUILD_DIR/ollama" --version
@@ -955,11 +972,21 @@ if [ "$AUTO_START" = "true" ]; then
 
     print_info "Starting Ollama server on port $PORT..."
     print_info "Log file: $LOG_DIR/ollama-server.log"
-    print_info "Keep-alive: Models will stay in memory (no cold starts)"
+    print_info "Performance: Keep-alive enabled, all GPU layers, flash attention"
     echo ""
 
-    # Start Ollama in background with keep-alive enabled
-    OLLAMA_HOST=127.0.0.1:$PORT OLLAMA_KEEP_ALIVE=-1 nohup "$OLLAMA_BUILD_DIR/ollama" serve \
+    # Start Ollama in background with performance optimizations
+    # OLLAMA_HOST: Bind to specific port
+    # OLLAMA_KEEP_ALIVE=-1: Keep models in memory indefinitely
+    # OLLAMA_NUM_GPU=999: Offload all layers to GPU
+    # OLLAMA_MAX_LOADED_MODELS=1: Focus memory on single model for best performance
+    # OLLAMA_FLASH_ATTENTION=1: Enable flash attention for faster inference
+    OLLAMA_HOST=127.0.0.1:$PORT \
+    OLLAMA_KEEP_ALIVE=-1 \
+    OLLAMA_NUM_GPU=999 \
+    OLLAMA_MAX_LOADED_MODELS=1 \
+    OLLAMA_FLASH_ATTENTION=1 \
+    nohup "$OLLAMA_BUILD_DIR/ollama" serve \
         > "$LOG_DIR/ollama-server.log" 2>&1 &
 
     SERVER_PID=$!
@@ -1198,7 +1225,9 @@ if [ "$AUTO_START" = "true" ]; then
     echo ""
     echo "To restart the server manually:"
     echo ""
-    echo "   OLLAMA_HOST=127.0.0.1:$PORT OLLAMA_KEEP_ALIVE=-1 $OLLAMA_BUILD_DIR/ollama serve"
+    echo "   OLLAMA_HOST=127.0.0.1:$PORT OLLAMA_KEEP_ALIVE=-1 OLLAMA_NUM_GPU=999 \\"
+    echo "   OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_FLASH_ATTENTION=1 \\"
+    echo "   $OLLAMA_BUILD_DIR/ollama serve"
     echo ""
     echo "Ready to use OpenCode! In your project directory:"
     echo -e "   ${GREEN}cd /path/to/your/project${NC}"
@@ -1206,7 +1235,9 @@ if [ "$AUTO_START" = "true" ]; then
 else
     echo "1. Start Ollama server in a new terminal:"
     echo ""
-    echo "   OLLAMA_HOST=127.0.0.1:$PORT OLLAMA_KEEP_ALIVE=-1 $OLLAMA_BUILD_DIR/ollama serve"
+    echo "   OLLAMA_HOST=127.0.0.1:$PORT OLLAMA_KEEP_ALIVE=-1 OLLAMA_NUM_GPU=999 \\"
+    echo "   OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_FLASH_ATTENTION=1 \\"
+    echo "   $OLLAMA_BUILD_DIR/ollama serve"
     echo ""
     echo "2. Wait for server to start, then verify:"
     echo ""
