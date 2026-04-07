@@ -5,16 +5,18 @@
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source common utilities if available
-if [[ -f "$SCRIPT_DIR/common.sh" ]]; then
-    source "$SCRIPT_DIR/common.sh"
-else
-    # Fallback print functions if common.sh is not available
-    print_header() { echo -e "\n========================================\n$1\n========================================\n"; }
-    print_info() { echo "ℹ $1"; }
-    print_status() { echo "✓ $1"; }
-    print_warning() { echo "⚠ $1"; }
-    print_error() { echo "✗ $1"; }
+# Source common utilities if not already loaded
+if ! declare -f print_header >/dev/null 2>&1; then
+    if [[ -f "$SCRIPT_DIR/common.sh" ]]; then
+        source "$SCRIPT_DIR/common.sh"
+    else
+        # Fallback print functions if common.sh is not available
+        print_header() { echo -e "\n========================================\n$1\n========================================\n"; }
+        print_info() { echo "ℹ $1"; }
+        print_status() { echo "✓ $1"; }
+        print_warning() { echo "⚠ $1"; }
+        print_error() { echo "✗ $1"; }
+    fi
 fi
 
 #############################################

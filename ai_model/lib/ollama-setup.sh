@@ -2,9 +2,11 @@
 # ollama-setup.sh - Build and manage Ollama with Apple Silicon optimizations
 # This file should be sourced, not executed directly
 
-# Source common utilities
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+# Source common utilities if not already loaded
+if ! declare -f print_header >/dev/null 2>&1; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/common.sh"
+fi
 
 #############################################
 # Build Configuration

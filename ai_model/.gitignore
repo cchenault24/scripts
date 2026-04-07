@@ -50,3 +50,16 @@ env/
 
 # Continue.dev backups (local testing)
 *.backup
+
+# Ollama build directory
+/tmp/ollama-build/
+
+# Server runtime files
+*.pid
+
+# Archive (old planning docs)
+archive/
+
+# Temporary files
+tmp/
+temp/
