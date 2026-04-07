@@ -65,7 +65,7 @@ OLLAMA_MODEL=""
 AUTO_START="${AUTO_START:-true}"  # Set to false to skip auto-start
 AUTO_START_ON_LOGIN="${AUTO_START_ON_LOGIN:-false}"  # Set to true for launchd
 BUILD_OPENCODE_FROM_SOURCE="${BUILD_OPENCODE_FROM_SOURCE:-false}"  # Set to true to build from source
-INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-true}"  # Set to false to skip embedding model
+INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-false}"  # Set to true to install embedding model
 
 # Function to check if command exists
 command_exists() {

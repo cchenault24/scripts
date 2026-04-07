@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/lib/ollama-setup.sh"
 export AUTO_START="${AUTO_START:-true}"
 export AUTO_START_ON_LOGIN="${AUTO_START_ON_LOGIN:-false}"
 export BUILD_OPENCODE_FROM_SOURCE="${BUILD_OPENCODE_FROM_SOURCE:-false}"
-export INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-true}"
+export INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-false}"
 
 # Main setup flow
 main() {

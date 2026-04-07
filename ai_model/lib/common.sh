@@ -15,6 +15,7 @@ export NC='\033[0m' # No Color
 export OLLAMA_BUILD_DIR="/tmp/ollama-build"
 export OPENCODE_BUILD_DIR="/tmp/opencode-build"
 export PORT="3456"
+export INSTALL_EMBEDDING_MODEL="${INSTALL_EMBEDDING_MODEL:-false}"  # Default to false
 
 # Detect system RAM (in GB)
 export TOTAL_RAM_MB=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024)}')

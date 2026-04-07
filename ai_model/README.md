@@ -70,8 +70,8 @@ OLLAMA_MODEL=gemma4:26b-a4b-it-q4_K_M ./setup.sh
 # Build OpenCode from dev branch
 BUILD_OPENCODE_FROM_SOURCE=true ./setup.sh
 
-# Skip embedding model
-INSTALL_EMBEDDING_MODEL=false ./setup.sh
+# Install embedding model (optional, not used by OpenCode directly)
+INSTALL_EMBEDDING_MODEL=true ./setup.sh
 
 # Skip auto-start
 AUTO_START=false ./setup.sh
@@ -126,10 +126,11 @@ uninstall-gemma4-working.sh # Cleanup
 - Reduced memory overhead with frame pointer optimization
 - Faster attention computation with flash attention
 
-### Embedding Support
-- Automatic installation of `nomic-embed-text` (274MB)
-- Optimized for semantic code search
-- Essential for large codebases (1000+ files)
+### Embedding Support (Optional)
+- **Not installed by default** - OpenCode doesn't use embeddings directly
+- Install with: `INSTALL_EMBEDDING_MODEL=true ./setup.sh`
+- Uses `nomic-embed-text` (274MB)
+- Useful if you build custom tools using MCP servers for semantic search
 
 ### OpenCode Integration
 - **Multiple specialized agents**:
