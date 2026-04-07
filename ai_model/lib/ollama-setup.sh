@@ -12,7 +12,7 @@ fi
 # Build Configuration
 #############################################
 export OLLAMA_BUILD_DIR="/tmp/ollama-build"
-export PORT="3456"  # Custom port to avoid conflicts
+export PORT="31434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
 
 # Build flags for Apple Silicon optimization
 export CGO_CFLAGS="-O3 -march=native -mtune=native -flto -fomit-frame-pointer -DNDEBUG"

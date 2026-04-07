@@ -97,7 +97,7 @@ The model should appear in the list with its size and modification date.
 **Solution:**
 1. Check what's using the port:
    ```bash
-   lsof -i :3456
+   lsof -i :31434
    ```
 2. Stop any conflicting process:
    ```bash
@@ -113,11 +113,11 @@ The model should appear in the list with its size and modification date.
 
 **Verification:**
 ```bash
-lsof -i :3456
+lsof -i :31434
 ```
 Should show only your Ollama instance, or nothing if you changed the port. Then verify connectivity:
 ```bash
-curl http://127.0.0.1:3456/api/tags
+curl http://127.0.0.1:31434/api/tags
 ```
 
 ---
@@ -156,7 +156,7 @@ curl http://127.0.0.1:3456/api/tags
 ```
 Should show "Server is running" with the PID. Also test API access:
 ```bash
-curl http://127.0.0.1:3456/api/tags
+curl http://127.0.0.1:31434/api/tags
 ```
 
 ---
@@ -237,7 +237,7 @@ Open Activity Monitor, go to the "Window" menu and select "GPU History". Run a q
          "title": "Local Ollama",
          "provider": "ollama",
          "model": "qwen2.5-coder:7b-instruct-q4_K_M",
-         "apiBase": "http://127.0.0.1:3456"
+         "apiBase": "http://127.0.0.1:31434"
        }
      ]
    }
@@ -263,7 +263,7 @@ Test the connection in Continue.dev chat interface. Send a simple query like "He
 1. Update Open WebUI environment variable to use Docker's host gateway:
    ```bash
    docker run -d -p 3000:8080 \
-     -e OLLAMA_API_BASE_URL=http://host.docker.internal:3456 \
+     -e OLLAMA_API_BASE_URL=http://host.docker.internal:31434 \
      --name open-webui \
      ghcr.io/open-webui/open-webui:main
    ```
@@ -275,7 +275,7 @@ Test the connection in Continue.dev chat interface. Send a simple query like "He
    ```
 3. Verify Ollama is accessible from host:
    ```bash
-   curl http://127.0.0.1:3456/api/tags
+   curl http://127.0.0.1:31434/api/tags
    ```
 
 **Verification:**
@@ -317,7 +317,7 @@ Check all client configurations:
 cat ~/.continue/config.json | grep "model"
 
 # Verify active model in Ollama
-curl http://127.0.0.1:3456/api/tags
+curl http://127.0.0.1:31434/api/tags
 ```
 Test inference in each client to confirm they're using the new model.
 
@@ -365,7 +365,7 @@ Should show a clean list with only the models you need, each appearing once with
    ```
 2. Check if the metrics endpoint responds:
    ```bash
-   curl http://127.0.0.1:3456/api/metrics
+   curl http://127.0.0.1:31434/api/metrics
    ```
 3. If unavailable, restart the server:
    ```bash
@@ -425,11 +425,11 @@ Should execute without permission errors. All scripts should show `rwxr-xr-x` pe
    ```bash
    # For zsh (macOS default)
    echo 'export OLLAMA_NUM_GPU=999' >> ~/.zshrc
-   echo 'export OLLAMA_HOST=http://127.0.0.1:3456' >> ~/.zshrc
+   echo 'export OLLAMA_HOST=http://127.0.0.1:31434' >> ~/.zshrc
 
    # For bash
    echo 'export OLLAMA_NUM_GPU=999' >> ~/.bashrc
-   echo 'export OLLAMA_HOST=http://127.0.0.1:3456' >> ~/.bashrc
+   echo 'export OLLAMA_HOST=http://127.0.0.1:31434' >> ~/.bashrc
    ```
 2. Reload your profile:
    ```bash
@@ -463,8 +463,8 @@ If you encounter issues not covered in this guide:
 
 3. **Test Server Health:**
    ```bash
-   curl http://127.0.0.1:3456/api/tags
-   curl http://127.0.0.1:3456/api/version
+   curl http://127.0.0.1:31434/api/tags
+   curl http://127.0.0.1:31434/api/version
    ```
 
 4. **Ollama Documentation:** https://github.com/ollama/ollama/tree/main/docs

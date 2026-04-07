@@ -182,32 +182,32 @@ setup_continue() {
       "title": "Llama 3.3 70B",
       "provider": "ollama",
       "model": "llama3.3:70b-instruct-q4_K_M",
-      "apiBase": "http://127.0.0.1:3456"
+      "apiBase": "http://127.0.0.1:31434"
     },
     {
       "title": "Codestral 22B (Code)",
       "provider": "ollama",
       "model": "codestral:22b-v0.1-q8_0",
-      "apiBase": "http://127.0.0.1:3456"
+      "apiBase": "http://127.0.0.1:31434"
     },
     {
       "title": "Gemma 4 31B",
       "provider": "ollama",
       "model": "gemma4:31b-it-q8_0",
-      "apiBase": "http://127.0.0.1:3456"
+      "apiBase": "http://127.0.0.1:31434"
     },
     {
       "title": "Phi 4 14B",
       "provider": "ollama",
       "model": "phi4:14b-q8_0",
-      "apiBase": "http://127.0.0.1:3456"
+      "apiBase": "http://127.0.0.1:31434"
     }
   ],
   "tabAutocompleteModel": {
     "title": "Fast Autocomplete",
     "provider": "ollama",
     "model": "llama3.2:3b-instruct-q8_0",
-    "apiBase": "http://127.0.0.1:3456"
+    "apiBase": "http://127.0.0.1:31434"
   }
 }
 EOF

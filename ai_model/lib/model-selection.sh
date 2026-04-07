@@ -14,7 +14,7 @@ fi
 #############################################
 export SELECTED_FAMILY=""
 export SELECTED_MODEL=""
-export OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+export OLLAMA_PORT="${OLLAMA_PORT:-31434}"
 
 #############################################
 # Installed Models Detection

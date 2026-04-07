@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 # Ollama configuration
-export PORT="3456"
+export PORT="31434"
 export OLLAMA_BUILD_DIR="/tmp/ollama-build"
 export OLLAMA_HOST="127.0.0.1:${PORT}"
 
@@ -43,7 +43,7 @@ Examples:
 Config files updated:
   • Continue.dev: $CONTINUE_CONFIG
   • OpenCode: $OPENCODE_CONFIG
-  • WebUI: Manual selection required at http://localhost:8080
+  • WebUI: Manual selection required at http://localhost:38080
 
 EOF
     exit 1
@@ -368,7 +368,7 @@ switch_model() {
     print_status "OpenCode updated: ${OPENCODE_CONFIG}"
     echo ""
     print_info "Note: Open WebUI requires manual model selection"
-    print_info "  1. Open http://localhost:8080"
+    print_info "  1. Open http://localhost:38080"
     print_info "  2. Select ${new_model} from the dropdown"
     echo ""
     print_status "Successfully switched to: ${new_model}"

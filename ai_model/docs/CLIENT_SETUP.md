@@ -9,10 +9,10 @@ Your local Ollama server provides AI models through three distinct clients, each
 | Client | Best For | Interface | Installation |
 |--------|----------|-----------|--------------|
 | **Continue.dev** | Daily coding, autocomplete, inline edits | JetBrains/VS Code | Plugin |
-| **Open WebUI** | Testing models, demos, non-developers | Browser (localhost:8080) | Docker |
+| **Open WebUI** | Testing models, demos, non-developers | Browser (localhost:38080) | Docker |
 | **OpenCode CLI** | Automation, scripts, CI/CD pipelines | Terminal | npm/bun |
 
-**Key Point:** All three clients connect to the same local Ollama server (localhost:11434), so you can use different models in different clients or switch between them seamlessly.
+**Key Point:** All three clients connect to the same local Ollama server (localhost:31434), so you can use different models in different clients or switch between them seamlessly.
 
 ---
 
@@ -51,26 +51,26 @@ Continue.dev stores its configuration at `~/.continue/config.json`. The setup sc
       "title": "Llama 3.3 70B",
       "provider": "ollama",
       "model": "llama3.3:70b-instruct-q4_K_M",
-      "apiBase": "http://localhost:11434"
+      "apiBase": "http://localhost:31434"
     },
     {
       "title": "Codestral 22B",
       "provider": "ollama",
       "model": "codestral:22b-v0.1-q8_0",
-      "apiBase": "http://localhost:11434"
+      "apiBase": "http://localhost:31434"
     },
     {
       "title": "Gemma4 31B",
       "provider": "ollama",
       "model": "gemma4:31b-it-q8_0",
-      "apiBase": "http://localhost:11434"
+      "apiBase": "http://localhost:31434"
     }
   ],
   "tabAutocompleteModel": {
     "title": "Fast Autocomplete",
     "provider": "ollama",
     "model": "llama3.2:3b-instruct-q8_0",
-    "apiBase": "http://localhost:11434"
+    "apiBase": "http://localhost:31434"
   }
 }
 ```
@@ -85,7 +85,7 @@ To add a new model:
   "title": "My Custom Model",
   "provider": "ollama",
   "model": "model-name:tag",
-  "apiBase": "http://localhost:11434"
+  "apiBase": "http://localhost:31434"
 }
 ```
 4. Restart your IDE or reload Continue.dev
@@ -101,7 +101,7 @@ For faster autocomplete, use a smaller model (3B-7B parameters):
   "title": "Fast Autocomplete",
   "provider": "ollama",
   "model": "llama3.2:3b-instruct-q8_0",
-  "apiBase": "http://localhost:11434"
+  "apiBase": "http://localhost:31434"
 }
 ```
 
@@ -150,7 +150,7 @@ Recommended autocomplete models:
 **Solutions:**
 1. Check if Ollama is running:
    ```bash
-   curl http://localhost:11434/api/tags
+   curl http://localhost:31434/api/tags
    ```
 2. Verify the server is running:
    ```bash
@@ -160,7 +160,7 @@ Recommended autocomplete models:
    ```bash
    ollama serve &
    ```
-4. Check Continue config has correct URL: `http://localhost:11434`
+4. Check Continue config has correct URL: `http://localhost:31434`
 
 #### Model Not Responding
 **Problem:** Model takes forever or doesn't respond
@@ -196,11 +196,11 @@ Open WebUI provides a ChatGPT-like web interface for interacting with local mode
 
 #### URL
 ```
-http://localhost:8080
+http://localhost:38080
 ```
 
 #### First-Time Setup
-1. Open browser and navigate to `http://localhost:8080`
+1. Open browser and navigate to `http://localhost:38080`
 2. Create an admin account (first user becomes admin)
 3. Login with your credentials
 4. The UI will automatically connect to your local Ollama server
@@ -260,7 +260,7 @@ http://localhost:8080
 
 #### Model Comparison
 Use multiple browser tabs to compare models side-by-side:
-1. Open two tabs: `http://localhost:8080`
+1. Open two tabs: `http://localhost:38080`
 2. Select different model in each tab
 3. Ask same question to both
 4. Compare responses
@@ -273,7 +273,7 @@ Use multiple browser tabs to compare models side-by-side:
 **Solutions:**
 1. Verify Ollama is running:
    ```bash
-   curl http://localhost:11434/api/tags
+   curl http://localhost:31434/api/tags
    ```
 2. Check Docker container is running:
    ```bash
@@ -287,10 +287,10 @@ Use multiple browser tabs to compare models side-by-side:
    ```bash
    docker exec open-webui env | grep OLLAMA
    ```
-   Should show: `OLLAMA_BASE_URL=http://host.docker.internal:11434`
+   Should show: `OLLAMA_BASE_URL=http://host.docker.internal:31434`
 
 #### Docker Container Not Running
-**Problem:** Page doesn't load at localhost:8080
+**Problem:** Page doesn't load at localhost:38080
 
 **Solutions:**
 1. Check if container exists:
@@ -306,7 +306,7 @@ Use multiple browser tabs to compare models side-by-side:
    docker run -d \
      --name open-webui \
      -p 8080:8080 \
-     -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+     -e OLLAMA_BASE_URL=http://host.docker.internal:31434 \
      -v open-webui:/app/backend/data \
      ghcr.io/open-webui/open-webui:main
    ```
@@ -358,7 +358,7 @@ OpenCode stores its configuration at `~/.config/opencode/opencode.jsonc`.
 ```jsonc
 {
   "model": "llama3.3:70b-instruct-q4_K_M",
-  "baseUrl": "http://localhost:11434",
+  "baseUrl": "http://localhost:31434",
   "temperature": 0.7,
   "num_predict": 4096,
   "repeat_penalty": 1.1,
@@ -560,7 +560,7 @@ jobs:
 **Solutions:**
 1. Verify Ollama is running:
    ```bash
-   curl http://localhost:11434/api/tags
+   curl http://localhost:31434/api/tags
    ```
 2. Check baseUrl in config:
    ```bash
@@ -657,16 +657,16 @@ The `switch-model.sh` script (if available) updates all client configs at once:
 **Check What's Running:**
 ```bash
 # Active models
-curl http://localhost:11434/api/ps
+curl http://localhost:31434/api/ps
 
 # Server status
-curl http://localhost:11434/api/tags
+curl http://localhost:31434/api/tags
 ```
 
 **Unload Models to Free RAM:**
 ```bash
 # Unload all models
-curl -X POST http://localhost:11434/api/generate -d '{"model":"", "keep_alive":0}'
+curl -X POST http://localhost:31434/api/generate -d '{"model":"", "keep_alive":0}'
 ```
 
 **Monitor Resource Usage:**
@@ -689,7 +689,7 @@ ollama ps
 - **Best for:** Daily coding, autocomplete
 
 ### Open WebUI
-- **URL:** http://localhost:8080
+- **URL:** http://localhost:38080
 - **Docker:** `docker ps | grep open-webui`
 - **Best for:** Testing, demos, non-developers
 
@@ -700,7 +700,7 @@ ollama ps
 - **Best for:** Automation, CI/CD, scripts
 
 ### Ollama Server
-- **Check status:** `curl http://localhost:11434/api/tags`
+- **Check status:** `curl http://localhost:31434/api/tags`
 - **List models:** `ollama list`
 - **Pull model:** `ollama pull <model>`
 - **Remove model:** `ollama rm <model>`

@@ -174,7 +174,7 @@ show_final_summary() {
 
     if [[ "$SETUP_CLIENTS" =~ "webui" ]] || [[ "$SETUP_CLIENTS" == "all" ]]; then
         echo "  - Open WebUI"
-        echo "    URL: http://localhost:8080"
+        echo "    URL: http://localhost:38080"
         echo "    Control: docker ps | grep open-webui"
         clients_installed=true
     fi
@@ -225,7 +225,7 @@ show_final_summary() {
 
     if [[ "$SETUP_CLIENTS" =~ "webui" ]] || [[ "$SETUP_CLIENTS" == "all" ]]; then
         echo "3. Access Open WebUI:"
-        echo "   Open http://localhost:8080 in your browser"
+        echo "   Open http://localhost:38080 in your browser"
         echo ""
     fi
 

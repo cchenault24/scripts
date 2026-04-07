@@ -113,13 +113,13 @@ configure_opencode() {
     {
       "name": "build",
       "model": "ollama/llama3.3:70b-instruct-q4_K_M",
-      "baseURL": "http://127.0.0.1:3456/v1",
+      "baseURL": "http://127.0.0.1:31434/v1",
       "maxSteps": 100
     },
     {
       "name": "review",
       "model": "ollama/llama3.3:70b-instruct-q4_K_M",
-      "baseURL": "http://127.0.0.1:3456/v1",
+      "baseURL": "http://127.0.0.1:31434/v1",
       "maxSteps": 50,
       "permissions": {
         "edit": false
@@ -128,7 +128,7 @@ configure_opencode() {
     {
       "name": "refactor",
       "model": "ollama/codestral:22b-v0.1-q8_0",
-      "baseURL": "http://127.0.0.1:3456/v1",
+      "baseURL": "http://127.0.0.1:31434/v1",
       "maxSteps": 100
     }
   ],

@@ -252,7 +252,7 @@ echo "Backup completed: $BACKUP_DIR"
 - Try smaller model variant first
 
 **Ollama service won't start:**
-- Check port availability: `lsof -i :11434`
+- Check port availability: `lsof -i :31434`
 - Review logs: `./llama-control.sh logs`
 - Restart: `./llama-control.sh restart`
 

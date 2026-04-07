@@ -26,8 +26,8 @@ if ! declare -f print_success >/dev/null 2>&1; then
 fi
 
 # Configuration
-WEBUI_PORT=8080
-OLLAMA_URL="http://host.docker.internal:3456"
+WEBUI_PORT=38080
+OLLAMA_URL="http://host.docker.internal:31434"
 CONTAINER_NAME="open-webui"
 WEBUI_IMAGE="ghcr.io/open-webui/open-webui:main"
 HEALTH_CHECK_TIMEOUT=60

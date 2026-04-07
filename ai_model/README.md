@@ -99,7 +99,7 @@ ollama pull llama3.2:3b-instruct-q8_0
 **Best for:** Testing models, demos, non-developers
 
 **Features:**
-- Browser-based at `localhost:8080`
+- Browser-based at `localhost:38080`
 - Chat interface similar to ChatGPT
 - Model switching
 - Conversation history
@@ -137,7 +137,7 @@ ollama_status
 stop_ollama_server
 
 # Health check
-curl http://localhost:11434/api/tags
+curl http://localhost:31434/api/tags
 ```
 
 ### Model Operations
@@ -384,7 +384,7 @@ Approximate tokens/second on M3 Max 64GB:
 **3. Port Already in Use**
 - **Cause:** Another Ollama instance running
 - **Solution:** `pkill ollama` or use custom port
-- **Verify:** `lsof -i :11434`
+- **Verify:** `lsof -i :31434`
 
 **4. Model Download Fails**
 - **Cause:** Network issues or disk space
