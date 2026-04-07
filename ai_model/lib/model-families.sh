@@ -61,6 +61,37 @@ is_model_allowed() {
     return 1
 }
 
+# Validate model name format to prevent command injection
+# Security: Protects against shell command injection through model names
+# Returns: 0 if valid, 1 if invalid
+is_valid_model_name() {
+    local model="$1"
+
+    # Reject empty strings
+    if [[ -z "$model" ]]; then
+        return 1
+    fi
+
+    # Reject strings longer than 100 characters
+    if [[ ${#model} -gt 100 ]]; then
+        return 1
+    fi
+
+    # Reject path traversal attempts (..)
+    if [[ "$model" == *".."* ]]; then
+        return 1
+    fi
+
+    # Only allow safe characters: alphanumeric, dash, underscore, colon, dot
+    # Reject any characters that could be used for command injection
+    if [[ ! "$model" =~ ^[a-zA-Z0-9._:-]+$ ]]; then
+        return 1
+    fi
+
+    # All checks passed
+    return 0
+}
+
 #############################################
 # Helper Functions
 #############################################
@@ -225,6 +256,7 @@ display_model_families_summary() {
 
 # Make all functions available when sourced
 export -f is_model_allowed
+export -f is_valid_model_name
 export -f list_models_by_family
 export -f get_model_info
 export -f get_recommended_models

@@ -77,7 +77,9 @@ load_preset() {
         print_error "Preset not found: $preset_name"
         print_info "Available presets:"
         if [[ -d "$SCRIPT_DIR/presets" ]]; then
-            ls -1 "$SCRIPT_DIR/presets"/*.env 2>/dev/null | xargs -n1 basename | sed 's/.env$//' || echo "  (none)"
+            find "$SCRIPT_DIR/presets" -maxdepth 1 -name "*.env" -print0 2>/dev/null | \
+                xargs -0 -n1 basename | \
+                sed 's/.env$//' || echo "  (none)"
         else
             echo "  (presets/ directory not found)"
         fi

@@ -8,6 +8,10 @@ if ! declare -f print_header >/dev/null 2>&1; then
     source "$SCRIPT_DIR/common.sh"
 fi
 
+# Source model security functions (required for input validation)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/model-families.sh"
+
 #############################################
 # Build Configuration
 #############################################
@@ -112,17 +116,19 @@ build_ollama() {
     if go build -trimpath -ldflags="-s -w" -o ollama 2>&1 | tee "$OLLAMA_LOG_FILE.build"; then
         print_status "Ollama binary built successfully"
     else
-        # Check if it's a UI build error (non-critical)
-        if grep -q "web" "$OLLAMA_LOG_FILE.build" || grep -q "node" "$OLLAMA_LOG_FILE.build"; then
-            print_warning "UI build encountered issues, but core binary may still work"
-            if [[ -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-                print_status "Core Ollama binary exists, continuing..."
+        local build_exit_code=$?
+
+        # Check for known non-critical issues (more specific patterns)
+        if grep -qE "web.*optional|node.*optional|ui.*skipped" "$OLLAMA_LOG_FILE.build"; then
+            if [[ -f "$OLLAMA_BUILD_DIR/ollama" ]] && [[ -x "$OLLAMA_BUILD_DIR/ollama" ]]; then
+                print_warning "UI build skipped, but core binary is functional"
             else
-                print_error "Failed to build Ollama binary"
+                print_error "Build failed: core binary not created (exit: $build_exit_code)"
                 return 1
             fi
         else
-            print_error "Failed to build Ollama binary"
+            print_error "Build failed with exit code: $build_exit_code"
+            cat "$OLLAMA_LOG_FILE.build"
             return 1
         fi
     fi
@@ -159,75 +165,107 @@ start_ollama_server() {
 
     print_header "Starting Ollama Server"
 
-    # Check if server is already running
-    if [[ -f "$OLLAMA_PID_FILE" ]]; then
-        local old_pid
-        old_pid=$(cat "$OLLAMA_PID_FILE")
-        if ps -p "$old_pid" > /dev/null 2>&1; then
-            print_warning "Ollama server is already running (PID: $old_pid)"
-            print_info "Use stop_ollama_server to stop it first"
-            return 0
-        else
-            print_warning "Removing stale PID file"
-            rm -f "$OLLAMA_PID_FILE"
-        fi
-    fi
+    # Check for flock availability (required for safe PID file locking)
+    if ! command -v flock &> /dev/null; then
+        print_warning "flock not found - installing automatically..."
 
-    # Check if binary exists
-    if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        print_error "Ollama binary not found at $OLLAMA_BUILD_DIR/ollama"
-        print_info "Run build_ollama first"
-        return 1
-    fi
-
-    # Ensure directories exist
-    mkdir -p ~/.local/var
-    mkdir -p ~/.local/var/log
-
-    print_info "Server configuration:"
-    print_info "  Host: $OLLAMA_HOST"
-    print_info "  Keep alive: $OLLAMA_KEEP_ALIVE"
-    print_info "  GPU layers: $OLLAMA_NUM_GPU"
-    print_info "  Max loaded models: $OLLAMA_MAX_LOADED_MODELS"
-    print_info "  Flash attention: $OLLAMA_FLASH_ATTENTION"
-    print_info "  Log file: $OLLAMA_LOG_FILE"
-
-    # Start server in background
-    print_info "Starting server..."
-    nohup "$OLLAMA_BUILD_DIR/ollama" serve > "$OLLAMA_LOG_FILE" 2>&1 &
-    local pid=$!
-
-    # Save PID
-    echo "$pid" > "$OLLAMA_PID_FILE"
-    print_status "Server started (PID: $pid)"
-
-    # Wait for server to be ready
-    print_info "Waiting for server to be ready..."
-    local max_attempts=30
-    local attempt=0
-
-    while [[ $attempt -lt $max_attempts ]]; do
-        if curl -s "http://127.0.0.1:$PORT/api/tags" > /dev/null 2>&1; then
-            print_status "Server is ready and responding"
-            print_info "Health check: http://127.0.0.1:$PORT/api/tags"
-            return 0
-        fi
-
-        # Check if process is still running
-        if ! ps -p "$pid" > /dev/null 2>&1; then
-            print_error "Server process died unexpectedly"
-            print_info "Check logs at: $OLLAMA_LOG_FILE"
-            rm -f "$OLLAMA_PID_FILE"
+        # Check if Homebrew is available
+        if ! command -v brew &> /dev/null; then
+            print_error "Homebrew is required to install flock"
+            print_info "Install Homebrew first: https://brew.sh"
             return 1
         fi
 
-        sleep 1
-        ((attempt++))
-    done
+        # Auto-install flock
+        if brew install flock; then
+            print_status "flock installed successfully"
+        else
+            print_error "Failed to install flock"
+            print_info "Try manually: brew install flock"
+            return 1
+        fi
+    fi
 
-    print_error "Server failed to respond after $max_attempts seconds"
-    print_info "Check logs at: $OLLAMA_LOG_FILE"
-    return 1
+    local lock_file="${OLLAMA_PID_FILE}.lock"
+
+    # Acquire exclusive lock to prevent race conditions
+    {
+        flock -x -n 200 || {
+            print_error "Another instance is managing the server"
+            return 1
+        }
+
+        # Now safely check and manage PID (protected by lock)
+        if [[ -f "$OLLAMA_PID_FILE" ]]; then
+            local old_pid
+            old_pid=$(cat "$OLLAMA_PID_FILE")
+            if ps -p "$old_pid" > /dev/null 2>&1; then
+                print_warning "Ollama server is already running (PID: $old_pid)"
+                print_info "Use stop_ollama_server to stop it first"
+                return 0
+            else
+                print_warning "Removing stale PID file"
+                rm -f "$OLLAMA_PID_FILE"
+            fi
+        fi
+
+        # Check if binary exists
+        if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
+            print_error "Ollama binary not found at $OLLAMA_BUILD_DIR/ollama"
+            print_info "Run build_ollama first"
+            return 1
+        fi
+
+        # Ensure directories exist
+        mkdir -p ~/.local/var
+        mkdir -p ~/.local/var/log
+
+        print_info "Server configuration:"
+        print_info "  Host: $OLLAMA_HOST"
+        print_info "  Keep alive: $OLLAMA_KEEP_ALIVE"
+        print_info "  GPU layers: $OLLAMA_NUM_GPU"
+        print_info "  Max loaded models: $OLLAMA_MAX_LOADED_MODELS"
+        print_info "  Flash attention: $OLLAMA_FLASH_ATTENTION"
+        print_info "  Log file: $OLLAMA_LOG_FILE"
+
+        # Start server in background
+        print_info "Starting server..."
+        nohup "$OLLAMA_BUILD_DIR/ollama" serve > "$OLLAMA_LOG_FILE" 2>&1 &
+        local pid=$!
+
+        # Save PID
+        echo "$pid" > "$OLLAMA_PID_FILE"
+        print_status "Server started (PID: $pid)"
+
+        # Wait for server to be ready
+        print_info "Waiting for server to be ready..."
+        local max_attempts=30
+        local attempt=0
+
+        while [[ $attempt -lt $max_attempts ]]; do
+            if curl -s "http://127.0.0.1:$PORT/api/tags" > /dev/null 2>&1; then
+                print_status "Server is ready and responding"
+                print_info "Health check: http://127.0.0.1:$PORT/api/tags"
+                return 0
+            fi
+
+            # Check if process is still running
+            if ! ps -p "$pid" > /dev/null 2>&1; then
+                print_error "Server process died unexpectedly"
+                print_info "Check logs at: $OLLAMA_LOG_FILE"
+                rm -f "$OLLAMA_PID_FILE"
+                return 1
+            fi
+
+            sleep 1
+            ((attempt++))
+        done
+
+        print_error "Server failed to respond after $max_attempts seconds"
+        print_info "Check logs at: $OLLAMA_LOG_FILE"
+        return 1
+
+    } 200>"$lock_file"
 }
 
 # Stop Ollama server gracefully
@@ -339,6 +377,14 @@ pull_model() {
     if [[ -z "$model" ]]; then
         print_error "Usage: pull_model <model_name> [context_size]"
         print_info "Example: pull_model codellama:7b 128000"
+        return 1
+    fi
+
+    # Security: Validate model name format to prevent command injection
+    if ! is_valid_model_name "$model"; then
+        print_error "Invalid model name format: $model"
+        print_info "Model names must contain only alphanumeric characters, dots, dashes, underscores, and colons"
+        print_info "Maximum length: 100 characters"
         return 1
     fi
 

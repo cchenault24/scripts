@@ -269,7 +269,13 @@ select_model_from_family() {
         else
             # Custom model name
             if [[ -n "$choice" ]]; then
-                # Validate model name with security filter
+                # Step 1: Format validation - prevents command injection
+                if ! is_valid_model_name "$choice"; then
+                    print_error "Invalid model name format. Use only letters, numbers, dots, dashes, underscores, and colons."
+                    continue
+                fi
+
+                # Step 2: Allowlist check - enforces trusted sources
                 if is_model_allowed "$choice"; then
                     SELECTED_MODEL="$choice"
                     print_warning "Custom model selected: $choice"

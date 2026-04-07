@@ -195,14 +195,79 @@ check_homebrew() {
     fi
 }
 
+# Setup Homebrew environment variables with explicit exports (security: avoid eval)
+# Returns 0 on success, 1 if Homebrew not found
+setup_homebrew_environment() {
+    if [[ -f "/opt/homebrew/bin/brew" ]]; then
+        # Apple Silicon path
+        export HOMEBREW_PREFIX="/opt/homebrew"
+        export HOMEBREW_CELLAR="/opt/homebrew/Cellar"
+        export HOMEBREW_REPOSITORY="/opt/homebrew/Homebrew"
+        export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+        export MANPATH="/opt/homebrew/share/man${MANPATH+:$MANPATH}:"
+        export INFOPATH="/opt/homebrew/share/info${INFOPATH+:$INFOPATH}"
+        return 0
+    elif [[ -f "/usr/local/bin/brew" ]]; then
+        # Intel path
+        export HOMEBREW_PREFIX="/usr/local"
+        export HOMEBREW_CELLAR="/usr/local/Cellar"
+        export HOMEBREW_REPOSITORY="/usr/local/Homebrew"
+        export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+        export MANPATH="/usr/local/share/man${MANPATH+:$MANPATH}:"
+        export INFOPATH="/usr/local/share/info${INFOPATH+:$INFOPATH}"
+        return 0
+    else
+        # Homebrew not found at expected locations
+        return 1
+    fi
+}
+
 # Install Homebrew
 install_homebrew() {
     print_info "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || return 1
 
-    # Add Homebrew to PATH for Apple Silicon
-    if [[ -f "/opt/homebrew/bin/brew" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
+    # Create secure temporary file
+    local temp_script
+    temp_script=$(mktemp) || {
+        print_error "Failed to create temporary file"
+        return 1
+    }
+
+    # Ensure cleanup on exit/interruption
+    trap 'rm -f "$temp_script"' EXIT INT TERM
+
+    # Download script to temp file with security flags
+    if ! curl -fsSL \
+        --max-time 60 \
+        --tlsv1.2 \
+        --proto '=https' \
+        https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+        -o "$temp_script"; then
+        print_error "Failed to download Homebrew installer"
+        rm -f "$temp_script"
+        return 1
+    fi
+
+    # Verify downloaded file is not empty
+    if [[ ! -s "$temp_script" ]]; then
+        print_error "Downloaded installer is empty"
+        rm -f "$temp_script"
+        return 1
+    fi
+
+    # Execute from file
+    if ! /bin/bash "$temp_script"; then
+        print_error "Homebrew installation failed"
+        rm -f "$temp_script"
+        return 1
+    fi
+
+    # Clean up temp file
+    rm -f "$temp_script"
+
+    # Setup Homebrew environment
+    if ! setup_homebrew_environment; then
+        print_warning "Homebrew installed but not found at expected location"
     fi
 
     print_status "Homebrew installed successfully"
@@ -226,8 +291,9 @@ check_prerequisites() {
     fi
 
     # Ensure Homebrew is in PATH
-    if [[ -f "/opt/homebrew/bin/brew" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || true
+    if ! setup_homebrew_environment; then
+        print_error "Homebrew not found at expected location"
+        return 1
     fi
 
     # Check and install Git
@@ -310,14 +376,30 @@ setup_directories() {
 #############################################
 
 # Export hardware information when this file is sourced
-export M_CHIP=$(detect_m_chip)
-export GPU_CORES=$(detect_gpu_cores)
-export TOTAL_RAM_GB=$(detect_ram_gb)
-export RAM_TIER=$(get_ram_tier)
-export P_CORES=$(detect_p_cores)
-export E_CORES=$(detect_e_cores)
-export TOTAL_CORES=$(detect_total_cores)
-export OPTIMAL_VRAM_MB=$(calculate_optimal_vram)
+# Separate declaration and assignment to catch failures (SC2155)
+M_CHIP=$(detect_m_chip) || M_CHIP="Unknown"
+export M_CHIP
+
+GPU_CORES=$(detect_gpu_cores) || GPU_CORES="8"
+export GPU_CORES
+
+TOTAL_RAM_GB=$(detect_ram_gb) || TOTAL_RAM_GB="16"
+export TOTAL_RAM_GB
+
+RAM_TIER=$(get_ram_tier) || RAM_TIER="tier1"
+export RAM_TIER
+
+P_CORES=$(detect_p_cores) || P_CORES="4"
+export P_CORES
+
+E_CORES=$(detect_e_cores) || E_CORES="4"
+export E_CORES
+
+TOTAL_CORES=$(detect_total_cores) || TOTAL_CORES="8"
+export TOTAL_CORES
+
+OPTIMAL_VRAM_MB=$(calculate_optimal_vram) || OPTIMAL_VRAM_MB="13000"
+export OPTIMAL_VRAM_MB
 
 # Display hardware info when sourced (optional, can be commented out)
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then

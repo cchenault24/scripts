@@ -221,6 +221,56 @@ export MODEL=llama3.2:11b-instruct-q8_0
 
 ---
 
+## Development Backup Points
+
+This section tracks backup branches and restore points created during major development work. These are temporary snapshots for safe experimentation and rollback capability.
+
+### Security Hardening Backup (Active)
+
+**Created:** 2026-04-07
+**Purpose:** Preserve pre-hardening state before applying security patches to ~5,000 lines of shell scripts
+**Scope:** All scripts in `ai_model/` directory
+
+**References:**
+- **Branch:** `backup/pre-security-hardening`
+- **Tag:** `backup-point-pre-security-hardening`
+- **Commit SHA:** `1f2eb9135f5460daba091a0e1dca2e5e505a01d2`
+- **Base:** `feature/opencode-gemma4`
+
+**View backup state:**
+```bash
+# Compare current code against backup
+git diff backup/pre-security-hardening
+
+# View specific file differences
+git diff backup/pre-security-hardening -- lib/common.sh
+
+# Inspect the backup commit
+git show backup-point-pre-security-hardening
+```
+
+**Restore backup (if security patches cause issues):**
+```bash
+# SAFE: Create new branch from backup to investigate
+git checkout backup/pre-security-hardening -b recovery-branch
+
+# SAFE: Create new branch from tag
+git checkout backup-point-pre-security-hardening -b recovery-from-tag
+
+# DESTRUCTIVE: Rollback current branch (loses all changes after backup)
+# WARNING: This will permanently discard all commits after 1f2eb91
+git reset --hard backup-point-pre-security-hardening
+
+# DESTRUCTIVE: Rollback and force push (only if you've already pushed bad commits)
+# WARNING: This rewrites history and affects other developers
+git reset --hard backup-point-pre-security-hardening
+git push --force-with-lease origin feature/opencode-gemma4
+```
+
+**Status:** Active during security hardening phase. Remove this section and delete the backup branch/tag once hardening is complete and validated.
+
+---
+
 ## Documentation
 
 Comprehensive guides available in `docs/`:
@@ -451,6 +501,7 @@ MIT License - See [LICENSE](../LICENSE) file for details.
 - Enhanced security with allowlist/blocklist
 - Added integration tests
 - Performance optimizations for Apple Silicon
+- Created backup point before security hardening (see Development Backup Points section)
 
 ---
 
