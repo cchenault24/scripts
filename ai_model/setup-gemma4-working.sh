@@ -752,6 +752,17 @@ EOF
                     rm -f /tmp/modelfile-$$
                     print_status "Created optimized model: $OPTIMIZED_MODEL"
                     OLLAMA_MODEL="$OPTIMIZED_MODEL"
+
+                    # Update OpenCode config to use optimized model
+                    CONFIG_FILE="$HOME/.config/opencode/opencode.jsonc"
+                    if [ -f "$CONFIG_FILE" ]; then
+                        print_info "Updating OpenCode config to use optimized model..."
+                        # Update the model references in the config
+                        sed -i.bak "s|\"${OLLAMA_MODEL%-*}\":|\"$OPTIMIZED_MODEL\":|g" "$CONFIG_FILE"
+                        sed -i.bak "s|ollama/${OLLAMA_MODEL%-*}|ollama/$OPTIMIZED_MODEL|g" "$CONFIG_FILE"
+                        rm -f "$CONFIG_FILE.bak"
+                        print_status "Config updated to use: $OPTIMIZED_MODEL"
+                    fi
                 else
                     rm -f /tmp/modelfile-$$
                     print_warning "Could not create optimized model, using original"
