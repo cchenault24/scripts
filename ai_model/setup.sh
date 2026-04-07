@@ -93,27 +93,15 @@ load_preset() {
 check_prerequisites() {
     print_header "Checking Prerequisites"
 
-    local missing=()
-
-    # Check for required tools
-    command -v git >/dev/null 2>&1 || missing+=("git")
-    command -v go >/dev/null 2>&1 || missing+=("go")
-    command -v cmake >/dev/null 2>&1 || missing+=("cmake")
-
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        print_error "Missing required tools: ${missing[*]}"
-        print_info "Install with: brew install ${missing[*]}"
+    # Check for Homebrew (required for installing Ollama)
+    if ! command -v brew >/dev/null 2>&1; then
+        print_error "Homebrew is not installed"
+        print_info "Install Homebrew from: https://brew.sh"
+        print_info "Then run: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
         exit 1
     fi
 
-    # Check Go version
-    local go_version
-    go_version=$(go version | awk '{print $3}' | sed 's/go//')
-    if [[ "$(printf '%s\n' "1.22" "$go_version" | sort -V | head -n1)" != "1.22" ]]; then
-        print_error "Go 1.22+ required (found: $go_version)"
-        exit 1
-    fi
-
+    print_status "Homebrew found: $(brew --version | head -1)"
     print_status "All prerequisites met"
 }
 
@@ -254,18 +242,18 @@ main() {
     echo "  GPU Cores: ${GPU_CORES:-Unknown}"
     echo ""
 
-    # IDEMPOTENCY: Check if Ollama is already built
-    if [[ -f /tmp/ollama-build/ollama ]]; then
-        print_status "Ollama binary already built at /tmp/ollama-build/ollama"
+    # IDEMPOTENCY: Check if Ollama is already installed
+    if command -v ollama &> /dev/null; then
+        print_status "Ollama already installed: $(ollama --version 2>&1 | head -1)"
         if [[ "$UNATTENDED" == "false" ]]; then
-            read -p "Rebuild Ollama? (y/N): " rebuild
-            if [[ "$rebuild" != "y" && "$rebuild" != "Y" ]]; then
-                export SKIP_BUILD=true
-                print_info "Skipping Ollama build"
+            read -p "Reinstall/upgrade Ollama? (y/N): " reinstall
+            if [[ "$reinstall" != "y" && "$reinstall" != "Y" ]]; then
+                export SKIP_INSTALL=true
+                print_info "Skipping Ollama installation"
             fi
         else
-            export SKIP_BUILD=true
-            print_info "Unattended mode: Skipping rebuild"
+            export SKIP_INSTALL=true
+            print_info "Unattended mode: Skipping reinstall"
         fi
     fi
 
@@ -283,11 +271,11 @@ main() {
     # Step 1: Prerequisites
     check_prerequisites
 
-    # Step 2: Build Ollama (if not skipped)
-    if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
-        build_ollama
+    # Step 2: Install Ollama (if not skipped)
+    if [[ "${SKIP_INSTALL:-false}" != "true" ]]; then
+        install_ollama
     else
-        print_info "Using existing Ollama build"
+        print_info "Using existing Ollama installation"
     fi
 
     # Step 3: Start server (if not already running)

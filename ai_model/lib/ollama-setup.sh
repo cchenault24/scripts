@@ -1,5 +1,5 @@
 #!/bin/bash
-# ollama-setup.sh - Build and manage Ollama with Apple Silicon optimizations
+# ollama-setup.sh - Install and manage Ollama with Apple Silicon optimizations
 # This file should be sourced, not executed directly
 
 # Source common utilities if not already loaded
@@ -13,19 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/model-families.sh"
 
 #############################################
-# Build Configuration
+# Installation Configuration
 #############################################
-export OLLAMA_BUILD_DIR="/tmp/ollama-build"
 export PORT="31434"  # High port to avoid conflicts (unlikely to conflict with dev tools)
-
-# Build flags for Apple Silicon optimization
-export CGO_CFLAGS="-O3 -march=native -mtune=native -flto -fomit-frame-pointer -DNDEBUG -funroll-loops -fvectorize"
-export CGO_LDFLAGS="-flto -framework Metal -framework Foundation -framework Accelerate"
-
-# Go build optimization
-export CGO_ENABLED=1
-export GOARCH=arm64
-export GOOS=darwin
 
 # Runtime configuration
 export OLLAMA_HOST="127.0.0.1:$PORT"
@@ -54,105 +44,70 @@ OLLAMA_PID_FILE="$HOME/.local/var/ollama-server.pid"
 OLLAMA_LOG_FILE="$HOME/.local/var/log/ollama-server.log"
 
 #############################################
-# Build Function
+# Installation Function
 #############################################
 
-# Clone and build Ollama with optimizations
-build_ollama() {
+# Install Ollama via Homebrew
+install_ollama() {
     set -euo pipefail
 
-    print_header "Building Ollama from Source"
+    print_header "Installing Ollama via Homebrew"
 
-    # Check for Go
-    if ! command -v go &> /dev/null; then
-        print_error "Go is not installed. Please install Go first."
+    # Check if Homebrew is installed
+    if ! command -v brew &> /dev/null; then
+        print_error "Homebrew is not installed"
+        print_info "Install Homebrew from: https://brew.sh"
         return 1
     fi
 
-    print_info "Go version: $(go version)"
-    print_info "Build directory: $OLLAMA_BUILD_DIR"
-    print_info "CGO_CFLAGS: $CGO_CFLAGS"
-    print_info "CGO_LDFLAGS: $CGO_LDFLAGS"
+    print_info "Homebrew version: $(brew --version | head -1)"
 
-    # Create build directory
-    mkdir -p "$OLLAMA_BUILD_DIR"
+    # Check if Ollama is already installed
+    if command -v ollama &> /dev/null; then
+        local installed_version
+        installed_version=$(ollama --version 2>&1 | head -1 || echo "unknown")
+        print_status "Ollama is already installed: $installed_version"
+        print_info "Location: $(which ollama)"
 
-    # Clone or update repository
-    if [[ -d "$OLLAMA_BUILD_DIR/.git" ]]; then
-        print_info "Updating existing Ollama repository..."
-        cd "$OLLAMA_BUILD_DIR"
-        git fetch origin || {
-            print_error "Failed to fetch updates"
-            return 1
-        }
-        git reset --hard origin/main || {
-            print_error "Failed to reset to origin/main"
-            return 1
-        }
-    else
-        print_info "Cloning Ollama repository..."
-        rm -rf "$OLLAMA_BUILD_DIR"
-        git clone https://github.com/ollama/ollama "$OLLAMA_BUILD_DIR" || {
-            print_error "Failed to clone Ollama repository"
-            return 1
-        }
-        cd "$OLLAMA_BUILD_DIR"
-    fi
-
-    print_status "Repository ready at: $OLLAMA_BUILD_DIR"
-
-    # Get current commit
-    local commit_hash
-    commit_hash=$(git rev-parse --short HEAD)
-    print_info "Building from commit: $commit_hash"
-
-    # Build the binary with optimizations
-    print_info "Building Ollama binary (this may take several minutes)..."
-
-    # Set Go environment
-    export GOARCH=arm64
-    export GOOS=darwin
-
-    if go build -trimpath -ldflags="-s -w" -o ollama 2>&1 | tee "$OLLAMA_LOG_FILE.build"; then
-        print_status "Ollama binary built successfully"
-    else
-        local build_exit_code=$?
-
-        # Check for known non-critical issues (more specific patterns)
-        if grep -qE "web.*optional|node.*optional|ui.*skipped" "$OLLAMA_LOG_FILE.build"; then
-            if [[ -f "$OLLAMA_BUILD_DIR/ollama" ]] && [[ -x "$OLLAMA_BUILD_DIR/ollama" ]]; then
-                print_warning "UI build skipped, but core binary is functional"
-            else
-                print_error "Build failed: core binary not created (exit: $build_exit_code)"
-                return 1
+        # Ask if user wants to upgrade
+        if [[ "${UNATTENDED:-false}" != "true" ]]; then
+            read -p "Upgrade to latest version? (y/N): " upgrade
+            if [[ "$upgrade" == "y" || "$upgrade" == "Y" ]]; then
+                print_info "Upgrading Ollama..."
+                if brew upgrade ollama 2>&1 | tee "$OLLAMA_LOG_FILE.install"; then
+                    print_status "Ollama upgraded successfully"
+                else
+                    print_warning "Upgrade had issues, but Ollama may still work"
+                fi
             fi
         else
-            print_error "Build failed with exit code: $build_exit_code"
-            cat "$OLLAMA_LOG_FILE.build"
-            return 1
+            print_info "Unattended mode: Skipping upgrade check"
         fi
+
+        return 0
     fi
 
-    # Verify the binary
-    if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        print_error "Ollama binary not found after build"
+    # Install Ollama
+    print_info "Installing Ollama..."
+    if brew install ollama 2>&1 | tee "$OLLAMA_LOG_FILE.install"; then
+        print_status "Ollama installed successfully"
+    else
+        print_error "Failed to install Ollama"
         return 1
     fi
 
-    print_info "Verifying binary..."
-    if "$OLLAMA_BUILD_DIR/ollama" --version 2>&1 | head -1; then
-        print_status "Binary verification successful"
-    else
-        print_warning "Version check returned non-zero, but binary may still work"
+    # Verify installation
+    if ! command -v ollama &> /dev/null; then
+        print_error "Ollama command not found after installation"
+        return 1
     fi
 
-    # Display binary info
-    local binary_size
-    binary_size=$(du -h "$OLLAMA_BUILD_DIR/ollama" | cut -f1)
-    print_status "Binary size: $binary_size"
-    print_status "Binary location: $OLLAMA_BUILD_DIR/ollama"
+    local installed_version
+    installed_version=$(ollama --version 2>&1 | head -1)
+    print_status "Installed version: $installed_version"
+    print_status "Location: $(which ollama)"
 
-    print_status "Ollama build complete"
+    print_status "Ollama installation complete"
 }
 
 #############################################
@@ -209,10 +164,10 @@ start_ollama_server() {
             fi
         fi
 
-        # Check if binary exists
-        if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-            print_error "Ollama binary not found at $OLLAMA_BUILD_DIR/ollama"
-            print_info "Run build_ollama first"
+        # Check if Ollama is installed
+        if ! command -v ollama &> /dev/null; then
+            print_error "Ollama is not installed"
+            print_info "Run install_ollama first"
             return 1
         fi
 
@@ -230,7 +185,7 @@ start_ollama_server() {
 
         # Start server in background
         print_info "Starting server..."
-        nohup "$OLLAMA_BUILD_DIR/ollama" serve > "$OLLAMA_LOG_FILE" 2>&1 &
+        nohup ollama serve > "$OLLAMA_LOG_FILE" 2>&1 &
         local pid=$!
 
         # Save PID
@@ -325,13 +280,14 @@ stop_ollama_server() {
 ollama_status() {
     print_header "Ollama Server Status"
 
-    # Check binary
-    if [[ -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        local binary_size
-        binary_size=$(du -h "$OLLAMA_BUILD_DIR/ollama" | cut -f1)
-        print_status "Binary: $OLLAMA_BUILD_DIR/ollama ($binary_size)"
+    # Check installation
+    if command -v ollama &> /dev/null; then
+        local version
+        version=$(ollama --version 2>&1 | head -1)
+        print_status "Ollama installed: $version"
+        print_status "Location: $(which ollama)"
     else
-        print_warning "Binary not found at $OLLAMA_BUILD_DIR/ollama"
+        print_warning "Ollama not installed"
     fi
 
     # Check server process
@@ -397,9 +353,9 @@ pull_model() {
         return 1
     fi
 
-    # Check if binary exists
-    if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        print_error "Ollama binary not found"
+    # Check if Ollama is installed
+    if ! command -v ollama &> /dev/null; then
+        print_error "Ollama is not installed"
         return 1
     fi
 
@@ -407,7 +363,7 @@ pull_model() {
     print_info "Target context size: $context_size"
 
     # Pull the model
-    if "$OLLAMA_BUILD_DIR/ollama" pull "$model"; then
+    if ollama pull "$model"; then
         print_status "Model pulled successfully: $model"
     else
         print_error "Failed to pull model: $model"
@@ -418,7 +374,7 @@ pull_model() {
     print_info "Model is ready to use"
     print_info "The model will use num_ctx parameter for context size"
     print_info "Example usage:"
-    print_info "  $OLLAMA_BUILD_DIR/ollama run $model"
+    print_info "  ollama run $model"
 
     print_status "Model setup complete"
 }
@@ -434,13 +390,13 @@ list_models() {
         return 1
     fi
 
-    # Check if binary exists
-    if [[ ! -f "$OLLAMA_BUILD_DIR/ollama" ]]; then
-        print_error "Ollama binary not found"
+    # Check if Ollama is installed
+    if ! command -v ollama &> /dev/null; then
+        print_error "Ollama is not installed"
         return 1
     fi
 
-    "$OLLAMA_BUILD_DIR/ollama" list
+    ollama list
 }
 
 #############################################
@@ -448,7 +404,7 @@ list_models() {
 #############################################
 
 # Make functions available when sourced
-export -f build_ollama
+export -f install_ollama
 export -f start_ollama_server
 export -f stop_ollama_server
 export -f ollama_status
