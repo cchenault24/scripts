@@ -114,9 +114,21 @@ uninstall-gemma4-working.sh # Cleanup
 - Essential for large codebases (1000+ files)
 
 ### OpenCode Integration
-- Simplified agent prompts (less overthinking)
-- Explicit file reading instructions
-- No hallucinated tools
+- **Multiple specialized agents**:
+  - `build` - Full-featured coding agent with edit permissions
+  - `review` - Code review expert (read-only, no edits)
+  - `refactor` - Refactoring specialist with safety checks
+- **Gemma 4 optimizations**:
+  - `repeat_penalty: 1.1` - Reduces repetitive responses
+  - `num_predict: 16384` - Ensures complete responses
+- **Large codebase workflows**:
+  - Context management for 10,000+ files
+  - Task tool integration for efficient exploration
+  - Few-shot examples showing correct patterns
+- **Comprehensive tool documentation**:
+  - Best practices for each tool
+  - Common mistakes to avoid
+  - Workflow guidance for different scenarios
 - Proper model name format (colons, not dashes)
 
 ## Requirements
