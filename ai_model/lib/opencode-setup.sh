@@ -88,7 +88,7 @@ install_opencode_via_curl() {
 # OpenCode Configuration Functions
 #############################################
 
-# Configure OpenCode with multi-agent setup
+# Configure OpenCode with current version format
 configure_opencode() {
     set -euo pipefail
 
@@ -96,7 +96,19 @@ configure_opencode() {
 
     local config_dir="$HOME/.config/opencode"
     local config_file="${config_dir}/opencode.jsonc"
-    local env_file="${config_dir}/opencode-env.sh"
+    local auth_dir="$HOME/.local/share/opencode"
+    local auth_file="${auth_dir}/auth.json"
+    local port="${PORT:-31434}"
+
+    # Detect installed model (prefer codestral, fallback to any model)
+    local model_name="codestral:22b-v0.1-q4_K_M"
+    if command -v ollama &> /dev/null; then
+        local available_model
+        available_model=$(ollama list 2>/dev/null | grep -E 'codestral|gemma4|llama' | head -1 | awk '{print $1}')
+        if [[ -n "$available_model" ]]; then
+            model_name="$available_model"
+        fi
+    fi
 
     # Create config directory
     print_info "Creating configuration directory..."
@@ -105,36 +117,41 @@ configure_opencode() {
         return 1
     }
 
-    # Generate multi-agent configuration
-    print_info "Generating multi-agent configuration..."
-    cat > "$config_file" << 'EOF'
-{
-  "agents": [
-    {
-      "name": "build",
-      "model": "ollama/llama3.3:70b-instruct-q4_K_M",
-      "baseURL": "http://127.0.0.1:31434/v1",
-      "maxSteps": 100
-    },
-    {
-      "name": "review",
-      "model": "ollama/llama3.3:70b-instruct-q4_K_M",
-      "baseURL": "http://127.0.0.1:31434/v1",
-      "maxSteps": 50,
-      "permissions": {
-        "edit": false
-      }
-    },
-    {
-      "name": "refactor",
-      "model": "ollama/codestral:22b-v0.1-q8_0",
-      "baseURL": "http://127.0.0.1:31434/v1",
-      "maxSteps": 100
+    # Create auth directory
+    mkdir -p "$auth_dir" || {
+        print_error "Failed to create auth directory: ${auth_dir}"
+        return 1
     }
-  ],
-  "modelParameters": {
-    "repeat_penalty": 1.1,
-    "num_predict": 16384
+
+    # Generate configuration (new format for opencode 1.3+)
+    print_info "Generating configuration for OpenCode..."
+    print_info "Using model: $model_name"
+    print_info "Using port: $port"
+
+    cat > "$config_file" <<EOF
+{
+  "agent": {
+    "default": {
+      "model": "openai/$model_name"
+    },
+    "build": {
+      "model": "openai/$model_name"
+    }
+  },
+  "mode": {},
+  "plugin": [],
+  "command": {}
+}
+EOF
+
+    # Configure OpenAI-compatible provider for Ollama
+    print_info "Configuring OpenAI-compatible provider for Ollama..."
+    cat > "$auth_file" <<EOF
+{
+  "openai": {
+    "type": "openai",
+    "key": "sk-dummy",
+    "baseURL": "http://127.0.0.1:${port}/v1"
   }
 }
 EOF
@@ -144,41 +161,55 @@ EOF
         return 1
     fi
 
-    print_status "Configuration file created: ${config_file}"
-
-    # Generate environment variables file
-    print_info "Creating environment variables file..."
-    cat > "$env_file" << 'EOF'
-#!/bin/bash
-# OpenCode Environment Variables
-# Source this file to load OpenCode environment settings
-
-# Performance optimizations
-export UV_SYSTEM_PYTHON=1
-export NODE_OPTIONS="--max-old-space-size=4096"
-
-# Optional: Add OpenCode to PATH if installed in custom location
-# export PATH="$HOME/.opencode/bin:$PATH"
-EOF
-
-    if [[ ! -f "$env_file" ]]; then
-        print_error "Failed to create environment file"
+    if [[ ! -f "$auth_file" ]]; then
+        print_error "Failed to create auth file"
         return 1
     fi
 
-    chmod +x "$env_file"
-    print_status "Environment file created: ${env_file}"
+    print_status "Configuration file created: ${config_file}"
+    print_status "Auth file created: ${auth_file}"
 
-    # Validate JSON configuration
-    print_info "Validating configuration..."
-    if command -v python3 &> /dev/null; then
-        if python3 -c "import json; json.load(open('${config_file}'))" 2>/dev/null; then
-            print_status "Configuration is valid JSON"
+    # Configure environment variables for OpenCode
+    print_info "Configuring environment variables..."
+    local shell_config=""
+    local current_shell="${SHELL##*/}"
+
+    case "$current_shell" in
+        zsh) shell_config="$HOME/.zshrc" ;;
+        bash)
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                shell_config="$HOME/.bash_profile"
+            else
+                shell_config="$HOME/.bashrc"
+            fi
+            ;;
+    esac
+
+    if [[ -n "$shell_config" ]]; then
+        # Add OpenCode environment variables if not already present
+        if ! grep -q "OPENAI_BASE_URL.*127.0.0.1:${port}" "$shell_config" 2>/dev/null; then
+            cat >> "$shell_config" <<'ENVEOF'
+
+# OpenCode Ollama configuration (added by ai_model setup)
+export OPENAI_API_KEY="sk-dummy"
+export OPENAI_BASE_URL="http://127.0.0.1:${PORT:-31434}/v1"
+ENVEOF
+            print_status "Added OpenCode environment variables to ${shell_config}"
         else
-            print_warning "Configuration validation failed (may be due to JSONC comments)"
+            print_info "OpenCode environment variables already configured"
         fi
+
+        # Export for current session
+        export OPENAI_API_KEY="sk-dummy"
+        export OPENAI_BASE_URL="http://127.0.0.1:${port}/v1"
+    fi
+
+    # Validate configuration
+    print_info "Validating configuration..."
+    if opencode debug config &>/dev/null; then
+        print_status "Configuration is valid"
     else
-        print_info "Skipping JSON validation (python3 not available)"
+        print_warning "Configuration validation had issues (may still work)"
     fi
 
     print_status "OpenCode configuration complete"
@@ -315,19 +346,27 @@ setup_opencode() {
 
     # Display usage information
     print_info "Usage:"
-    echo "  Run: opencode \"your prompt here\""
+    echo "  Run TUI: opencode"
+    echo "  Run with message: opencode run \"your prompt here\""
     echo "  Config: ~/.config/opencode/opencode.jsonc"
-    echo "  Environment: source ~/.config/opencode/opencode-env.sh"
+    echo "  Auth: ~/.local/share/opencode/auth.json"
     echo ""
-    print_info "Available agents:"
-    echo "  - build: Llama 3.3 70B (100 steps, full permissions)"
-    echo "  - review: Llama 3.3 70B (50 steps, read-only)"
-    echo "  - refactor: Codestral 22B (100 steps, full permissions)"
+    print_info "Configuration:"
+    echo "  Provider: openai (OpenAI-compatible)"
+    echo "  Model: $model_name"
+    echo "  Base URL: http://127.0.0.1:${port}/v1"
     echo ""
-    print_info "To use a specific agent:"
-    echo "  opencode --agent build \"your prompt\""
-    echo "  opencode --agent review \"your prompt\""
-    echo "  opencode --agent refactor \"your prompt\""
+    print_info "Environment Variables:"
+    echo "  OPENAI_API_KEY=sk-dummy"
+    echo "  OPENAI_BASE_URL=http://127.0.0.1:${port}/v1"
+    echo ""
+    print_warning "KNOWN ISSUE: OpenCode v1.3.17 may have compatibility issues with Ollama"
+    echo "  - Model discovery may fail even with correct configuration"
+    echo "  - Consider using Continue.dev or Open WebUI as alternatives"
+    echo ""
+    print_info "Verify setup:"
+    echo "  opencode providers list"
+    echo "  opencode debug config"
 
     return 0
 }
