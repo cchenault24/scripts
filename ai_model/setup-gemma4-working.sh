@@ -103,24 +103,23 @@ select_model() {
     print_info "Detected system RAM: ${TOTAL_RAM_GB}GB"
     echo ""
 
-    # Check for already installed models
+    # Check for already installed models (server should be running at this point)
     INSTALLED_MODELS=""
 
-    # Try 1: Check if server is already running
     if curl -s -m 2 http://127.0.0.1:$PORT/api/tags >/dev/null 2>&1; then
         INSTALLED_MODELS=$(curl -s http://127.0.0.1:$PORT/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | grep "^gemma4:" || true)
-    # Try 2: Check Ollama model directory directly
-    elif [ -d "$HOME/.ollama/models/manifests/registry.ollama.ai/library/gemma4" ]; then
-        INSTALLED_MODELS=$(find "$HOME/.ollama/models/manifests/registry.ollama.ai/library/gemma4" -type f 2>/dev/null | while read -r file; do
-            tag=$(basename "$(dirname "$file")")
-            # Skip 'latest' tag and only show actual version tags
-            if [ "$tag" != "latest" ] && [ "$tag" != "gemma4" ]; then
-                echo "gemma4:$tag"
-            fi
-        done | sort -u || true)
-    # Try 3: Use ollama binary if it exists
-    elif [ -f "$OLLAMA_BUILD_DIR/ollama" ]; then
-        INSTALLED_MODELS=$("$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep "^gemma4:" | awk '{print $1}' || true)
+
+        if [ -n "$INSTALLED_MODELS" ]; then
+            echo ""
+            print_status "Detected installed models:"
+            echo "$INSTALLED_MODELS" | while IFS= read -r model; do
+                echo "  • $model"
+            done
+            echo ""
+        fi
+    else
+        print_warning "Cannot detect installed models (server not reachable)"
+        echo ""
     fi
 
     # Define available models with sizes and recommendations
@@ -358,6 +357,43 @@ else
     else
         print_error "Binary verification failed - build may have issues"
         exit 1
+    fi
+
+    # Start server so model detection works
+    echo ""
+    print_info "Starting Ollama server for model detection..."
+
+    # Create log directory
+    LOG_DIR="$HOME/.local/var/log"
+    mkdir -p "$LOG_DIR"
+
+    # Check if port is already in use
+    if lsof -ti:$PORT >/dev/null 2>&1; then
+        print_info "Server already running on port $PORT"
+    else
+        # Start server in background
+        OLLAMA_HOST=127.0.0.1:$PORT \
+        OLLAMA_KEEP_ALIVE=-1 \
+        OLLAMA_NUM_GPU=999 \
+        OLLAMA_MAX_LOADED_MODELS=1 \
+        OLLAMA_FLASH_ATTENTION=1 \
+        nohup "$OLLAMA_BUILD_DIR/ollama" serve \
+            > "$LOG_DIR/ollama-server.log" 2>&1 &
+
+        SERVER_PID=$!
+        echo "$SERVER_PID" > "$HOME/.local/var/ollama-server.pid"
+
+        print_status "Server started (PID: $SERVER_PID)"
+
+        # Wait for server to be ready
+        print_info "Waiting for server to be ready..."
+        for i in {1..30}; do
+            if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+                print_status "Server is ready!"
+                break
+            fi
+            sleep 1
+        done
     fi
 fi
 

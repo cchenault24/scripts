@@ -87,6 +87,43 @@ build_ollama() {
         return 1
     fi
 
+    # Start server so model detection works
+    echo ""
+    print_info "Starting Ollama server for model detection..."
+
+    # Create log directory
+    LOG_DIR="$HOME/.local/var/log"
+    mkdir -p "$LOG_DIR"
+
+    # Check if port is already in use
+    if lsof -ti:$PORT >/dev/null 2>&1; then
+        print_info "Server already running on port $PORT"
+    else
+        # Start server in background
+        OLLAMA_HOST=127.0.0.1:$PORT \
+        OLLAMA_KEEP_ALIVE=-1 \
+        OLLAMA_NUM_GPU=999 \
+        OLLAMA_MAX_LOADED_MODELS=1 \
+        OLLAMA_FLASH_ATTENTION=1 \
+        nohup "$OLLAMA_BUILD_DIR/ollama" serve \
+            > "$LOG_DIR/ollama-server.log" 2>&1 &
+
+        SERVER_PID=$!
+        echo "$SERVER_PID" > "$HOME/.local/var/ollama-server.pid"
+
+        print_status "Server started (PID: $SERVER_PID)"
+
+        # Wait for server to be ready
+        print_info "Waiting for server to be ready..."
+        for i in {1..30}; do
+            if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+                print_status "Server is ready!"
+                break
+            fi
+            sleep 1
+        done
+    fi
+
     echo ""
 }
 
@@ -99,14 +136,21 @@ start_ollama_server() {
 
     print_header "Starting Ollama Server"
 
+    # Check if server is already running and healthy
+    if curl -s -f "http://127.0.0.1:$PORT/api/tags" >/dev/null 2>&1; then
+        print_status "Server already running and responding"
+        echo ""
+        return 0
+    fi
+
     # Create log directory
     LOG_DIR="$HOME/.local/var/log"
     mkdir -p "$LOG_DIR"
 
-    # Check if port is already in use
+    # Check if port is in use but not responding (stale process)
     if lsof -ti:$PORT >/dev/null 2>&1; then
-        print_warning "Port $PORT is already in use"
-        print_info "Killing existing process..."
+        print_warning "Port $PORT is in use but server not responding"
+        print_info "Killing stale process..."
         lsof -ti:$PORT | xargs kill -9
         sleep 2
     fi
