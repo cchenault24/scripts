@@ -141,12 +141,17 @@ uninstall-gemma4-working.sh # Cleanup
 
 ### OpenCode Integration
 - **Multiple specialized agents**:
-  - `build` - Full-featured coding agent with edit permissions
-  - `review` - Code review expert (read-only, no edits)
-  - `refactor` - Refactoring specialist with safety checks
+  - `build` - Full-featured coding agent with edit permissions (100 steps max)
+  - `review` - Code review expert (read-only, no edits, 50 steps max)
+  - `refactor` - Refactoring specialist with safety checks (100 steps max)
 - **Gemma 4 optimizations**:
   - `repeat_penalty: 1.1` - Reduces repetitive responses
   - `num_predict: 16384` - Ensures complete responses
+- **Performance optimizations**:
+  - Production build with minification and tree-shaking
+  - Extended timeouts (10 min provider, 1 min chunks)
+  - Step limits to prevent runaway loops
+  - Environment variables for 10-20% faster file operations
 - **Large codebase workflows**:
   - Context management for 10,000+ files
   - Task tool integration for efficient exploration
@@ -171,15 +176,32 @@ Dependencies auto-installed: `git`, `go`, `bun`
 ```
 ~/.config/opencode/
 ├── opencode.jsonc          # Main configuration
+├── opencode-env.sh         # Performance environment variables
 ├── AGENTS.md               # Agent instructions
 └── prompts/
-    └── build.txt           # Build agent prompt
+    ├── build.txt           # Build agent prompt
+    ├── review.txt          # Review agent prompt
+    └── refactor.txt        # Refactor agent prompt
 
 ~/.local/var/
 ├── ollama-server.pid       # Server PID
 └── log/
     └── ollama-server.log   # Server logs
 ```
+
+### Performance Environment Variables
+
+For optimal OpenCode performance, add to your `~/.zshrc` or `~/.bashrc`:
+
+```bash
+[ -f ~/.config/opencode/opencode-env.sh ] && source ~/.config/opencode/opencode-env.sh
+```
+
+This enables:
+- 10-20% faster file operations
+- 10-minute timeout for long-running commands
+- Faster startup (skips models.dev fetch)
+- More efficient file change detection
 
 ## Troubleshooting
 

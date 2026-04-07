@@ -58,8 +58,9 @@ install_opencode() {
                 print_error "packages/opencode directory not found"
                 exit 1
             }
-            print_info "Building OpenCode binary (this may take 3-5 minutes)..."
-            bun run build -- --single --skip-install || {
+            print_info "Building OpenCode binary with production optimizations..."
+            print_info "Enabling: minification, tree-shaking, production mode"
+            bun run build -- --single --skip-install --production || {
                 print_error "Failed to build OpenCode"
                 exit 1
             }
@@ -153,6 +154,8 @@ configure_opencode() {
       "name": "Ollama (local)",
       "options": {
         "baseURL": "http://127.0.0.1:3456/v1",
+        "timeout": 600000,
+        "chunkTimeout": 60000,
         "toolParser": [
           { "type": "raw-function-call" },
           { "type": "json" }
@@ -181,6 +184,7 @@ configure_opencode() {
   "agent": {
     "build": {
       "prompt": "{file:./prompts/build.txt}",
+      "steps": 100,
       "permission": {
         "edit": "allow",
         "bash": "allow",
@@ -190,6 +194,7 @@ configure_opencode() {
     },
     "review": {
       "prompt": "{file:./prompts/review.txt}",
+      "steps": 50,
       "permission": {
         "edit": "deny",
         "bash": "allow",
@@ -199,6 +204,7 @@ configure_opencode() {
     },
     "refactor": {
       "prompt": "{file:./prompts/refactor.txt}",
+      "steps": 100,
       "permission": {
         "edit": "allow",
         "bash": "allow",
@@ -612,6 +618,37 @@ For large refactorings:
 EOF
 
     print_status "Created: $CONFIG_DIR/prompts/refactor.txt"
+
+    print_info "Creating performance environment variables..."
+    cat > "$CONFIG_DIR/opencode-env.sh" <<'EOF'
+#!/bin/bash
+#
+# OpenCode Performance Environment Variables
+# Source this file before running opencode for optimal performance:
+#   source ~/.config/opencode/opencode-env.sh && opencode
+#
+# Or add to your ~/.zshrc or ~/.bashrc:
+#   [ -f ~/.config/opencode/opencode-env.sh ] && source ~/.config/opencode/opencode-env.sh
+#
+
+# Disable file time checks (10-20% faster file operations)
+export OPENCODE_DISABLE_FILETIME_CHECK=true
+
+# Increase bash tool timeout for long-running operations (10 minutes)
+export OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS=600000
+
+# Skip models.dev fetch on startup (2-5s faster startup)
+export OPENCODE_DISABLE_MODELS_FETCH=true
+
+# Disable terminal title updates (minor overhead reduction)
+export OPENCODE_DISABLE_TERMINAL_TITLE=true
+
+# Enable experimental file watcher (more efficient file change detection)
+export OPENCODE_EXPERIMENTAL_FILEWATCHER=true
+EOF
+
+    chmod +x "$CONFIG_DIR/opencode-env.sh"
+    print_status "Created: $CONFIG_DIR/opencode-env.sh"
 
     echo ""
 

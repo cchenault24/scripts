@@ -85,6 +85,9 @@ main() {
     echo ""
     print_info "Server control: $SCRIPT_DIR/llama-control.sh {start|stop|restart|status|logs|models}"
     echo ""
+    print_info "Performance: For optimal OpenCode performance, add to ~/.zshrc:"
+    print_info "  [ -f ~/.config/opencode/opencode-env.sh ] && source ~/.config/opencode/opencode-env.sh"
+    echo ""
 }
 
 install_embedding_model() {
