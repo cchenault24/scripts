@@ -175,6 +175,33 @@ Dependencies auto-installed: `git`, `go`, `bun`
 
 ## Troubleshooting
 
+### UI build error during Ollama compilation
+
+**Symptom:** See `tsc: command not found` during build
+
+**Status:** This is expected and non-critical
+
+**Explanation:**
+- Ollama has an optional embedded web UI that requires TypeScript
+- The UI build may fail if npm packages aren't installed
+- This is fine - Ollama works perfectly as an API server (which OpenCode uses)
+- The script detects this and continues
+
+**To verify build succeeded:**
+```bash
+/tmp/ollama-build/ollama --version  # Should show version
+./llama-control.sh status           # Should show running server
+```
+
+**To fix UI build (optional):**
+```bash
+cd /tmp/ollama-build/app/ui
+npm install
+npm run build
+cd ../..
+go build -trimpath -ldflags="-s -w" .
+```
+
 ### Server not responding
 ```bash
 ./llama-control.sh logs     # Check logs

@@ -346,8 +346,15 @@ else
     export CGO_LDFLAGS="-flto -framework Metal -framework Foundation -framework Accelerate"
 
     # Generate C++ components with Metal support
-    go generate ./... || {
-        print_warning "go generate had some warnings, continuing..."
+    print_info "Generating C++ components and optional UI..."
+    go generate ./... 2>&1 | tee /tmp/ollama-generate.log || {
+        # Check if it's just the UI build that failed
+        if grep -q "tsc: command not found\|npm.*exit status" /tmp/ollama-generate.log; then
+            print_info "UI build skipped (TypeScript not installed - this is fine)"
+            print_info "Ollama will work as API server (which is all OpenCode needs)"
+        else
+            print_warning "go generate had some warnings, continuing..."
+        fi
     }
 
     # Build with optimizations
@@ -359,6 +366,16 @@ else
 
     print_status "Ollama built successfully"
     "$OLLAMA_BUILD_DIR/ollama" --version
+
+    # Verify the binary works
+    echo ""
+    print_info "Verifying Ollama binary..."
+    if "$OLLAMA_BUILD_DIR/ollama" --version >/dev/null 2>&1; then
+        print_status "Binary verification passed - ready to serve models"
+    else
+        print_error "Binary verification failed - build may have issues"
+        exit 1
+    fi
 fi
 
 echo ""
