@@ -208,7 +208,67 @@ setup_continue() {
     "provider": "ollama",
     "model": "llama3.2:3b-instruct-q8_0",
     "apiBase": "http://127.0.0.1:31434"
-  }
+  },
+  "embeddingsProvider": {
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "apiBase": "http://127.0.0.1:31434"
+  },
+  "reranker": {
+    "name": "free-trial"
+  },
+  "contextProviders": [
+    {
+      "name": "code",
+      "params": {}
+    },
+    {
+      "name": "docs",
+      "params": {}
+    },
+    {
+      "name": "diff",
+      "params": {}
+    },
+    {
+      "name": "terminal",
+      "params": {}
+    },
+    {
+      "name": "problems",
+      "params": {}
+    },
+    {
+      "name": "folder",
+      "params": {}
+    },
+    {
+      "name": "codebase",
+      "params": {}
+    }
+  ],
+  "slashCommands": [
+    {
+      "name": "edit",
+      "description": "Edit selected code"
+    },
+    {
+      "name": "comment",
+      "description": "Write comments for the selected code"
+    },
+    {
+      "name": "share",
+      "description": "Export the current chat session to markdown"
+    },
+    {
+      "name": "cmd",
+      "description": "Generate a shell command"
+    },
+    {
+      "name": "commit",
+      "description": "Generate a commit message"
+    }
+  ]
 }
 EOF
 
@@ -248,7 +308,7 @@ EOF
     echo ""
     print_info "Next steps:"
     echo "  1. Install Continue.dev extension in your IDE (if not already installed)"
-    echo "  2. Ensure Ollama is running on port 3456"
+    echo "  2. Ensure Ollama is running on port 31434 (http://127.0.0.1:31434)"
     echo "  3. Restart your IDE to load the new configuration"
 }
 
