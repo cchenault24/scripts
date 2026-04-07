@@ -159,6 +159,12 @@ get_installed_models() {
 # Generate Continue config with installed models
 generate_continue_config() {
     local ollama_url="${1:-http://127.0.0.1:31434}"
+
+    # Ensure URL has http:// prefix
+    if [[ ! "$ollama_url" =~ ^https?:// ]]; then
+        ollama_url="http://${ollama_url}"
+    fi
+
     # Continue.dev requires the OpenAI-compatible /v1 endpoint
     local continue_url="${ollama_url}/v1"
 
@@ -327,7 +333,9 @@ setup_continue() {
 
     local config_dir="$HOME/.continue"
     local config_file="$config_dir/config.json"
-    local ollama_url="${OLLAMA_HOST:-http://127.0.0.1:31434}"
+    # Use PORT from ollama-setup.sh, or default to 31434
+    local port="${PORT:-31434}"
+    local ollama_url="http://127.0.0.1:${port}"
 
     # Create config directory if it doesn't exist
     if [[ ! -d "$config_dir" ]]; then
