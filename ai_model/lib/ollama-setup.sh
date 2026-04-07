@@ -141,15 +141,19 @@ pull_and_optimize_model() {
     local model_name="$1"
     local context_size="$2"
 
-    print_header "Pulling Model: $model_name"
+    print_header "Model Setup: $model_name"
 
     print_info "Checking if model is already available..."
 
     # Set OLLAMA_HOST for the CLI commands
     export OLLAMA_HOST="127.0.0.1:$PORT"
 
-    if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep -q "$model_name"; then
-        print_status "Model $model_name already pulled"
+    # Check if base model exists
+    MODEL_EXISTS=false
+    if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep -q "^$model_name"; then
+        MODEL_EXISTS=true
+        print_status "Model $model_name already installed"
+        print_info "Skipping download..."
     else
         # Estimate size based on model name
         MODEL_SIZE="unknown size"
@@ -171,13 +175,29 @@ pull_and_optimize_model() {
         if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" pull "$model_name"; then
             echo ""
             print_status "Model $model_name pulled successfully"
+            MODEL_EXISTS=true
+        else
+            echo ""
+            print_error "Failed to pull model"
+            print_info "You can pull it manually later with:"
+            print_info "  OLLAMA_HOST=127.0.0.1:$PORT $OLLAMA_BUILD_DIR/ollama pull $model_name"
+            return 1
+        fi
+    fi
 
-            # Create optimized model with proper context size
-            print_info "Creating optimized model with $context_size token context..."
-            MODEL_SUFFIX=$(echo "$model_name" | grep -q "26b\|31b" && echo "256k" || echo "128k")
-            OPTIMIZED_MODEL="${model_name}-${MODEL_SUFFIX}"
+    # Create or recreate optimized model (always run this, even if base model existed)
+    if [ "$MODEL_EXISTS" = true ]; then
+        echo ""
+        print_info "Creating optimized model with $context_size token context..."
+        MODEL_SUFFIX=$(echo "$model_name" | grep -q "26b\|31b" && echo "256k" || echo "128k")
+        OPTIMIZED_MODEL="${model_name}-${MODEL_SUFFIX}"
 
-            cat > /tmp/modelfile-$$ << EOF
+        # Check if optimized model already exists
+        if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep -q "^$OPTIMIZED_MODEL"; then
+            print_info "Optimized model already exists, recreating with latest settings..."
+        fi
+
+        cat > /tmp/modelfile-$$ << EOF
 FROM $model_name
 PARAMETER num_ctx $context_size
 PARAMETER temperature 0.7
@@ -185,31 +205,25 @@ PARAMETER top_k 64
 PARAMETER top_p 0.95
 EOF
 
-            if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" create "$OPTIMIZED_MODEL" -f /tmp/modelfile-$$ >/dev/null 2>&1; then
-                rm -f /tmp/modelfile-$$
-                print_status "Created optimized model: $OPTIMIZED_MODEL"
-                export OLLAMA_MODEL="$OPTIMIZED_MODEL"
+        if OLLAMA_HOST="127.0.0.1:$PORT" "$OLLAMA_BUILD_DIR/ollama" create "$OPTIMIZED_MODEL" -f /tmp/modelfile-$$ >/dev/null 2>&1; then
+            rm -f /tmp/modelfile-$$
+            print_status "Created optimized model: $OPTIMIZED_MODEL"
+            export OLLAMA_MODEL="$OPTIMIZED_MODEL"
 
-                # Update OpenCode config to use optimized model
-                CONFIG_FILE="$HOME/.config/opencode/opencode.jsonc"
-                if [ -f "$CONFIG_FILE" ]; then
-                    print_info "Updating OpenCode config to use optimized model..."
-                    # Update the model references in the config
-                    sed -i.bak "s|\"${model_name}\":|\"$OPTIMIZED_MODEL\":|g" "$CONFIG_FILE"
-                    sed -i.bak "s|ollama/${model_name}|ollama/$OPTIMIZED_MODEL|g" "$CONFIG_FILE"
-                    rm -f "$CONFIG_FILE.bak"
-                    print_status "Config updated to use: $OPTIMIZED_MODEL"
-                fi
-            else
-                rm -f /tmp/modelfile-$$
-                print_warning "Could not create optimized model, using original"
+            # Update OpenCode config to use optimized model
+            CONFIG_FILE="$HOME/.config/opencode/opencode.jsonc"
+            if [ -f "$CONFIG_FILE" ]; then
+                print_info "Updating OpenCode config to use optimized model..."
+                # Update the model references in the config
+                sed -i.bak "s|\"${model_name}\":|\"$OPTIMIZED_MODEL\":|g" "$CONFIG_FILE"
+                sed -i.bak "s|ollama/${model_name}|ollama/$OPTIMIZED_MODEL|g" "$CONFIG_FILE"
+                rm -f "$CONFIG_FILE.bak"
+                print_status "Config updated to use: $OPTIMIZED_MODEL"
             fi
         else
-            echo ""
-            print_error "Failed to pull model"
-            print_info "You can pull it manually later with:"
-            print_info "  OLLAMA_HOST=127.0.0.1:$PORT $OLLAMA_BUILD_DIR/ollama pull $model_name"
-            return 1
+            rm -f /tmp/modelfile-$$
+            print_warning "Could not create optimized model, using base model"
+            export OLLAMA_MODEL="$model_name"
         fi
     fi
 

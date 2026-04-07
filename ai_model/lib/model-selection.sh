@@ -13,32 +13,69 @@ select_model() {
 
     # Check for already installed models
     INSTALLED_MODELS=""
-    if curl -s http://127.0.0.1:$PORT/api/tags >/dev/null 2>&1; then
-        print_info "Checking already installed models..."
-        INSTALLED_MODELS=$(curl -s http://127.0.0.1:$PORT/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | grep "^gemma4:" || true)
 
-        if [ -n "$INSTALLED_MODELS" ]; then
-            echo ""
-            echo -e "${GREEN}Already Installed:${NC}"
-            echo "$INSTALLED_MODELS" | while IFS= read -r model; do
-                # Check if optimized variant exists
-                if echo "$model" | grep -q "\-128k\|\-256k"; then
-                    echo "  ✓ $model ${DIM}(optimized)${NC}"
-                else
-                    echo "  ✓ $model"
-                fi
-            done
-            echo ""
-        fi
+    # Try 1: Check if server is already running
+    if curl -s -m 2 http://127.0.0.1:$PORT/api/tags >/dev/null 2>&1; then
+        print_info "Checking already installed models (server running)..."
+        INSTALLED_MODELS=$(curl -s http://127.0.0.1:$PORT/api/tags | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | grep "^gemma4:" || true)
+    # Try 2: Check Ollama model directory directly
+    elif [ -d "$HOME/.ollama/models/manifests/registry.ollama.ai/library" ]; then
+        print_info "Checking already installed models (local storage)..."
+        INSTALLED_MODELS=$(find "$HOME/.ollama/models/manifests/registry.ollama.ai/library" -type d -name "gemma4" 2>/dev/null | while read -r dir; do
+            if [ -d "$dir" ]; then
+                find "$dir" -type f 2>/dev/null | while read -r file; do
+                    basename "$(dirname "$file")" | sed 's/^/gemma4:/'
+                done
+            fi
+        done | sort -u || true)
+    # Try 3: Use ollama binary if it exists
+    elif [ -f "$OLLAMA_BUILD_DIR/ollama" ]; then
+        print_info "Checking already installed models (ollama list)..."
+        INSTALLED_MODELS=$("$OLLAMA_BUILD_DIR/ollama" list 2>/dev/null | grep "^gemma4:" | awk '{print $1}' || true)
+    fi
+
+    if [ -n "$INSTALLED_MODELS" ]; then
+        echo ""
+        echo -e "${GREEN}Already Installed:${NC}"
+        echo "$INSTALLED_MODELS" | while IFS= read -r model; do
+            # Check if optimized variant exists
+            if echo "$model" | grep -q "\-128k\|\-256k"; then
+                echo "  ✓ $model ${DIM}(optimized)${NC}"
+            else
+                echo "  ✓ $model ${DIM}(base)${NC}"
+            fi
+        done
+        echo ""
     fi
 
     # Define available models with sizes and recommendations
     echo -e "${YELLOW}Available Gemma 4 Models (https://ollama.com/library/gemma4/tags):${NC}"
     echo ""
 
-    # Function to check if model is installed
+    # Function to check if model is installed (checks both base and optimized variants)
     is_installed() {
-        echo "$INSTALLED_MODELS" | grep -q "^$1$" && echo " ${GREEN}[INSTALLED]${NC}" || echo ""
+        local model="$1"
+        local has_base=false
+        local has_optimized=false
+
+        # Check for base model
+        if echo "$INSTALLED_MODELS" | grep -q "^${model}$"; then
+            has_base=true
+        fi
+
+        # Check for optimized variant (128k or 256k)
+        if echo "$INSTALLED_MODELS" | grep -q "^${model}-128k$\|^${model}-256k$"; then
+            has_optimized=true
+        fi
+
+        # Display status
+        if [ "$has_optimized" = true ]; then
+            echo " ${GREEN}[INSTALLED - OPTIMIZED]${NC}"
+        elif [ "$has_base" = true ]; then
+            echo " ${GREEN}[INSTALLED - BASE]${NC}"
+        else
+            echo ""
+        fi
     }
 
     echo -e "${BLUE}Small Models (128K context):${NC}"

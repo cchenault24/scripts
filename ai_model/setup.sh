@@ -32,16 +32,16 @@ main() {
     # Step 0: Check prerequisites
     check_prerequisites
 
-    # Step 1: Model Selection
+    # Step 1: Build Ollama (before model selection so we can detect installed models)
+    build_ollama
+
+    # Step 2: Model Selection (after Ollama is built so we can use it to list models)
     if [ -z "${OLLAMA_MODEL:-}" ]; then
         select_model
     else
         print_info "Using model from environment: $OLLAMA_MODEL"
         echo ""
     fi
-
-    # Step 2: Build Ollama
-    build_ollama
 
     # Step 3: Install/Configure OpenCode
     # Call original setup script for OpenCode setup (Steps 2-3)
