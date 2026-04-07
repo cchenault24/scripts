@@ -29,7 +29,7 @@ fi
 WEBUI_PORT=38080
 OLLAMA_URL="http://host.docker.internal:31434"
 CONTAINER_NAME="open-webui"
-WEBUI_IMAGE="ghcr.io/open-webui/open-webui:main"
+WEBUI_IMAGE="ghcr.io/open-webui/open-webui:webui_main"
 HEALTH_CHECK_TIMEOUT=60
 
 # Check if Docker is installed and running
@@ -184,7 +184,7 @@ configure_webui() {
 }
 
 # Main execution
-main() {
+webui_main() {
     echo ""
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}          ${GREEN}Open WebUI Setup${NC}                                    ${BLUE}║${NC}"
@@ -225,10 +225,10 @@ main() {
 
 # Wrapper function to be called from orchestrator
 setup_webui() {
-    main "$@"
+    webui_main "$@"
 }
 
-# Only run main if executed directly (not sourced)
+# Only run webui_main if executed directly (not sourced)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+    webui_main "$@"
 fi
