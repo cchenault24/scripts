@@ -159,6 +159,8 @@ get_installed_models() {
 # Generate Continue config with installed models
 generate_continue_config() {
     local ollama_url="${1:-http://127.0.0.1:31434}"
+    # Continue.dev requires the OpenAI-compatible /v1 endpoint
+    local continue_url="${ollama_url}/v1"
 
     print_info "Detecting installed models..." >&2
 
@@ -226,7 +228,7 @@ for model in data.get('models', []):
       "title": "$title",
       "provider": "ollama",
       "model": "$model_name",
-      "apiUrl": "$ollama_url"
+      "apiUrl": "$continue_url"
     }
 EOF
 )
@@ -243,7 +245,7 @@ EOF
     "title": "Fast Autocomplete",
     "provider": "ollama",
     "model": "$autocomplete_model",
-    "apiUrl": "$ollama_url"
+    "apiUrl": "$continue_url"
   }
 EOF
 )
@@ -256,7 +258,7 @@ EOF
   "embeddingsProvider": {
     "provider": "ollama",
     "model": "nomic-embed-text",
-    "apiUrl": "$ollama_url"
+    "apiUrl": "$continue_url"
   },
   "reranker": {
     "name": "free-trial"
