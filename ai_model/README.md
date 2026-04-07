@@ -1,233 +1,194 @@
-# Gemma 4 + llama.cpp + OpenCode Setup
+# Gemma 4 + Ollama + OpenCode Setup
 
-Automated setup for **Gemma 4 26B** with **llama.cpp** and **OpenCode** on macOS. This is a proven working configuration that avoids current Ollama and OpenCode compatibility issues.
+Automated setup for running Gemma 4 models locally with Ollama and OpenCode on Apple Silicon.
 
-## 🎯 Overview
-
-This project provides a **minimal, bash-only** setup for running Gemma 4 26B locally with OpenCode, bypassing known issues:
-- ✅ **llama.cpp** with Gemma 4 tokenizer fixes (PR #21343)
-- ✅ **OpenCode** with tool-call compatibility layer (PR #16531)
-- ✅ **Automatic SSL certificate support** for corporate networks
-- ✅ **Automatic model download and server startup**
-- ✅ **Comprehensive uninstaller** for clean removal
-- ✅ **No Python dependencies** - self-contained bash scripts
-
-**Based on**: [daniel-farina's proven guide](https://gist.github.com/daniel-farina/87dc1c394b94e45bb700d27e9ea03193)
-
-## ✨ Why This Setup?
-
-**As of April 2026:**
-
-- **Ollama v0.20.0** has Gemma 4 bugs:
-  - Tool call parser crashes ([#15241](https://github.com/ollama/ollama/issues/15241))
-  - Streaming drops tool calls
-  - `<unused25>` token spam
-
-- **OpenCode** has local provider issues:
-  - Can't handle non-standard tool call formats ([#20669](https://github.com/anomalyco/opencode/issues/20669), [#20719](https://github.com/anomalyco/opencode/issues/20719))
-
-**This setup uses:**
-- **llama.cpp** built from source with Gemma 4 fixes
-- **OpenCode** built from source with tool-call compatibility
-- **HuggingFace CLI** with SSL certificate support
-
-## 📦 Requirements
-
-### System Requirements
-- **macOS**: Apple Silicon (M1/M2/M3/M4)
-- **RAM**: 24GB+ recommended (32GB ideal)
-- **Homebrew**: For dependencies
-- **XCode Command Line Tools**: For compilation
-
-### Automatic Dependencies
-The setup script automatically installs:
-- `pipx` - Python application isolation
-- `git` - Version control (if missing)
-- `gh` - GitHub CLI (if missing)
-- `cmake` - Build system (if missing)
-- `bun` - JavaScript runtime (if missing)
-- `huggingface-hub` - Model downloads with SSL support
-
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-cd ai_model
-
-# Run the automated setup script
+# Interactive setup (recommended)
 ./setup-gemma4-working.sh
 
-# The script will:
-# 0. Setup HuggingFace CLI with SSL certificate support
-# 1. Build llama.cpp with Gemma 4 fixes (~5 min)
-# 2. Install OpenCode via official installer
-# 3. Build OpenCode custom version with tool-call compat (~5 min)
-# 4. Create configuration files
-# 5. Download Gemma 4 26B model (~16GB, 10-30 min)
-# 6. Start llama-server automatically
-
-# Total time: ~15-30 minutes
+# Or use new modular version
+./setup.sh
 ```
 
-## ⚙️ Configuration Options
+## Scripts Overview
 
-The script supports environment variables:
+### Main Scripts
+
+- **`setup-gemma4-working.sh`** - Complete all-in-one setup (952 lines)
+  - Full-featured with all configuration options
+  - Includes OpenCode installation and configuration
+  - Recommended for first-time setup
+
+- **`setup.sh`** - Modular setup orchestrator (new)
+  - Cleaner, focused implementation
+  - Sources functionality from `lib/` modules
+  - Easier to maintain and extend
+
+- **`llama-control.sh`** - Server management
+  ```bash
+  ./llama-control.sh start    # Start Ollama server
+  ./llama-control.sh stop     # Stop server
+  ./llama-control.sh restart  # Restart server
+  ./llama-control.sh status   # Check status and list models
+  ./llama-control.sh logs     # View logs
+  ./llama-control.sh models   # List installed models
+  ```
+
+- **`uninstall-gemma4-working.sh`** - Clean uninstaller
+  - Interactive removal of all components
+  - Selective uninstallation options
+
+### Library Modules (`lib/`)
+
+- **`common.sh`** - Shared utilities
+  - Color definitions
+  - Print functions (print_status, print_error, etc.)
+  - System detection (RAM, architecture)
+  - Prerequisites checking
+
+- **`model-selection.sh`** - Interactive model selection
+  - RAM-based recommendations
+  - Shows already installed models
+  - 8 Gemma 4 model variants to choose from
+
+- **`ollama-setup.sh`** - Ollama build and management
+  - Build from latest main branch commit
+  - Apple Silicon optimizations (Metal, Accelerate, native ARM64)
+  - Server startup with keep-alive
+  - Model pulling and optimization (128K/256K context)
+
+## Usage Examples
+
+### Environment Variables
 
 ```bash
-# Skip auto-download and auto-start (manual setup)
-AUTO_START=false ./setup-gemma4-working.sh
+# Skip model selection
+OLLAMA_MODEL=gemma4:26b-a4b-it-q4_K_M ./setup.sh
 
-# Enable auto-start on login (launchd service)
-AUTO_START_ON_LOGIN=true ./setup-gemma4-working.sh
+# Build OpenCode from dev branch
+BUILD_OPENCODE_FROM_SOURCE=true ./setup.sh
 
-# Custom context size (default: 131072)
-CONTEXT_SIZE=65536 ./setup-gemma4-working.sh
+# Skip embedding model
+INSTALL_EMBEDDING_MODEL=false ./setup.sh
 
-# Custom port (default: 3456)
-PORT=8089 ./setup-gemma4-working.sh
+# Skip auto-start
+AUTO_START=false ./setup.sh
 ```
 
-## 🔄 Idempotency
+### Model Options
 
-The script is **fully idempotent** and safe to run multiple times:
+| Model | Size | Context | RAM Needed | Best For |
+|-------|------|---------|------------|----------|
+| gemma4:e2b-it-q4_K_M | 7.2GB | 128K | 16GB+ | Small/fast |
+| gemma4:e4b-it-q8_0 | 12GB | 128K | 24GB+ | Balanced |
+| gemma4:26b-a4b-it-q4_K_M | 18GB | 256K | 32GB+ | Large codebases |
+| gemma4:31b-it-q8_0 | 34GB | 256K | 48GB+ | Maximum quality |
 
-- ✅ Skips llama.cpp build if already compiled
-- ✅ Skips OpenCode custom build if already installed
-- ✅ Skips model download if already cached
-- ✅ Skips launchd service if already loaded
-- ✅ Only backs up OpenCode binary once
+## Architecture
 
-## 📖 After Setup
+```
+setup.sh (orchestrator)
+├── lib/common.sh          # Shared utilities
+├── lib/model-selection.sh # Model selection
+└── lib/ollama-setup.sh    # Ollama build & management
 
-### With AUTO_START=true (default)
+setup-gemma4-working.sh    # All-in-one (legacy)
+llama-control.sh           # Server control
+uninstall-gemma4-working.sh # Cleanup
+```
 
-The server is already running! 🎉
+## Features
 
+### Performance Optimizations
+- **OLLAMA_KEEP_ALIVE=-1**: Models stay in memory (no cold starts)
+- **Metal GPU**: All layers offloaded to Apple Silicon GPU
+- **Accelerate framework**: Optimized BLAS operations
+- **Native ARM64**: `-O3 -march=native -mtune=native` compilation flags
+- **Proper context sizes**: 128K for e2b/e4b, 256K for 26b/31b models
+
+### Embedding Support
+- Automatic installation of `nomic-embed-text` (274MB)
+- Optimized for semantic code search
+- Essential for large codebases (1000+ files)
+
+### OpenCode Integration
+- Simplified agent prompts (less overthinking)
+- Explicit file reading instructions
+- No hallucinated tools
+- Proper model name format (colons, not dashes)
+
+## Requirements
+
+- macOS Apple Silicon (M1/M2/M3/M4)
+- 24GB+ RAM (32GB+ recommended)
+- Homebrew
+- Internet connection
+
+Dependencies auto-installed: `git`, `go`, `bun`
+
+## Configuration Files
+
+```
+~/.config/opencode/
+├── opencode.jsonc          # Main configuration
+├── AGENTS.md               # Agent instructions
+└── prompts/
+    └── build.txt           # Build agent prompt
+
+~/.local/var/
+├── ollama-server.pid       # Server PID
+└── log/
+    └── ollama-server.log   # Server logs
+```
+
+## Troubleshooting
+
+### Server not responding
 ```bash
-# Verify it's working
-curl http://127.0.0.1:3456/health
-
-# View logs
-tail -f ~/.local/var/log/llama-server.log
-
-# Stop the server
-kill $(cat ~/.local/var/llama-server.pid)
-
-# Start using OpenCode
-cd /path/to/your/project
-opencode
+./llama-control.sh logs     # Check logs
+./llama-control.sh restart  # Restart server
 ```
 
-### Memory Requirements
+### Model not found
+Ensure model name uses colons, not dashes:
+- ✅ `gemma4:e4b-it-q8_0`
+- ❌ `gemma4-e4b-it-q8_0`
 
-| Context Size | RAM Needed | Best For |
-|--------------|------------|----------|
-| 32K (32768) | ~17GB | Most users |
-| 64K (65536) | ~20GB | Longer sessions |
-| 128K (131072) | ~25GB | Maximum context |
-
-## 🗑️ Uninstallation
-
-A comprehensive uninstaller is provided:
-
+### Context truncation
+Models are auto-configured with proper context sizes. If you see truncation warnings, check:
 ```bash
-cd ai_model
-./uninstall-gemma4-working.sh
+./llama-control.sh models   # Verify -128k or -256k suffix
 ```
 
-### What It Does
-
-The uninstaller is **interactive** and lets you choose:
-
-1. **llama.cpp build** (~500MB) - Build artifacts
-2. **OpenCode custom build** - Restore original backup
-3. **Configuration files** - OpenCode configs
-4. **Gemma 4 26B model** (~16GB) - **Default: Keep** (reusable)
-5. **Running processes** - Stop llama-server
-6. **launchd service** - Auto-start configuration
-7. **Log files** - Server logs and PID files
-8. **HuggingFace CLI** - **Default: Keep** (shared tool)
-
-**Typical removal** (keeps model for reinstall):
-- Frees ~500MB
-- Keeps 16GB model cache for quick reinstall
-
-**Full removal** (everything):
-- Frees ~17GB
-- Returns system to pre-install state
-
-## 📝 Documentation
-
-- **[GEMMA4_WORKING_SETUP.md](./GEMMA4_WORKING_SETUP.md)** - Complete setup guide
-- **[REFACTORING_SUMMARY.md](./REFACTORING_SUMMARY.md)** - Project history
-
-## 🔧 Troubleshooting
-
-### SSL Certificate Errors
-
-The script automatically installs pip-system-certs. If you see SSL errors:
-
+### Rebuild from scratch
 ```bash
-# Verify injection
-pipx runpip huggingface-hub list | grep pip-system-certs
-
-# Re-inject if needed
-pipx inject huggingface-hub pip-system-certs
+rm -rf /tmp/ollama-build
+./setup.sh
 ```
 
-### Memory Pressure / Screen Flickering
+## Updates
 
-Close Chrome and heavy apps. If still too much, reduce context size:
-
+### Update Ollama
 ```bash
-CONTEXT_SIZE=65536 ./setup-gemma4-working.sh
+rm -rf /tmp/ollama-build
+./setup.sh  # Rebuilds from latest commit
 ```
 
-### Model Download Fails
-
-Set HuggingFace token for better rate limits:
-
+### Update OpenCode
 ```bash
-export HF_TOKEN=your_token_here
-./setup-gemma4-working.sh
+# Official release
+opencode update
+
+# Dev branch build
+BUILD_OPENCODE_FROM_SOURCE=true ./setup.sh
 ```
 
-### Server Won't Start
-
-Check logs for errors:
-
-```bash
-tail -50 ~/.local/var/log/llama-server.log
-```
-
-## 📁 Project Structure
-
-```
-ai_model/
-├── setup-gemma4-working.sh        # Main installer (bash)
-├── uninstall-gemma4-working.sh    # Comprehensive uninstaller (bash)
-├── GEMMA4_WORKING_SETUP.md        # Detailed setup guide
-├── README.md                      # This file
-└── REFACTORING_SUMMARY.md         # Project history
-```
-
-**Note**: This is a minimal, production-ready package with no dependencies. The scripts are self-contained bash scripts that don't require Python or any external libraries.
-
-## 🤝 Contributing
-
-This is a working solution for current Gemma 4 compatibility issues. Once the upstream projects fix their bugs:
-- Ollama v0.20.1+ with Gemma 4 fixes
-- OpenCode merges PR #16531
-- Homebrew llama.cpp updates
-
-You can switch back to simpler official packages.
-
-## 📄 License
+## License
 
 MIT
 
-## 🙏 Credits
+## Credits
 
-- Setup approach: [@daniel-farina](https://gist.github.com/daniel-farina/87dc1c394b94e45bb700d27e9ea03193)
-- llama.cpp: [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
-- OpenCode: [anomalyco/opencode](https://github.com/anomalyco/opencode)
-- Gemma 4: Google
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
