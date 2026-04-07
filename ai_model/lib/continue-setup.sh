@@ -226,7 +226,7 @@ for model in data.get('models', []):
       "title": "$title",
       "provider": "ollama",
       "model": "$model_name",
-      "apiBase": "$ollama_url"
+      "apiUrl": "$ollama_url"
     }
 EOF
 )
@@ -243,7 +243,7 @@ EOF
     "title": "Fast Autocomplete",
     "provider": "ollama",
     "model": "$autocomplete_model",
-    "apiBase": "$ollama_url"
+    "apiUrl": "$ollama_url"
   }
 EOF
 )
@@ -256,7 +256,7 @@ EOF
   "embeddingsProvider": {
     "provider": "ollama",
     "model": "nomic-embed-text",
-    "apiBase": "$ollama_url"
+    "apiUrl": "$ollama_url"
   },
   "reranker": {
     "name": "free-trial"
