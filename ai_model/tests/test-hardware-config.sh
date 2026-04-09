@@ -105,50 +105,50 @@ test_calculate_metal_memory() {
 test_calculate_kv_cache_gb() {
     print_section "Testing calculate_kv_cache_gb()"
 
-    # Test e2b model (50K bytes/token, optimized)
-    begin_test "e2b @ 64K context -> ~3GB KV cache"
+    # Test e2b model (197K bytes/token, conservative)
+    begin_test "e2b @ 64K context -> ~12GB KV cache"
     local result
     result=$(calculate_kv_cache_gb "e2b" 65536)
-    if [[ $result -ge 2 && $result -le 4 ]]; then
+    if [[ $result -ge 11 && $result -le 13 ]]; then
         pass_test
     else
-        fail_test "Expected ~3GB, got ${result}GB"
+        fail_test "Expected ~12GB, got ${result}GB"
     fi
 
-    # Test latest model (70K bytes/token, optimized)
-    begin_test "latest @ 64K context -> ~4GB KV cache"
+    # Test latest model (295K bytes/token, conservative)
+    begin_test "latest @ 64K context -> ~18GB KV cache"
     result=$(calculate_kv_cache_gb "latest" 65536)
-    if [[ $result -ge 3 && $result -le 5 ]]; then
+    if [[ $result -ge 17 && $result -le 19 ]]; then
         pass_test
     else
-        fail_test "Expected ~4GB, got ${result}GB"
+        fail_test "Expected ~18GB, got ${result}GB"
     fi
 
-    # Test 26b model (150K bytes/token, optimized)
-    begin_test "26b @ 64K context -> ~9GB KV cache"
+    # Test 26b model (400K bytes/token, conservative)
+    begin_test "26b @ 64K context -> ~24GB KV cache"
     result=$(calculate_kv_cache_gb "26b" 65536)
-    if [[ $result -ge 8 && $result -le 10 ]]; then
+    if [[ $result -ge 23 && $result -le 25 ]]; then
         pass_test
     else
-        fail_test "Expected ~9GB, got ${result}GB"
+        fail_test "Expected ~24GB, got ${result}GB"
     fi
 
-    # Test 31b model (180K bytes/token, optimized)
-    begin_test "31b @ 64K context -> ~11GB KV cache"
+    # Test 31b model (524K bytes/token, conservative)
+    begin_test "31b @ 64K context -> ~32GB KV cache"
     result=$(calculate_kv_cache_gb "31b" 65536)
-    if [[ $result -ge 10 && $result -le 12 ]]; then
+    if [[ $result -ge 31 && $result -le 33 ]]; then
         pass_test
     else
-        fail_test "Expected ~11GB, got ${result}GB"
+        fail_test "Expected ~32GB, got ${result}GB"
     fi
 
     # Test with 128K context (double the cache)
-    begin_test "latest @ 128K context -> ~8GB KV cache"
+    begin_test "latest @ 128K context -> ~36GB KV cache"
     result=$(calculate_kv_cache_gb "latest" 131072)
-    if [[ $result -ge 7 && $result -le 10 ]]; then
+    if [[ $result -ge 35 && $result -le 37 ]]; then
         pass_test
     else
-        fail_test "Expected ~8GB, got ${result}GB"
+        fail_test "Expected ~36GB, got ${result}GB"
     fi
 }
 
@@ -167,12 +167,12 @@ test_validate_gpu_fit() {
         fail_test "Should fit on GPU"
     fi
 
-    # Test: 16GB RAM with latest @ 64K (should fit)
-    begin_test "16GB RAM + latest @ 64K -> should fit"
+    # Test: 16GB RAM with latest @ 64K (should NOT fit with conservative values)
+    begin_test "16GB RAM + latest @ 64K -> should NOT fit"
     if validate_gpu_fit 16 "latest" 65536; then
-        pass_test
+        fail_test "Should NOT fit on GPU"
     else
-        fail_test "Should fit on GPU"
+        pass_test
     fi
 
     # Test: 16GB RAM with 31b @ 64K (should NOT fit)
@@ -223,22 +223,22 @@ test_recommend_model() {
         fail_test "Expected gemma4:e2b, got $result"
     fi
 
-    # Test 16GB RAM -> should recommend latest
-    begin_test "16GB RAM -> gemma4:latest"
+    # Test 16GB RAM -> should recommend e2b (conservative values mean latest doesn't fit)
+    begin_test "16GB RAM -> gemma4:e2b"
     result=$(recommend_model 16)
-    if [[ "$result" == "gemma4:latest" ]]; then
+    if [[ "$result" == "gemma4:e2b" ]]; then
         pass_test
     else
-        fail_test "Expected gemma4:latest, got $result"
+        fail_test "Expected gemma4:e2b, got $result"
     fi
 
-    # Test 24GB RAM -> should recommend latest
-    begin_test "24GB RAM -> gemma4:latest"
+    # Test 24GB RAM -> should recommend e2b (conservative values mean latest doesn't fit)
+    begin_test "24GB RAM -> gemma4:e2b"
     result=$(recommend_model 24)
-    if [[ "$result" == "gemma4:latest" ]]; then
+    if [[ "$result" == "gemma4:e2b" ]]; then
         pass_test
     else
-        fail_test "Expected gemma4:latest, got $result"
+        fail_test "Expected gemma4:e2b, got $result"
     fi
 
     # Test 32GB RAM -> should recommend 26b or latest

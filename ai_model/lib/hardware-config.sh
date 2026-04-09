@@ -78,23 +78,24 @@ get_model_weight_gb() {
 # Formula based on actual Gemma4 architecture: 2 (K+V) × layers × hidden_dim × context × fp16
 # Gemma4 27B: 46 layers × 4608 hidden_dim
 # Gemma4 9B:  42 layers × 3584 hidden_dim
-# Per-token KV cache size (in bytes) - optimized for GPU fit:
-#   31b: ~180,000 bytes/token (with quantization and optimization)
-#   26b: ~150,000 bytes/token (with quantization and optimization)
-#   latest/e4b: ~70,000 bytes/token (with quantization, fp16, optimizations)
-#   e2b: ~50,000 bytes/token (smaller architecture, optimized)
+# Per-token KV cache size (in bytes) - conservative real-world values:
+#   31b: ~524,288 bytes/token (~512 KB/token, 128K ctx = ~65GB KV cache)
+#   26b: ~400,000 bytes/token (~391 KB/token, 128K ctx = ~50GB KV cache)
+#   latest/e4b: ~295,000 bytes/token (~288 KB/token, 128K ctx = ~36GB KV cache)
+#   e2b: ~197,000 bytes/token (~192 KB/token, 128K ctx = ~24GB KV cache)
 calculate_kv_cache_gb() {
     local model_size=$1
     local context_tokens=$2
 
-    # Bytes per token for KV cache (optimized with quantization and Metal GPU acceleration)
+    # Bytes per token for KV cache (conservative real-world values)
+    # These match the memory usage observed in calculate_context_length comments
     local bytes_per_token
     case "$model_size" in
-        31b) bytes_per_token=180000 ;;   # ~176 KB per token
-        26b) bytes_per_token=150000 ;;   # ~146 KB per token
-        latest|e4b) bytes_per_token=70000 ;;  # ~68 KB per token (optimized)
-        e2b) bytes_per_token=50000 ;;   # ~49 KB per token (smaller + optimized)
-        *) bytes_per_token=70000 ;;
+        31b) bytes_per_token=524288 ;;   # ~512 KB per token (128K ctx = ~65GB KV)
+        26b) bytes_per_token=400000 ;;   # ~391 KB per token (128K ctx = ~50GB KV)
+        latest|e4b) bytes_per_token=295000 ;;  # ~288 KB per token (128K ctx = ~36GB KV)
+        e2b) bytes_per_token=197000 ;;   # ~192 KB per token (128K ctx = ~24GB KV)
+        *) bytes_per_token=295000 ;;
     esac
 
     # Calculate total KV cache in bytes
@@ -166,7 +167,7 @@ calculate_context_length() {
     case "$model_size" in
         31b)
             # 31b: Very large model, conservative context for GPU fit
-            # Model: 19GB, KV cache: 512 bytes/token
+            # Model: 19GB, KV cache: ~512 KB/token (524,288 bytes/token)
             if [[ $ram_gb -ge 80 ]]; then
                 echo "131072"  # 128K context (~65GB KV = ~84GB total)
             elif [[ $ram_gb -ge 64 ]]; then
@@ -179,7 +180,7 @@ calculate_context_length() {
             ;;
         26b)
             # 26b: Large model, better GPU fit than 31b
-            # Model: 17GB, KV cache: 400 bytes/token
+            # Model: 17GB, KV cache: ~390 KB/token (400,000 bytes/token)
             if [[ $ram_gb -ge 64 ]]; then
                 echo "131072"  # 128K context (~50GB KV = ~67GB total)
             elif [[ $ram_gb -ge 48 ]]; then
@@ -192,7 +193,7 @@ calculate_context_length() {
             ;;
         e2b|latest|e4b)
             # Smaller models: ~10GB weights
-            # e2b KV cache: ~200K bytes/token, latest: ~300K bytes/token
+            # e2b: ~192 KB/token (197,000 bytes), latest/e4b: ~288 KB/token (295,000 bytes)
             if [[ $ram_gb -ge 48 ]]; then
                 echo "131072"  # 128K context (latest: ~36GB KV = ~46GB total, e2b: ~24GB KV = ~31GB total)
             elif [[ $ram_gb -ge 32 ]]; then
