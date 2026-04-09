@@ -35,6 +35,19 @@
 
 set -euo pipefail
 
+# Cleanup function for trap
+cleanup() {
+    local exit_code=$?
+    # If backup directory was created but is empty, remove it
+    if [[ -n "${BACKUP_DIR:-}" && -d "$BACKUP_DIR" ]]; then
+        if [[ ! "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]]; then
+            rmdir "$BACKUP_DIR" 2>/dev/null || true
+        fi
+    fi
+    exit "$exit_code"
+}
+trap cleanup EXIT INT TERM
+
 # Source library modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
@@ -57,8 +70,8 @@ LAUNCHAGENT_LABEL="com.ollama.custom"
 LAUNCHAGENT_PLIST="$HOME/Library/LaunchAgents/${LAUNCHAGENT_LABEL}.plist"
 OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
 OLLAMA_MODELS_DIR="$HOME/.ollama"
-OLLAMA_LOGS_STDOUT="/tmp/ollama.stdout.log"
-OLLAMA_LOGS_STDERR="/tmp/ollama.stderr.log"
+OLLAMA_LOGS_STDOUT="$HOME/.local/var/log/ollama.stdout.log"
+OLLAMA_LOGS_STDERR="$HOME/.local/var/log/ollama.stderr.log"
 
 # Tracking
 ITEMS_REMOVED=0
@@ -93,6 +106,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         --backup-dir)
             BACKUP_DIR="$2"
+            # Validate backup directory is not a system directory
+            case "$BACKUP_DIR" in
+                /|/bin|/usr|/etc|/System|/Library|/Applications|/private)
+                    print_error "Cannot use system directory as backup location: $BACKUP_DIR"
+                    exit 1
+                    ;;
+            esac
             shift 2
             ;;
         --yes|-y)

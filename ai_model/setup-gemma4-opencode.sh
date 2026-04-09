@@ -38,6 +38,15 @@
 
 set -euo pipefail
 
+# Cleanup function for trap
+cleanup() {
+    local exit_code=$?
+    # Remove temporary modelfile if it exists
+    [[ -n "${modelfile_path:-}" && -f "$modelfile_path" ]] && rm -f "$modelfile_path"
+    exit "$exit_code"
+}
+trap cleanup EXIT INT TERM
+
 # Source library modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
@@ -75,6 +84,7 @@ OLLAMA_LIST_CACHE=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --model)
+            validate_model_name "$2" || exit 1
             GEMMA_MODEL="$2"
             shift 2
             ;;
@@ -155,11 +165,17 @@ if [[ -z "$GEMMA_MODEL" ]]; then
         read -p "Use recommended model $RECOMMENDED_MODEL? (Y/n) " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Nn]$ ]]; then
-            read -r -p "Enter model name (e.g., gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b): " GEMMA_MODEL
-            if [[ -z "$GEMMA_MODEL" ]]; then
-                print_error "No model specified, using recommendation"
-                GEMMA_MODEL="$RECOMMENDED_MODEL"
-            fi
+            while true; do
+                read -r -p "Enter model name (e.g., gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b): " GEMMA_MODEL
+                if [[ -z "$GEMMA_MODEL" ]]; then
+                    print_error "No model specified, using recommendation"
+                    GEMMA_MODEL="$RECOMMENDED_MODEL"
+                    break
+                fi
+                if validate_model_name "$GEMMA_MODEL"; then
+                    break
+                fi
+            done
         fi
     fi
 fi
@@ -176,7 +192,7 @@ NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 # Validate that selected model will fit on GPU
 print_header "Validating GPU Compatibility"
 
-metal_gb=$((METAL_MEMORY / 1024 / 1024 / 1024))
+metal_gb=$((METAL_MEMORY / BYTES_PER_GB))
 model_weight_gb=$(get_model_weight_gb "$MODEL_SIZE")
 kv_cache_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$CONTEXT_LENGTH")
 total_needed_gb=$((model_weight_gb + kv_cache_gb))
@@ -219,6 +235,22 @@ fi
 #############################################
 # Helper Functions
 #############################################
+
+# Validate model name against allowed list
+validate_model_name() {
+    local model="$1"
+    # Only allow gemma4: prefix with known variants
+    case "$model" in
+        gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
+            return 0
+            ;;
+        *)
+            print_error "Invalid model name: $model"
+            print_info "Allowed models: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b"
+            return 1
+            ;;
+    esac
+}
 
 # Get ollama list output (cached to avoid multiple subprocess calls)
 get_ollama_list() {
@@ -370,6 +402,9 @@ create_launchagent() {
     echo "  • GPU Layers:        All (999)"
     echo ""
 
+    # Create log directory
+    mkdir -p "$HOME/.local/var/log"
+
     cat > "$LAUNCHAGENT_PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -406,9 +441,9 @@ create_launchagent() {
         <string>${NUM_CTX}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>/tmp/ollama.stdout.log</string>
+    <string>$HOME/.local/var/log/ollama.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/ollama.stderr.log</string>
+    <string>$HOME/.local/var/log/ollama.stderr.log</string>
 </dict>
 </plist>
 EOF
@@ -433,7 +468,7 @@ EOF
         attempt=$((attempt + 1))
         if [[ $attempt -ge $max_attempts ]]; then
             print_error "Ollama server failed to start after ${max_attempts} seconds"
-            print_info "Check logs: tail -f /tmp/ollama.stdout.log /tmp/ollama.stderr.log"
+            print_info "Check logs: tail -f $HOME/.local/var/log/ollama.stdout.log $HOME/.local/var/log/ollama.stderr.log"
             exit 1
         fi
         sleep 1
@@ -523,7 +558,11 @@ create_custom_model() {
     print_info "Configuration optimized for ${DETECTED_RAM_GB}GB RAM"
 
     # Create temporary Modelfile
-    local modelfile_path="/tmp/Modelfile.${CUSTOM_MODEL_NAME}"
+    local modelfile_path
+    modelfile_path=$(mktemp "/tmp/Modelfile.XXXXXX") || {
+        print_error "Failed to create temporary file"
+        exit 1
+    }
     cat > "$modelfile_path" << EOF
 FROM ${GEMMA_MODEL}
 
@@ -734,7 +773,7 @@ Quick Start:
 
 Server Management:
 ------------------
-- View logs:       tail -f /tmp/ollama.stdout.log
+- View logs:       tail -f $HOME/.local/var/log/ollama.stdout.log
 - Server status:   curl ${OLLAMA_HOST}/api/tags
 - Restart server:  launchctl unload "$LAUNCHAGENT_PLIST" && launchctl load "$LAUNCHAGENT_PLIST"
 - Stop server:     launchctl unload "$LAUNCHAGENT_PLIST"
@@ -767,7 +806,7 @@ Troubleshooting:
 - If OpenCode can't connect: curl ${OLLAMA_HOST}/api/tags
 - If model is slow: Check GPU usage in Activity Monitor
 - If out of memory: Try a smaller model (./setup-gemma4-opencode.sh --model gemma4:e2b)
-- View errors: tail -f /tmp/ollama.stderr.log
+- View errors: tail -f $HOME/.local/var/log/ollama.stderr.log
 
 Documentation:
 -------------

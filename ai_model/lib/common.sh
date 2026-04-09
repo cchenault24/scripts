@@ -19,6 +19,11 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+# Byte conversion constants
+readonly BYTES_PER_GB=$((1024 * 1024 * 1024))
+readonly BYTES_PER_MB=$((1024 * 1024))
+readonly BYTES_PER_KB=1024
+
 #############################################
 # Print Functions
 #############################################
@@ -68,20 +73,17 @@ detect_hardware_profile() {
     cpu_cores=$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "8")
 
     # Parse chip generation
-    local m_chip="Unknown"
-    if echo "$cpu_brand" | grep -q "Apple M5"; then
-        m_chip="M5"
-    elif echo "$cpu_brand" | grep -q "Apple M4"; then
-        m_chip="M4"
-    elif echo "$cpu_brand" | grep -q "Apple M3"; then
-        m_chip="M3"
-    elif echo "$cpu_brand" | grep -q "Apple M2"; then
-        m_chip="M2"
-    elif echo "$cpu_brand" | grep -q "Apple M1"; then
-        m_chip="M1"
-    fi
+    local m_chip
+    case "$cpu_brand" in
+        *"Apple M5"*) m_chip="M5" ;;
+        *"Apple M4"*) m_chip="M4" ;;
+        *"Apple M3"*) m_chip="M3" ;;
+        *"Apple M2"*) m_chip="M2" ;;
+        *"Apple M1"*) m_chip="M1" ;;
+        *) m_chip="Unknown" ;;
+    esac
 
-    local ram_gb=$((ram_bytes / 1024 / 1024 / 1024))
+    local ram_gb=$((ram_bytes / BYTES_PER_GB))
 
     echo "$m_chip $ram_gb $cpu_cores"
 }

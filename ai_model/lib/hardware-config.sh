@@ -14,7 +14,6 @@ set -euo pipefail
 
 # Metal memory allocation strategy
 readonly MAX_METAL_GB=80              # Cap for very high-RAM systems (leave room for OS)
-readonly METAL_MEMORY_PERCENT=75      # Use 75% of RAM for Metal
 
 # Parallel request thresholds (RAM GB -> parallel count)
 readonly PARALLEL_TIER_ULTRA=64       # 64GB+ → 6 parallel requests
@@ -26,14 +25,6 @@ readonly PARALLEL_TIER_LOW=24         # 24GB+ → 2 parallel requests
 readonly MODEL_31B_MIN_RAM=48
 readonly MODEL_26B_MIN_RAM=32
 readonly MODEL_LATEST_MIN_RAM=16
-readonly MODEL_E2B_MIN_RAM=12
-
-# Server startup configuration
-readonly OLLAMA_STARTUP_TIMEOUT=30    # Maximum seconds to wait for server readiness
-
-# Response generation limits
-readonly MAX_TOKENS_PERCENT=25        # Use up to 25% of context window for output
-readonly MAX_TOKENS_CAP=8192          # Cap at 8K tokens for practical response length
 
 #############################################
 # Model Specifications
@@ -49,7 +40,7 @@ readonly MAX_TOKENS_CAP=8192          # Cap at 8K tokens for practical response 
 # Calculate optimal Metal memory allocation (bytes)
 calculate_metal_memory() {
     local ram_gb=$1
-    local ram_bytes=$((ram_gb * 1024 * 1024 * 1024))
+    local ram_bytes=$((ram_gb * BYTES_PER_GB))
 
     # Use 95% of RAM for Metal on systems with 32GB+ (leave 5% for OS)
     # Use 90% on smaller systems (more conservative)
@@ -63,7 +54,7 @@ calculate_metal_memory() {
     local metal_memory=$((ram_bytes * metal_percent / 100))
 
     # Cap at MAX_METAL_GB to leave room for OS
-    local max_metal=$((MAX_METAL_GB * 1024 * 1024 * 1024))
+    local max_metal=$((MAX_METAL_GB * BYTES_PER_GB))
     if [[ $metal_memory -gt $max_metal ]]; then
         metal_memory=$max_metal
     fi
@@ -122,7 +113,7 @@ validate_gpu_fit() {
 
     local metal_bytes
     metal_bytes=$(calculate_metal_memory "$ram_gb")
-    local metal_gb=$((metal_bytes / 1024 / 1024 / 1024))
+    local metal_gb=$((metal_bytes / BYTES_PER_GB))
 
     local model_weight_gb
     model_weight_gb=$(get_model_weight_gb "$model_size")
