@@ -230,6 +230,15 @@ if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
     fi
 else
     print_status "Model will run at 100% GPU - optimal performance!"
+
+    # Check for tight fit (less than 10% headroom)
+    local headroom_gb=$((metal_gb - total_needed_gb))
+    local min_headroom=$((metal_gb / 10))
+    if [[ $headroom_gb -lt $min_headroom ]]; then
+        print_warning "Running close to GPU memory limit (${headroom_gb}GB headroom)"
+        print_info "Performance may degrade under memory pressure or with concurrent apps"
+        print_info "Consider closing other apps or using a smaller model for best stability"
+    fi
 fi
 
 #############################################
@@ -476,7 +485,7 @@ EOF
 
     # Wait for Ollama to be ready
     print_info "Waiting for Ollama server to be ready..."
-    local max_attempts=30
+    local max_attempts=60
     local attempt=0
     while ! curl -s "$OLLAMA_HOST/api/tags" > /dev/null 2>&1; do
         attempt=$((attempt + 1))

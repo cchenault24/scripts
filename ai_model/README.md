@@ -197,7 +197,7 @@ ollama run gemma4-optimized
 curl http://localhost:11434/api/tags
 
 # View logs
-tail -f /tmp/ollama.stdout.log
+tail -f ~/.local/var/log/ollama.stdout.log
 
 # List models
 ollama list
@@ -278,7 +278,7 @@ curl http://localhost:11434/api/tags
 launchctl list | grep ollama
 
 # View logs
-tail -f /tmp/ollama.stderr.log
+tail -f ~/.local/var/log/ollama.stderr.log
 ```
 
 ### Out of memory errors
@@ -350,7 +350,7 @@ MIT License - See [LICENSE](../LICENSE) file for details.
 
 For issues or questions:
 1. Check the troubleshooting section above
-2. View logs in `/tmp/ollama.*.log`
+2. View logs in `~/.local/var/log/ollama.*.log`
 3. Run with `--help` flag for options
 
 ---
