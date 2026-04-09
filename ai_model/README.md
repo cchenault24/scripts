@@ -65,7 +65,7 @@ Production-ready scripts for deploying Google's Gemma4 models with OpenCode via 
 ### Configuration
 - **LaunchAgent** - Auto-starts Ollama on boot with optimized settings
 - **OpenCode Config** - Pre-configured for your hardware
-- **Custom Model** - Hardware-optimized variant (e.g., gemma4-optimized-31b) with tuned context window
+- **Custom Model** - Hardware-optimized variant with customizable naming (e.g., gemma4-coding-fast, gemma4-optimized-31b-64k)
 - **Superpowers Plugin** (Optional) - Enhanced OpenCode capabilities from [obra/superpowers](https://github.com/obra/superpowers)
 
 ### Optimizations (Hardware-Dependent)

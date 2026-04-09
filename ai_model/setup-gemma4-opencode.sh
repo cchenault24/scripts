@@ -183,8 +183,8 @@ fi
 # Extract model size for dynamic configuration
 MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
 
-# Set custom model name to include variant (e.g., gemma4-optimized-31b)
-CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}"
+# Custom model name will be set after context selection
+CUSTOM_MODEL_NAME=""
 
 # Calculate optimal settings based on hardware
 METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
@@ -305,6 +305,81 @@ fi
 
 NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 
+# Ask about custom model name (skip in auto mode)
+if [[ "$AUTO_MODE" != true ]]; then
+    print_header "Custom Model Naming"
+
+    # Suggest default name with context
+    local context_k=$((CONTEXT_LENGTH / 1024))
+    local default_name="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
+
+    echo -e "${BLUE}Suggested name: ${default_name}${NC}"
+    echo ""
+    echo "This is the name you'll use with 'ollama run' and OpenCode."
+    echo "Examples of custom names:"
+    echo "  • gemma4-coding-fast    (for quick coding tasks)"
+    echo "  • gemma4-research-deep  (for research with large context)"
+    echo "  • gemma4-31b-balanced   (descriptive of model + purpose)"
+    echo ""
+    echo "Name requirements:"
+    echo "  • Lowercase letters, numbers, hyphens (-), underscores (_), dots (.)"
+    echo "  • No spaces or special characters"
+    echo "  • Should be memorable and descriptive"
+    echo ""
+    read -p "Use suggested name? (Y/n) " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        while true; do
+            echo ""
+            read -r -p "Enter custom model name: " custom_input
+
+            # Use default if empty
+            if [[ -z "$custom_input" ]]; then
+                print_info "No input, using suggested name"
+                CUSTOM_MODEL_NAME="$default_name"
+                break
+            fi
+
+            # Validate format: lowercase alphanumeric + hyphens, underscores, dots only
+            # No spaces, no special chars that could break shell/ollama
+            if [[ "$custom_input" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+                # Additional validation: reasonable length
+                if [[ ${#custom_input} -gt 64 ]]; then
+                    print_error "Name too long (max 64 characters)"
+                    continue
+                fi
+
+                # Warn if no prefix (recommended to start with "gemma" for clarity)
+                if [[ ! "$custom_input" =~ ^gemma ]]; then
+                    echo ""
+                    print_warning "Name doesn't start with 'gemma' - may be unclear this is a Gemma model"
+                    read -p "Use this name anyway? (y/N) " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        continue
+                    fi
+                fi
+
+                CUSTOM_MODEL_NAME="$custom_input"
+                print_status "Using custom name: $CUSTOM_MODEL_NAME"
+                break
+            else
+                print_error "Invalid name format"
+                echo "  • Must start with a letter or number"
+                echo "  • Can only contain: a-z, 0-9, hyphens (-), underscores (_), dots (.)"
+                echo "  • No uppercase, spaces, or special characters"
+            fi
+        done
+    else
+        CUSTOM_MODEL_NAME="$default_name"
+    fi
+else
+    # Auto mode: use default naming with context
+    local context_k=$((CONTEXT_LENGTH / 1024))
+    CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
+fi
+
 # Validate that selected model will fit on GPU
 print_header "Validating GPU Compatibility"
 
@@ -336,10 +411,12 @@ if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
             print_info "Using recommended model instead"
             GEMMA_MODEL="$RECOMMENDED_MODEL"
             MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
-            CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}"
             CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
             NUM_CTX=$CONTEXT_LENGTH
             METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
+            # Regenerate custom model name with new context
+            local context_k=$((CONTEXT_LENGTH / 1024))
+            CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
         fi
     else
         print_error "Cannot proceed in --auto mode with incompatible model"
