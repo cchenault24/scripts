@@ -143,6 +143,12 @@ check_localhost_binding() {
         script_name=$(basename "$script")
         verbose "Checking $script_name"
 
+        # Skip test files that check for dangerous patterns (quality-checks.sh itself)
+        if [[ "$script_name" == "quality-checks.sh" ]]; then
+            verbose "  ${BLUE}→${NC} $script_name skipped (test utility)"
+            continue
+        fi
+
         # Check for 0.0.0.0 binding (should be localhost/127.0.0.1 only)
         if grep -q "0\.0\.0\.0" "$script"; then
             echo -e "${RED}✗${NC} $script_name - Found 0.0.0.0 binding (should use 127.0.0.1 or localhost)"
@@ -186,6 +192,12 @@ check_no_hardcoded_credentials() {
         local script_name
         script_name=$(basename "$script")
         verbose "Checking $script_name"
+
+        # Skip hardware-config.sh which contains MODEL_*_SIZE constants (not credentials)
+        if [[ "$script_name" == "hardware-config.sh" ]]; then
+            verbose "  ${BLUE}→${NC} $script_name skipped (contains model size constants)"
+            continue
+        fi
 
         local found_issue=false
         for pattern in "${patterns[@]}"; do
@@ -279,6 +291,12 @@ check_dangerous_patterns() {
         local script_name
         script_name=$(basename "$script")
         verbose "Checking $script_name"
+
+        # Skip test files that deliberately check for these patterns
+        if [[ "$script_name" == *"test-"* ]] || [[ "$script_name" == "quality-checks.sh" ]] || [[ "$script_name" == "helpers.sh" ]]; then
+            verbose "  ${BLUE}→${NC} $script_name skipped (test utility)"
+            continue
+        fi
 
         local found_issue=false
 

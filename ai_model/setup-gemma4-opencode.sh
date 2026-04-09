@@ -239,9 +239,23 @@ fi
 # Validate model name against allowed list
 validate_model_name() {
     local model="$1"
-    # Only allow gemma4: prefix with known variants
+
+    # First check against allowed patterns
     case "$model" in
         gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
+            # Verify exact length to detect null bytes or other hidden characters
+            # gemma4:e2b=10, gemma4:latest=13, gemma4:26b=10, gemma4:31b=10
+            # Bash preserves null bytes in length, so 'gemma4:e2b\0' would be length 11
+            local expected_len
+            case "$model" in
+                gemma4:latest) expected_len=13 ;;
+                gemma4:e2b|gemma4:26b|gemma4:31b) expected_len=10 ;;
+            esac
+
+            if [ ${#model} -ne "$expected_len" ]; then
+                print_error "Invalid model name: contains invalid characters"
+                return 1
+            fi
             return 0
             ;;
         *)

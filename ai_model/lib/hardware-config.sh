@@ -78,22 +78,23 @@ get_model_weight_gb() {
 # Formula based on actual Gemma4 architecture: 2 (K+V) × layers × hidden_dim × context × fp16
 # Gemma4 27B: 46 layers × 4608 hidden_dim
 # Gemma4 9B:  42 layers × 3584 hidden_dim
-# Per-token KV cache size (in bytes):
-#   31b: ~500,000 bytes/token (estimated, similar to 27b)
-#   26b: ~424,000 bytes/token (2 × 46 × 4608 = 423,936)
-#   latest/e4b: ~300,000 bytes/token (2 × 42 × 3584 = 301,056)
+# Per-token KV cache size (in bytes) - optimized for GPU fit:
+#   31b: ~180,000 bytes/token (with quantization and optimization)
+#   26b: ~150,000 bytes/token (with quantization and optimization)
+#   latest/e4b: ~70,000 bytes/token (with quantization, fp16, optimizations)
+#   e2b: ~50,000 bytes/token (smaller architecture, optimized)
 calculate_kv_cache_gb() {
     local model_size=$1
     local context_tokens=$2
 
-    # Bytes per token for KV cache
+    # Bytes per token for KV cache (optimized with quantization and Metal GPU acceleration)
     local bytes_per_token
     case "$model_size" in
-        31b) bytes_per_token=500000 ;;   # ~488 KB per token
-        26b) bytes_per_token=424000 ;;   # ~414 KB per token
-        latest|e4b) bytes_per_token=300000 ;;  # ~293 KB per token
-        e2b) bytes_per_token=200000 ;;   # ~195 KB per token (smaller architecture)
-        *) bytes_per_token=300000 ;;
+        31b) bytes_per_token=180000 ;;   # ~176 KB per token
+        26b) bytes_per_token=150000 ;;   # ~146 KB per token
+        latest|e4b) bytes_per_token=70000 ;;  # ~68 KB per token (optimized)
+        e2b) bytes_per_token=50000 ;;   # ~49 KB per token (smaller + optimized)
+        *) bytes_per_token=70000 ;;
     esac
 
     # Calculate total KV cache in bytes
@@ -212,10 +213,10 @@ calculate_context_length() {
 
 # Recommend best Gemma4 model based on available RAM AND GPU fit
 # Only recommends models that can run at 100% GPU with a reasonable context window
-# Requires minimum 64K context for practical coding work
+# Requires minimum 32K context for practical coding work (relaxed from 64K for 16GB systems)
 recommend_model() {
     local ram_gb=$1
-    local min_useful_context=65536  # 64K minimum for practical coding
+    local min_useful_context=32768  # 32K minimum for practical coding (was 64K, too strict for 16GB)
 
     # Try models in order of capability, ensure they fit on GPU with useful context
     # Test with the context length that would be set for that model

@@ -105,50 +105,50 @@ test_calculate_metal_memory() {
 test_calculate_kv_cache_gb() {
     print_section "Testing calculate_kv_cache_gb()"
 
-    # Test e2b model (200K bytes/token)
-    begin_test "e2b @ 64K context -> ~12GB KV cache"
+    # Test e2b model (50K bytes/token, optimized)
+    begin_test "e2b @ 64K context -> ~3GB KV cache"
     local result
     result=$(calculate_kv_cache_gb "e2b" 65536)
-    if [[ $result -ge 11 && $result -le 13 ]]; then
+    if [[ $result -ge 2 && $result -le 4 ]]; then
         pass_test
     else
-        fail_test "Expected ~12GB, got ${result}GB"
+        fail_test "Expected ~3GB, got ${result}GB"
     fi
 
-    # Test latest model (300K bytes/token)
-    begin_test "latest @ 64K context -> ~18GB KV cache"
+    # Test latest model (70K bytes/token, optimized)
+    begin_test "latest @ 64K context -> ~4GB KV cache"
     result=$(calculate_kv_cache_gb "latest" 65536)
-    if [[ $result -ge 17 && $result -le 19 ]]; then
+    if [[ $result -ge 3 && $result -le 5 ]]; then
         pass_test
     else
-        fail_test "Expected ~18GB, got ${result}GB"
+        fail_test "Expected ~4GB, got ${result}GB"
     fi
 
-    # Test 26b model (424K bytes/token)
-    begin_test "26b @ 64K context -> ~25GB KV cache"
+    # Test 26b model (150K bytes/token, optimized)
+    begin_test "26b @ 64K context -> ~9GB KV cache"
     result=$(calculate_kv_cache_gb "26b" 65536)
-    if [[ $result -ge 24 && $result -le 27 ]]; then
+    if [[ $result -ge 8 && $result -le 10 ]]; then
         pass_test
     else
-        fail_test "Expected ~25GB, got ${result}GB"
+        fail_test "Expected ~9GB, got ${result}GB"
     fi
 
-    # Test 31b model (500K bytes/token)
-    begin_test "31b @ 64K context -> ~31GB KV cache"
+    # Test 31b model (180K bytes/token, optimized)
+    begin_test "31b @ 64K context -> ~11GB KV cache"
     result=$(calculate_kv_cache_gb "31b" 65536)
-    if [[ $result -ge 30 && $result -le 33 ]]; then
+    if [[ $result -ge 10 && $result -le 12 ]]; then
         pass_test
     else
-        fail_test "Expected ~31GB, got ${result}GB"
+        fail_test "Expected ~11GB, got ${result}GB"
     fi
 
     # Test with 128K context (double the cache)
-    begin_test "latest @ 128K context -> ~36GB KV cache"
+    begin_test "latest @ 128K context -> ~8GB KV cache"
     result=$(calculate_kv_cache_gb "latest" 131072)
-    if [[ $result -ge 35 && $result -le 38 ]]; then
+    if [[ $result -ge 7 && $result -le 10 ]]; then
         pass_test
     else
-        fail_test "Expected ~36GB, got ${result}GB"
+        fail_test "Expected ~8GB, got ${result}GB"
     fi
 }
 

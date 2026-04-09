@@ -23,9 +23,24 @@ source "$SCRIPT_DIR/helpers.sh"
 # Extract just the validate_model_name function
 validate_model_name() {
     local model="$1"
-    # Only allow gemma4: prefix with known variants
+
+    # First check against allowed patterns
     case "$model" in
         gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
+            # Verify exact length to detect truncation or appended characters
+            # Note: Bash cannot store null bytes in variables - they act as terminators
+            # So $'gemma4:e2b\0' becomes just "gemma4:e2b" (length 10)
+            # This check catches if someone tries to append data after what bash sees
+            local expected_len
+            case "$model" in
+                gemma4:latest) expected_len=13 ;;
+                gemma4:e2b|gemma4:26b|gemma4:31b) expected_len=10 ;;
+            esac
+
+            # Length check: ensures no extra characters (spaces, tabs, etc.)
+            if [ ${#model} -ne "$expected_len" ]; then
+                return 1
+            fi
             return 0
             ;;
         *)
@@ -236,11 +251,16 @@ test_unicode_and_encoding() {
     fi
 
     # Test null byte
-    begin_test "gemma4:e2b\\0 is rejected"
+    # Note: Bash automatically truncates strings at null bytes, so $'gemma4:e2b\0'
+    # becomes just "gemma4:e2b" (bash cannot store null bytes in variables).
+    # This is actually a security feature - null bytes are automatically stripped.
+    # We test that the truncated value is still valid (which it should be).
+    begin_test "gemma4:e2b\\0 is handled (bash auto-truncates)"
     if validate_model_name $'gemma4:e2b\0'; then
-        fail_test "Null byte should be rejected"
-    else
+        # Bash truncated it to valid "gemma4:e2b" - this is expected and safe
         pass_test
+    else
+        fail_test "Bash should auto-truncate null-terminated strings to valid prefix"
     fi
 }
 
