@@ -66,6 +66,7 @@ Production-ready scripts for deploying Google's Gemma4 models with OpenCode via 
 - **LaunchAgent** - Auto-starts Ollama on boot with optimized settings
 - **OpenCode Config** - Pre-configured for your hardware
 - **Custom Model** - Hardware-optimized variant (e.g., gemma4-optimized-31b) with tuned context window
+- **Superpowers Plugin** (Optional) - Enhanced OpenCode capabilities from [obra/superpowers](https://github.com/obra/superpowers)
 
 ### Optimizations (Hardware-Dependent)
 - Metal GPU memory allocation (70-75% of total RAM)
@@ -333,6 +334,7 @@ cd ai_model
 - **OpenCode**: https://opencode.ai/docs/
 - **Gemma**: https://ai.google.dev/gemma
 - **Models**: https://ollama.com/library/gemma4/tags
+- **Superpowers Plugin**: https://github.com/obra/superpowers
 
 ## Files
 
