@@ -35,49 +35,9 @@
 
 set -euo pipefail
 
-#############################################
-# Color Definitions
-#############################################
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-#############################################
-# Print Functions
-#############################################
-
-print_header() {
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}========================================${NC}\n"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-print_status() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}" >&2
-}
-
-print_action() {
-    echo -e "${CYAN}→ $1${NC}"
-}
-
-print_dry_run() {
-    echo -e "${YELLOW}[DRY-RUN]${NC} $1"
-}
+# Source library modules
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
 
 #############################################
 # Configuration
@@ -183,30 +143,6 @@ confirm() {
     fi
 
     [[ "$response" =~ ^[Yy]$ ]]
-}
-
-# Get size of file or directory in bytes
-get_size() {
-    local path="$1"
-    if [[ -e "$path" ]]; then
-        if [[ -d "$path" ]]; then
-            du -sk "$path" 2>/dev/null | awk '{print $1 * 1024}' || echo "0"
-        else
-            stat -f%z "$path" 2>/dev/null || echo "0"
-        fi
-    else
-        echo "0"
-    fi
-}
-
-# Format bytes to human-readable
-format_bytes() {
-    local bytes=$1
-    if command -v numfmt &> /dev/null; then
-        numfmt --to=iec-i --suffix=B "$bytes" 2>/dev/null || echo "${bytes} bytes"
-    else
-        echo "$bytes bytes"
-    fi
 }
 
 # Backup file or directory

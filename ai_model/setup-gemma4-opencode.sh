@@ -38,190 +38,17 @@
 
 set -euo pipefail
 
-#############################################
-# Color Definitions
-#############################################
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
-
-#############################################
-# Print Functions
-#############################################
-
-print_header() {
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}========================================${NC}\n"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
-}
-
-print_status() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}" >&2
-}
-
-#############################################
-# Setup
-#############################################
-
-#############################################
-# Hardware Detection Functions
-#############################################
-
-# Detect Apple Silicon chip generation
-detect_m_chip() {
-    local cpu_brand
-    cpu_brand=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "Unknown")
-
-    if echo "$cpu_brand" | grep -q "Apple M1"; then
-        echo "M1"
-    elif echo "$cpu_brand" | grep -q "Apple M2"; then
-        echo "M2"
-    elif echo "$cpu_brand" | grep -q "Apple M3"; then
-        echo "M3"
-    elif echo "$cpu_brand" | grep -q "Apple M4"; then
-        echo "M4"
-    elif echo "$cpu_brand" | grep -q "Apple M5"; then
-        echo "M5"
-    else
-        echo "Unknown"
-    fi
-}
-
-# Detect total system RAM in GB
-detect_ram_gb() {
-    local ram_bytes
-    ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
-    echo $((ram_bytes / 1024 / 1024 / 1024))
-}
-
-# Detect CPU cores (performance cores for Apple Silicon)
-detect_cpu_cores() {
-    sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "8"
-}
-
-# Calculate optimal Metal memory allocation (bytes)
-# Strategy: Use 70-80% of total RAM, leave headroom for system
-calculate_metal_memory() {
-    local ram_gb=$1
-    local ram_bytes=$((ram_gb * 1024 * 1024 * 1024))
-
-    # Use 75% of RAM for Metal, capped at reasonable limits
-    local metal_memory=$((ram_bytes * 75 / 100))
-
-    # Cap at 80GB for very high-RAM systems to leave room for OS
-    local max_metal=$((80 * 1024 * 1024 * 1024))
-    if [[ $metal_memory -gt $max_metal ]]; then
-        metal_memory=$max_metal
-    fi
-
-    echo "$metal_memory"
-}
-
-# Calculate optimal parallel requests
-# Strategy: More RAM = more parallel requests, but cap at reasonable limit
-calculate_num_parallel() {
-    local ram_gb=$1
-
-    if [[ $ram_gb -ge 64 ]]; then
-        echo "6"
-    elif [[ $ram_gb -ge 48 ]]; then
-        echo "4"
-    elif [[ $ram_gb -ge 32 ]]; then
-        echo "3"
-    elif [[ $ram_gb -ge 24 ]]; then
-        echo "2"
-    else
-        echo "1"
-    fi
-}
-
-# Calculate optimal context length based on model and available RAM
-# Gemma4 models have different native context windows:
-# - e2b, latest/e4b: 128K (131,072 tokens)
-# - 26b, 31b: 256K (262,144 tokens)
-calculate_context_length() {
-    local ram_gb=$1
-    local model_size=$2  # e.g., "e2b", "latest", "e4b", "26b", "31b"
-
-    # Determine model's native context capability
-    case "$model_size" in
-        26b|31b)
-            # Large models support 256K context
-            if [[ $ram_gb -ge 64 ]]; then
-                echo "262144"  # Full 256K context
-            elif [[ $ram_gb -ge 48 ]]; then
-                echo "262144"  # Full 256K context
-            else
-                echo "131072"  # 128K context (reduced for lower RAM)
-            fi
-            ;;
-        e2b|latest|e4b)
-            # Smaller models support 128K context
-            if [[ $ram_gb -ge 24 ]]; then
-                echo "131072"  # Full 128K context
-            elif [[ $ram_gb -ge 16 ]]; then
-                echo "65536"   # 64K context (reduced for lower RAM)
-            else
-                echo "32768"   # 32K context (minimum)
-            fi
-            ;;
-        *)
-            # Default fallback
-            echo "131072"  # 128K context
-            ;;
-    esac
-}
-
-# Recommend best Gemma4 model for hardware
-# Based on actual models available at https://ollama.com/library/gemma4/tags
-recommend_model() {
-    local ram_gb=$1
-
-    if [[ $ram_gb -ge 48 ]]; then
-        echo "gemma4:31b"  # 20GB model, 256K context
-    elif [[ $ram_gb -ge 32 ]]; then
-        echo "gemma4:26b"  # 18GB model, 256K context
-    elif [[ $ram_gb -ge 16 ]]; then
-        echo "gemma4:latest"  # 9.6GB model (e4b), 128K context
-    else
-        echo "gemma4:e2b"  # 7.2GB model, 128K context (smallest)
-    fi
-}
-
-# Get model variant from model name (e.g., "gemma4:26b" -> "26b")
-get_model_size() {
-    local model=$1
-    local variant="${model#*:}"  # Remove everything before :
-    # If it's just "gemma4" without variant, default to latest
-    if [[ "$variant" == "gemma4" ]] || [[ -z "$variant" ]]; then
-        echo "latest"
-    else
-        echo "$variant"
-    fi
-}
+# Source library modules
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/hardware-config.sh"
 
 #############################################
 # Configuration
 #############################################
 
-# Detect hardware
-DETECTED_M_CHIP=$(detect_m_chip)
-DETECTED_RAM_GB=$(detect_ram_gb)
-DETECTED_CPU_CORES=$(detect_cpu_cores)
+# Detect hardware (batched for efficiency - single subprocess call)
+read -r DETECTED_M_CHIP DETECTED_RAM_GB DETECTED_CPU_CORES <<< "$(detect_hardware_profile)"
 
 # Model configuration (can be overridden via --model flag)
 RECOMMENDED_MODEL=$(recommend_model "$DETECTED_RAM_GB")
@@ -237,6 +64,9 @@ CUSTOM_MODEL_NAME="gemma4-optimized"
 
 # Ollama configuration
 OLLAMA_HOST="http://localhost:11434"
+
+# Cache for ollama list output (avoid multiple subprocess calls)
+OLLAMA_LIST_CACHE=""
 
 #############################################
 # Parse Arguments
@@ -279,23 +109,47 @@ if [[ -z "$GEMMA_MODEL" ]]; then
         echo -e "${GREEN}Recommended Model: $RECOMMENDED_MODEL${NC}"
         echo ""
 
-        # Show all available options (from https://ollama.com/library/gemma4/tags)
-        echo "Available Gemma4 models:"
+        # Show available options with GPU compatibility indicators
+        echo "Available Gemma4 models (✓ = 100% GPU, ⚠ = CPU/GPU split):"
+        echo ""
+
+        # Check each model's GPU fit
+        test_31b_context=$(calculate_context_length "$DETECTED_RAM_GB" "31b")
+        test_26b_context=$(calculate_context_length "$DETECTED_RAM_GB" "26b")
+        test_latest_context=$(calculate_context_length "$DETECTED_RAM_GB" "latest")
+        test_e2b_context=$(calculate_context_length "$DETECTED_RAM_GB" "e2b")
+
         if [[ $DETECTED_RAM_GB -ge 48 ]]; then
-            echo "  1. gemma4:31b    (20GB model, 256K context, requires 48GB+ RAM)"
-            echo "  2. gemma4:26b    (18GB model, 256K context, requires 32GB+ RAM)"
-            echo "  3. gemma4:latest (9.6GB model, 128K context, requires 16GB+ RAM)"
-            echo "  4. gemma4:e2b    (7.2GB model, 128K context, smallest)"
+            if validate_gpu_fit "$DETECTED_RAM_GB" "31b" "$test_31b_context"; then
+                echo "  ✓ gemma4:31b    (19GB model, $((test_31b_context/1024))K context, 100% GPU)"
+            else
+                echo "  ⚠ gemma4:31b    (19GB model, $((test_31b_context/1024))K context, CPU/GPU split - not recommended)"
+            fi
+
+            if validate_gpu_fit "$DETECTED_RAM_GB" "26b" "$test_26b_context"; then
+                echo "  ✓ gemma4:26b    (17GB model, $((test_26b_context/1024))K context, 100% GPU)"
+            else
+                echo "  ⚠ gemma4:26b    (17GB model, $((test_26b_context/1024))K context, CPU/GPU split)"
+            fi
+
+            echo "  ✓ gemma4:latest (10GB model, $((test_latest_context/1024))K context, 100% GPU)"
+            echo "  ✓ gemma4:e2b    (7GB model, $((test_e2b_context/1024))K context, 100% GPU)"
         elif [[ $DETECTED_RAM_GB -ge 32 ]]; then
-            echo "  1. gemma4:26b    (18GB model, 256K context, requires 32GB+ RAM)"
-            echo "  2. gemma4:latest (9.6GB model, 128K context, requires 16GB+ RAM)"
-            echo "  3. gemma4:e2b    (7.2GB model, 128K context, smallest)"
+            if validate_gpu_fit "$DETECTED_RAM_GB" "26b" "$test_26b_context"; then
+                echo "  ✓ gemma4:26b    (17GB model, $((test_26b_context/1024))K context, 100% GPU)"
+            else
+                echo "  ⚠ gemma4:26b    (17GB model, $((test_26b_context/1024))K context, CPU/GPU split)"
+            fi
+            echo "  ✓ gemma4:latest (10GB model, $((test_latest_context/1024))K context, 100% GPU)"
+            echo "  ✓ gemma4:e2b    (7GB model, $((test_e2b_context/1024))K context, 100% GPU)"
         elif [[ $DETECTED_RAM_GB -ge 16 ]]; then
-            echo "  1. gemma4:latest (9.6GB model, 128K context, requires 16GB+ RAM)"
-            echo "  2. gemma4:e2b    (7.2GB model, 128K context, smallest)"
+            echo "  ✓ gemma4:latest (10GB model, $((test_latest_context/1024))K context, 100% GPU)"
+            echo "  ✓ gemma4:e2b    (7GB model, $((test_e2b_context/1024))K context, 100% GPU)"
         else
-            echo "  1. gemma4:e2b    (7.2GB model, 128K context, smallest)"
+            echo "  ✓ gemma4:e2b    (7GB model, $((test_e2b_context/1024))K context, 100% GPU)"
         fi
+        echo ""
+        print_info "Models marked with ⚠ will use CPU fallback (slower performance)"
         echo ""
 
         read -p "Use recommended model $RECOMMENDED_MODEL? (Y/n) " -n 1 -r
@@ -317,7 +171,67 @@ MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
 METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
 NUM_PARALLEL=$(calculate_num_parallel "$DETECTED_RAM_GB")
 CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
-NUM_CTX=$CONTEXT_LENGTH  # NUM_CTX should match or exceed CONTEXT_LENGTH
+NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
+
+# Validate that selected model will fit on GPU
+print_header "Validating GPU Compatibility"
+
+metal_gb=$((METAL_MEMORY / 1024 / 1024 / 1024))
+model_weight_gb=$(get_model_weight_gb "$MODEL_SIZE")
+kv_cache_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$CONTEXT_LENGTH")
+total_needed_gb=$((model_weight_gb + kv_cache_gb))
+
+echo "Selected Model: $GEMMA_MODEL"
+echo "Context Window: $((CONTEXT_LENGTH / 1024))K tokens"
+echo ""
+echo "GPU Memory Requirements:"
+echo "  • Model weights:     ${model_weight_gb}GB"
+echo "  • KV cache:          ${kv_cache_gb}GB"
+echo "  • Total needed:      ${total_needed_gb}GB"
+echo "  • Available Metal:   ${metal_gb}GB"
+echo ""
+
+if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
+    print_error "Model $GEMMA_MODEL will NOT fit entirely on GPU!"
+    print_warning "This will result in CPU/GPU split and poor performance"
+    echo ""
+    echo "Recommended alternative: $RECOMMENDED_MODEL"
+
+    if [[ "$AUTO_MODE" != true ]]; then
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Using recommended model instead"
+            GEMMA_MODEL="$RECOMMENDED_MODEL"
+            MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
+            CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
+            NUM_CTX=$CONTEXT_LENGTH
+            METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
+        fi
+    else
+        print_error "Cannot proceed in --auto mode with incompatible model"
+        exit 1
+    fi
+else
+    print_status "Model will run at 100% GPU - optimal performance!"
+fi
+
+#############################################
+# Helper Functions
+#############################################
+
+# Get ollama list output (cached to avoid multiple subprocess calls)
+get_ollama_list() {
+    if [[ -z "$OLLAMA_LIST_CACHE" ]]; then
+        OLLAMA_LIST_CACHE=$(ollama list 2>/dev/null || echo "")
+    fi
+    echo "$OLLAMA_LIST_CACHE"
+}
+
+# Clear ollama list cache (call after pulling new models)
+clear_ollama_cache() {
+    OLLAMA_LIST_CACHE=""
+}
 
 #############################################
 # Validation Functions
@@ -534,8 +448,8 @@ EOF
 pull_model() {
     print_header "Step 4: Pulling Gemma4 Model"
 
-    # Check if model already exists
-    if ollama list | grep -q "^${GEMMA_MODEL}"; then
+    # Check if model already exists (using cached list)
+    if get_ollama_list | grep -q "^${GEMMA_MODEL}"; then
         print_status "Model $GEMMA_MODEL already pulled"
         return 0
     fi
@@ -543,52 +457,30 @@ pull_model() {
     print_info "Pulling model: $GEMMA_MODEL"
     print_warning "This may take 15-30 minutes depending on your internet connection..."
 
-    # Extract model variant from name for better progress info
+    # Get model specifications from data structure
     local model_variant="${GEMMA_MODEL#*:}"
-    case "$model_variant" in
-        e2b*)
-            print_info "Model: gemma4:e2b (7.2GB download, 128K context)"
-            print_info "Recommended RAM: 12GB+ (will work with 8GB+ but slower)"
-            if [[ $DETECTED_RAM_GB -lt 12 ]]; then
-                print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - 12GB+ recommended"
-            else
-                print_status "Your ${DETECTED_RAM_GB}GB RAM is sufficient for this model"
-            fi
-            ;;
-        latest*|e4b*)
-            print_info "Model: gemma4:latest/e4b (9.6GB download, 128K context)"
-            print_info "Recommended RAM: 16GB+"
-            if [[ $DETECTED_RAM_GB -lt 16 ]]; then
-                print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - 16GB+ recommended"
-            else
-                print_status "Your ${DETECTED_RAM_GB}GB RAM is sufficient for this model"
-            fi
-            ;;
-        26b*)
-            print_info "Model: gemma4:26b (18GB download, 256K context)"
-            print_info "Recommended RAM: 32GB+"
-            if [[ $DETECTED_RAM_GB -lt 32 ]]; then
-                print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - 32GB+ recommended"
-            else
-                print_status "Your ${DETECTED_RAM_GB}GB RAM is sufficient for this model"
-            fi
-            ;;
-        31b*)
-            print_info "Model: gemma4:31b (20GB download, 256K context)"
-            print_info "Recommended RAM: 48GB+"
-            if [[ $DETECTED_RAM_GB -lt 48 ]]; then
-                print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - 48GB+ recommended"
-            else
-                print_status "Your ${DETECTED_RAM_GB}GB RAM is sufficient for this model"
-            fi
-            ;;
-        *)
-            print_info "Downloading ${GEMMA_MODEL}..."
-            ;;
-    esac
+    local specs
+    specs=$(get_model_specs "$model_variant")
+
+    if [[ -n "$specs" ]]; then
+        # Parse specifications
+        read -r size_gb context_k min_ram_gb <<< "$specs"
+
+        print_info "Model: gemma4:${model_variant} (${size_gb}GB download, ${context_k}K context)"
+        print_info "Recommended RAM: ${min_ram_gb}GB+"
+
+        if [[ $DETECTED_RAM_GB -lt $min_ram_gb ]]; then
+            print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - ${min_ram_gb}GB+ recommended"
+        else
+            print_status "Your ${DETECTED_RAM_GB}GB RAM is sufficient for this model"
+        fi
+    else
+        print_info "Downloading ${GEMMA_MODEL}..."
+    fi
 
     if ollama pull "$GEMMA_MODEL"; then
         print_status "Model $GEMMA_MODEL pulled successfully"
+        clear_ollama_cache  # Invalidate cache after pulling new model
     else
         print_error "Failed to pull model $GEMMA_MODEL"
         exit 1
@@ -598,8 +490,8 @@ pull_model() {
 create_custom_model() {
     print_header "Step 5: Creating High-Context Model Variant"
 
-    # Check if custom model already exists
-    if ollama list | grep -q "^${CUSTOM_MODEL_NAME}"; then
+    # Check if custom model already exists (using cached list)
+    if get_ollama_list | grep -q "^${CUSTOM_MODEL_NAME}"; then
         print_status "Custom model $CUSTOM_MODEL_NAME already exists"
 
         # Ask if user wants to recreate it (skip in auto mode)
@@ -616,6 +508,7 @@ create_custom_model() {
 
         print_info "Removing existing $CUSTOM_MODEL_NAME..."
         ollama rm "$CUSTOM_MODEL_NAME" 2>/dev/null || true
+        clear_ollama_cache  # Invalidate cache after removing model
     fi
 
     # Format context window for display
@@ -654,6 +547,7 @@ EOF
         print_status "Custom model $CUSTOM_MODEL_NAME created successfully"
         print_status "Context: ${context_display} tokens (optimized for your ${DETECTED_RAM_GB}GB RAM)"
         rm "$modelfile_path"
+        clear_ollama_cache  # Invalidate cache after creating new model
     else
         print_error "Failed to create custom model $CUSTOM_MODEL_NAME"
         rm "$modelfile_path"
@@ -677,7 +571,7 @@ EOF
 configure_opencode() {
     print_header "Step 6: Configuring OpenCode"
 
-    local opencode_config="$HOME/.config/opencode/config.json"
+    local opencode_config="$HOME/.config/opencode/opencode.json"
 
     # Create config directory if it doesn't exist
     mkdir -p "$(dirname "$opencode_config")"
@@ -694,29 +588,39 @@ configure_opencode() {
     fi
 
     print_info "Creating OpenCode configuration..."
+    print_info "Model: ollama/$CUSTOM_MODEL_NAME"
     print_info "Context window: $(printf "%'d" "$NUM_CTX") tokens"
 
-    # Calculate reasonable maxTokens (response length)
-    # Allow up to 25% of context for output, capped at 8K for practical responses
-    local max_tokens=$((NUM_CTX / 4))
-    if [[ $max_tokens -gt 8192 ]]; then
-        max_tokens=8192
-    fi
-
+    # OpenCode uses model format: "ollama/model-name"
+    # Ollama API URL needs /v1 suffix for OpenAI-compatible endpoint
     cat > "$opencode_config" << EOF
 {
-  "provider": "ollama",
-  "model": "${CUSTOM_MODEL_NAME}",
-  "baseURL": "${OLLAMA_HOST}",
-  "temperature": 0.7,
-  "maxTokens": ${max_tokens},
-  "contextWindow": ${NUM_CTX},
-  "apiKey": "not-required"
+  "\$schema": "https://opencode.ai/config.json",
+  "model": "ollama/${CUSTOM_MODEL_NAME}",
+  "provider": {
+    "ollama": {
+      "name": "Ollama",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "${OLLAMA_HOST}/v1"
+      },
+      "models": {
+        "${GEMMA_MODEL}": {
+          "name": "${GEMMA_MODEL}"
+        },
+        "${CUSTOM_MODEL_NAME}": {
+          "_launch": true,
+          "name": "${CUSTOM_MODEL_NAME}:latest"
+        }
+      }
+    }
+  }
 }
 EOF
 
-    print_status "OpenCode configured to use $CUSTOM_MODEL_NAME"
-    print_status "Context: $(printf "%'d" "$NUM_CTX") tokens, Max response: $(printf "%'d" "$max_tokens") tokens"
+    print_status "OpenCode configured to use ollama/$CUSTOM_MODEL_NAME"
+    print_status "Ollama endpoint: ${OLLAMA_HOST}/v1"
+    print_status "Context: $(printf "%'d" "$NUM_CTX") tokens"
 }
 
 #############################################
@@ -760,15 +664,18 @@ verify_setup() {
         all_good=false
     fi
 
-    # Check models
-    if ollama list | grep -q "^${GEMMA_MODEL}"; then
+    # Check models (using cached list for efficiency)
+    local model_list
+    model_list=$(get_ollama_list)
+
+    if echo "$model_list" | grep -q "^${GEMMA_MODEL}"; then
         print_status "Base Model: $GEMMA_MODEL"
     else
         print_error "Base Model: $GEMMA_MODEL NOT FOUND"
         all_good=false
     fi
 
-    if ollama list | grep -q "^${CUSTOM_MODEL_NAME}"; then
+    if echo "$model_list" | grep -q "^${CUSTOM_MODEL_NAME}"; then
         print_status "Custom Model: $CUSTOM_MODEL_NAME"
     else
         print_error "Custom Model: $CUSTOM_MODEL_NAME NOT FOUND"
@@ -776,8 +683,8 @@ verify_setup() {
     fi
 
     # Check OpenCode config
-    if [[ -f "$HOME/.config/opencode/config.json" ]]; then
-        print_status "OpenCode Config: $HOME/.config/opencode/config.json"
+    if [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
+        print_status "OpenCode Config: $HOME/.config/opencode/opencode.json"
     else
         print_error "OpenCode Config: NOT FOUND"
         all_good=false
@@ -842,9 +749,9 @@ Model Information:
 
 OpenCode Configuration:
 ----------------------
-- Config:          $HOME/.config/opencode/config.json
+- Config:          $HOME/.config/opencode/opencode.json
 - Provider:        Ollama (local)
-- Endpoint:        ${OLLAMA_HOST}
+- Endpoint:        ${OLLAMA_HOST}/v1
 - Context:         ${context_display} tokens
 
 Performance Tips:
