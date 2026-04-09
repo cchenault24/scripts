@@ -257,7 +257,7 @@ print_summary() {
     if [[ $FAILED_SUITES -eq 0 && $SKIPPED_SUITES -eq 0 ]]; then
         echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
         echo -e "${GREEN}║                                        ║${NC}"
-        echo -e "${GREEN}║   ✓ All tests passed successfully!    ║${NC}"
+        echo -e "${GREEN}║   ✓ All tests passed successfully!     ║${NC}"
         echo -e "${GREEN}║                                        ║${NC}"
         echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
         echo ""
