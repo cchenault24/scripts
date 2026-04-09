@@ -198,7 +198,7 @@ if [[ "$AUTO_MODE" != true ]]; then
 
     # Determine model's native max context
     # e2b and latest: 128K max, 26b and 31b: 256K max
-    local max_context
+    max_context=""
     case "$MODEL_SIZE" in
         e2b|latest|e4b)
             max_context=131072  # 128K
@@ -226,8 +226,8 @@ if [[ "$AUTO_MODE" != true ]]; then
     declare -a context_labels=("32K" "64K" "128K" "256K")
 
     for i in "${!context_options[@]}"; do
-        local ctx="${context_options[$i]}"
-        local label="${context_labels[$i]}"
+        ctx="${context_options[$i]}"
+        label="${context_labels[$i]}"
 
         # Skip options beyond model's native max context
         if [[ $ctx -gt $max_context ]]; then
@@ -235,8 +235,8 @@ if [[ "$AUTO_MODE" != true ]]; then
         fi
 
         # Calculate if it fits
-        local kv_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$ctx")
-        local total_gb=$((model_weight_gb + kv_gb))
+        kv_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$ctx")
+        total_gb=$((model_weight_gb + kv_gb))
 
         if validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$ctx"; then
             if [[ $ctx -eq $RECOMMENDED_CONTEXT ]]; then
@@ -255,7 +255,7 @@ if [[ "$AUTO_MODE" != true ]]; then
 
     if [[ $REPLY =~ ^[Nn]$ ]]; then
         # Build valid options string based on model max
-        local valid_options
+        valid_options=""
         if [[ $max_context -eq 262144 ]]; then
             valid_options="32K, 64K, 128K, or 256K"
         else
@@ -310,8 +310,8 @@ if [[ "$AUTO_MODE" != true ]]; then
     print_header "Custom Model Naming"
 
     # Suggest default name with context
-    local context_k=$((CONTEXT_LENGTH / 1024))
-    local default_name="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
+    context_k=$((CONTEXT_LENGTH / 1024))
+    default_name="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
 
     echo -e "${BLUE}Suggested name: ${default_name}${NC}"
     echo ""
@@ -376,7 +376,7 @@ if [[ "$AUTO_MODE" != true ]]; then
     fi
 else
     # Auto mode: use default naming with context
-    local context_k=$((CONTEXT_LENGTH / 1024))
+    context_k=$((CONTEXT_LENGTH / 1024))
     CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
 fi
 
@@ -415,7 +415,7 @@ if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
             NUM_CTX=$CONTEXT_LENGTH
             METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
             # Regenerate custom model name with new context
-            local context_k=$((CONTEXT_LENGTH / 1024))
+            context_k=$((CONTEXT_LENGTH / 1024))
             CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
         fi
     else
