@@ -232,13 +232,13 @@ test_recommend_model() {
         fail_test "Expected gemma4:e2b, got $result"
     fi
 
-    # Test 24GB RAM -> should recommend e2b (conservative values mean latest doesn't fit)
-    begin_test "24GB RAM -> gemma4:e2b"
+    # Test 24GB RAM -> should recommend latest (with GPU-validated 32K context, latest fits)
+    begin_test "24GB RAM -> gemma4:latest"
     result=$(recommend_model 24)
-    if [[ "$result" == "gemma4:e2b" ]]; then
+    if [[ "$result" == "gemma4:latest" ]]; then
         pass_test
     else
-        fail_test "Expected gemma4:e2b, got $result"
+        fail_test "Expected gemma4:latest, got $result"
     fi
 
     # Test 32GB RAM -> should recommend 26b or latest
@@ -302,13 +302,13 @@ test_calculate_context_length() {
         fail_test "Expected 131072, got $result"
     fi
 
-    # Test latest model
-    begin_test "16GB RAM + latest -> 32K context"
+    # Test latest model (GPU-validated contexts)
+    begin_test "16GB RAM + latest -> 16K context"
     result=$(calculate_context_length 16 "latest")
-    if [[ $result -eq 32768 ]]; then
+    if [[ $result -eq 16384 ]]; then
         pass_test
     else
-        fail_test "Expected 32768, got $result"
+        fail_test "Expected 16384, got $result"
     fi
 
     begin_test "32GB RAM + latest -> 64K context"
@@ -319,12 +319,12 @@ test_calculate_context_length() {
         fail_test "Expected 65536, got $result"
     fi
 
-    begin_test "48GB RAM + latest -> 128K context"
+    begin_test "48GB RAM + latest -> 64K context"
     result=$(calculate_context_length 48 "latest")
-    if [[ $result -eq 131072 ]]; then
+    if [[ $result -eq 65536 ]]; then
         pass_test
     else
-        fail_test "Expected 131072, got $result"
+        fail_test "Expected 65536, got $result"
     fi
 
     # Test 26b model
@@ -344,12 +344,12 @@ test_calculate_context_length() {
         fail_test "Expected 65536, got $result"
     fi
 
-    begin_test "64GB RAM + 26b -> 128K context"
+    begin_test "64GB RAM + 26b -> 64K context"
     result=$(calculate_context_length 64 "26b")
-    if [[ $result -eq 131072 ]]; then
+    if [[ $result -eq 65536 ]]; then
         pass_test
     else
-        fail_test "Expected 131072, got $result"
+        fail_test "Expected 65536, got $result"
     fi
 
     # Test 31b model (most conservative)
@@ -369,12 +369,12 @@ test_calculate_context_length() {
         fail_test "Expected 65536, got $result"
     fi
 
-    begin_test "80GB RAM + 31b -> 128K context"
+    begin_test "80GB RAM + 31b -> 64K context"
     result=$(calculate_context_length 80 "31b")
-    if [[ $result -eq 131072 ]]; then
+    if [[ $result -eq 65536 ]]; then
         pass_test
     else
-        fail_test "Expected 131072, got $result"
+        fail_test "Expected 65536, got $result"
     fi
 }
 

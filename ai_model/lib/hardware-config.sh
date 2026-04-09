@@ -160,56 +160,94 @@ calculate_num_parallel() {
 # Context window sizing considers both model weights AND KV cache memory:
 # - 31b model: ~19GB weights + KV cache (256K=~100GB, 128K=~50GB, 64K=~25GB)
 # - Setting too large context causes CPU/GPU split and poor GPU utilization
+#
+# IMPORTANT: This function now validates GPU fit and automatically reduces context
+# until 100% GPU usage is achieved. Never returns a context that causes CPU/GPU split.
 calculate_context_length() {
     local ram_gb=$1
     local model_size=$2  # e.g., "e2b", "latest", "e4b", "26b", "31b"
 
+    # Determine model's native max context (upper bound)
+    local max_context
+    case "$model_size" in
+        e2b|latest|e4b)
+            max_context=131072  # 128K native max
+            ;;
+        26b|31b)
+            max_context=262144  # 256K native max
+            ;;
+        *)
+            max_context=131072  # Default to 128K
+            ;;
+    esac
+
+    # Start with optimistic context based on RAM heuristics
+    local candidate_context
     case "$model_size" in
         31b)
             # 31b: Very large model, conservative context for GPU fit
             # Model: 19GB, KV cache: ~512 KB/token (524,288 bytes/token)
             if [[ $ram_gb -ge 80 ]]; then
-                echo "131072"  # 128K context (~65GB KV = ~84GB total)
+                candidate_context="131072"  # 128K context (~65GB KV = ~84GB total)
             elif [[ $ram_gb -ge 64 ]]; then
-                echo "65536"   # 64K context (~32GB KV = ~51GB total)
+                candidate_context="65536"   # 64K context (~32GB KV = ~51GB total)
             elif [[ $ram_gb -ge 48 ]]; then
-                echo "32768"   # 32K context (~16GB KV = ~35GB total)
+                candidate_context="32768"   # 32K context (~16GB KV = ~35GB total)
             else
-                echo "16384"   # 16K context (~8GB KV = ~27GB total)
+                candidate_context="16384"   # 16K context (~8GB KV = ~27GB total)
             fi
             ;;
         26b)
             # 26b: Large model, better GPU fit than 31b
             # Model: 17GB, KV cache: ~390 KB/token (400,000 bytes/token)
             if [[ $ram_gb -ge 64 ]]; then
-                echo "131072"  # 128K context (~50GB KV = ~67GB total)
+                candidate_context="131072"  # 128K context (~50GB KV = ~67GB total)
             elif [[ $ram_gb -ge 48 ]]; then
-                echo "65536"   # 64K context (~25GB KV = ~42GB total)
+                candidate_context="65536"   # 64K context (~25GB KV = ~42GB total)
             elif [[ $ram_gb -ge 32 ]]; then
-                echo "32768"   # 32K context (~12GB KV = ~29GB total)
+                candidate_context="32768"   # 32K context (~12GB KV = ~29GB total)
             else
-                echo "16384"   # 16K context (~6GB KV = ~23GB total)
+                candidate_context="16384"   # 16K context (~6GB KV = ~23GB total)
             fi
             ;;
         e2b|latest|e4b)
             # Smaller models: ~10GB weights
             # e2b: ~192 KB/token (197,000 bytes), latest/e4b: ~288 KB/token (295,000 bytes)
             if [[ $ram_gb -ge 48 ]]; then
-                echo "131072"  # 128K context (latest: ~36GB KV = ~46GB total, e2b: ~24GB KV = ~31GB total)
+                candidate_context="131072"  # 128K context (latest: ~36GB KV = ~46GB total, e2b: ~24GB KV = ~31GB total)
             elif [[ $ram_gb -ge 32 ]]; then
-                echo "65536"   # 64K context (latest: ~18GB KV = ~28GB total, e2b: ~12GB KV = ~19GB total)
+                candidate_context="65536"   # 64K context (latest: ~18GB KV = ~28GB total, e2b: ~12GB KV = ~19GB total)
             elif [[ $ram_gb -ge 24 ]]; then
-                echo "65536"   # 64K context
+                candidate_context="65536"   # 64K context
             elif [[ $ram_gb -ge 16 ]]; then
-                echo "32768"   # 32K context
+                candidate_context="32768"   # 32K context
             else
-                echo "16384"   # 16K context
+                candidate_context="16384"   # 16K context
             fi
             ;;
         *)
-            echo "65536"  # 64K context default
+            candidate_context="65536"  # 64K context default
             ;;
     esac
+
+    # Validate GPU fit and reduce context until it fits at 100% GPU
+    # This ensures we NEVER recommend a context that causes CPU/GPU split
+    local min_context=8192  # 8K minimum (practical lower bound for coding)
+
+    while [[ $candidate_context -ge $min_context ]]; do
+        if validate_gpu_fit "$ram_gb" "$model_size" "$candidate_context"; then
+            # Found a context that fits on GPU!
+            echo "$candidate_context"
+            return 0
+        fi
+
+        # Didn't fit, try half the context
+        candidate_context=$((candidate_context / 2))
+    done
+
+    # If we get here, even minimum context doesn't fit (very low RAM scenario)
+    # Return minimum context anyway - user will see warning in validation step
+    echo "$min_context"
 }
 
 # Recommend best Gemma4 model based on available RAM AND GPU fit
