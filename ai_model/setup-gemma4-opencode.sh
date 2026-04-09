@@ -766,7 +766,7 @@ Troubleshooting:
 ---------------
 - If OpenCode can't connect: curl ${OLLAMA_HOST}/api/tags
 - If model is slow: Check GPU usage in Activity Monitor
-- If out of memory: Try a smaller model (./setup-gemma4-opencode.sh --model gemma4:9b)
+- If out of memory: Try a smaller model (./setup-gemma4-opencode.sh --model gemma4:e2b)
 - View errors: tail -f /tmp/ollama.stderr.log
 
 Documentation:

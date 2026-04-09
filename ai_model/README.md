@@ -44,8 +44,8 @@ Production-ready scripts for deploying Google's Gemma4 models with OpenCode via 
 |-------|------|---------|--------------|----------|
 | **gemma4:e2b** | 7.2GB | 128K | 12GB+ | Minimal RAM systems |
 | **gemma4:latest** | 9.6GB | 128K | 16GB+ | Balanced performance |
-| **gemma4:26b** | 18GB | 256K | 32GB+ | Large context needs |
-| **gemma4:31b** | 20GB | 256K | 48GB+ | Maximum quality |
+| **gemma4:26b** | 17GB | 256K | 32GB+ | Large context needs |
+| **gemma4:31b** | 19GB | 256K | 48GB+ | Maximum quality |
 
 *Source: https://ollama.com/library/gemma4/tags*
 
@@ -137,8 +137,8 @@ Detected Hardware:
 Recommended Model: gemma4:31b
 
 Available Gemma4 models:
-  1. gemma4:31b    (20GB model, 256K context, requires 48GB+ RAM)
-  2. gemma4:26b    (18GB model, 256K context, requires 32GB+ RAM)
+  1. gemma4:31b    (19GB model, 256K context, requires 48GB+ RAM)
+  2. gemma4:26b    (17GB model, 256K context, requires 32GB+ RAM)
   3. gemma4:latest (9.6GB model, 128K context, requires 16GB+ RAM)
   4. gemma4:e2b    (7.2GB model, 128K context, smallest)
 
