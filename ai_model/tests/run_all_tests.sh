@@ -39,6 +39,7 @@ TEST_SUITES=(
     "test-hardware-config.sh|Hardware Configuration Tests|unit"
     "test-validation.sh|Input Validation Tests|unit"
     "test-integration.sh|Integration Tests|integration"
+    "test-e2e-flow.sh|E2E Interactive Flow Tests|e2e"
 )
 
 # Track results
