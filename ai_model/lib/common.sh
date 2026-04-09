@@ -123,3 +123,71 @@ format_bytes() {
         fi
     fi
 }
+
+# Format context length to K notation (e.g., 65536 -> "64K")
+format_context_k() {
+    local context_tokens=$1
+    echo "$((context_tokens / 1024))K"
+}
+
+# Format context for display (K notation if >= 100K, otherwise comma-separated)
+format_context_display() {
+    local context_tokens=$1
+    if [[ $context_tokens -ge 100000 ]]; then
+        format_context_k "$context_tokens"
+    else
+        printf "%'d" "$context_tokens"
+    fi
+}
+
+# Generate custom model name with context suffix
+generate_custom_model_name() {
+    local model_size=$1
+    local context_tokens=$2
+    local context_k=$((context_tokens / 1024))
+    echo "gemma4-optimized-${model_size}-${context_k}k"
+}
+
+# Validate model name against allowed list
+validate_model_name() {
+    local model="$1"
+
+    # First check against allowed patterns
+    case "$model" in
+        gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
+            # Verify exact length to detect null bytes or other hidden characters
+            # gemma4:e2b=10, gemma4:latest=13, gemma4:26b=10, gemma4:31b=10
+            # Bash preserves null bytes in length, so 'gemma4:e2b\0' would be length 11
+            local expected_len
+            case "$model" in
+                gemma4:latest) expected_len=13 ;;
+                gemma4:e2b|gemma4:26b|gemma4:31b) expected_len=10 ;;
+            esac
+
+            if [ ${#model} -ne "$expected_len" ]; then
+                print_error "Invalid model name: contains invalid characters"
+                return 1
+            fi
+            return 0
+            ;;
+        *)
+            print_error "Invalid model name: $model"
+            print_info "Allowed models: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b"
+            return 1
+            ;;
+    esac
+}
+
+# Get ollama list output (cached to avoid multiple subprocess calls)
+OLLAMA_LIST_CACHE=""
+get_ollama_list() {
+    if [[ -z "$OLLAMA_LIST_CACHE" ]]; then
+        OLLAMA_LIST_CACHE=$(ollama list 2>/dev/null || echo "")
+    fi
+    echo "$OLLAMA_LIST_CACHE"
+}
+
+# Clear ollama list cache (call after pulling new models)
+clear_ollama_cache() {
+    OLLAMA_LIST_CACHE=""
+}

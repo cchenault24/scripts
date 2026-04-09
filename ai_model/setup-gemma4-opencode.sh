@@ -51,6 +51,7 @@ trap cleanup EXIT INT TERM
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/hardware-config.sh"
+source "$SCRIPT_DIR/lib/interactive.sh"
 
 #############################################
 # Configuration
@@ -194,190 +195,17 @@ CONTEXT_LENGTH=$RECOMMENDED_CONTEXT  # Default to recommended
 
 # Ask about context window (skip in auto mode)
 if [[ "$AUTO_MODE" != true ]]; then
-    print_header "Context Window Selection"
-
-    # Determine model's native max context
-    # e2b and latest: 128K max, 26b and 31b: 256K max
-    max_context=""
-    case "$MODEL_SIZE" in
-        e2b|latest|e4b)
-            max_context=131072  # 128K
-            ;;
-        26b|31b)
-            max_context=262144  # 256K
-            ;;
-        *)
-            max_context=131072  # Default to 128K
-            ;;
-    esac
-
-    echo -e "${BLUE}Model: ${GEMMA_MODEL} (native max: $((max_context / 1024))K context)${NC}"
-    echo -e "${BLUE}Recommended context for your hardware: $((RECOMMENDED_CONTEXT / 1024))K tokens${NC}"
-    echo ""
-    echo "Available context window sizes:"
-    echo ""
-
-    # Calculate GPU fit for each context size
-    metal_gb=$((METAL_MEMORY / BYTES_PER_GB))
-    model_weight_gb=$(get_model_weight_gb "$MODEL_SIZE")
-
-    # Context options to display (only up to model's max)
-    declare -a context_options=(32768 65536 131072 262144)
-    declare -a context_labels=("32K" "64K" "128K" "256K")
-
-    for i in "${!context_options[@]}"; do
-        ctx="${context_options[$i]}"
-        label="${context_labels[$i]}"
-
-        # Skip options beyond model's native max context
-        if [[ $ctx -gt $max_context ]]; then
-            continue
-        fi
-
-        # Calculate if it fits
-        kv_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$ctx")
-        total_gb=$((model_weight_gb + kv_gb))
-
-        if validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$ctx"; then
-            if [[ $ctx -eq $RECOMMENDED_CONTEXT ]]; then
-                echo -e "  ${GREEN}✓ ${label} (${ctx} tokens) - Recommended${NC}"
-            else
-                echo -e "  ${GREEN}✓ ${label} (${ctx} tokens) - 100% GPU${NC}"
-            fi
-        else
-            echo -e "  ${YELLOW}⚠ ${label} (${ctx} tokens) - CPU/GPU split (slower)${NC}"
-        fi
-    done
-
-    echo ""
-    read -p "Use recommended $((RECOMMENDED_CONTEXT / 1024))K context? (Y/n) " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        # Build valid options string based on model max
-        valid_options=""
-        if [[ $max_context -eq 262144 ]]; then
-            valid_options="32K, 64K, 128K, or 256K"
-        else
-            valid_options="32K, 64K, or 128K"
-        fi
-
-        while true; do
-            echo ""
-            read -r -p "Enter context size ($valid_options): " context_input
-
-            # Parse input (use tr for bash 3.2 compatibility)
-            context_lower=$(echo "$context_input" | tr '[:upper:]' '[:lower:]')
-            case "$context_lower" in
-                32k|32)
-                    CONTEXT_LENGTH=32768
-                    break
-                    ;;
-                64k|64)
-                    CONTEXT_LENGTH=65536
-                    break
-                    ;;
-                128k|128)
-                    CONTEXT_LENGTH=131072
-                    break
-                    ;;
-                256k|256)
-                    if [[ $max_context -lt 262144 ]]; then
-                        print_error "256K exceeds model's native max context ($((max_context / 1024))K)"
-                        print_info "This model supports up to $((max_context / 1024))K context"
-                    else
-                        CONTEXT_LENGTH=262144
-                        break
-                    fi
-                    ;;
-                "")
-                    print_info "No input, using recommended $((RECOMMENDED_CONTEXT / 1024))K"
-                    CONTEXT_LENGTH=$RECOMMENDED_CONTEXT
-                    break
-                    ;;
-                *)
-                    print_error "Invalid input. Please enter $valid_options"
-                    ;;
-            esac
-        done
-    fi
+    select_context_window
+else
+    NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 fi
-
-NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 
 # Ask about custom model name (skip in auto mode)
 if [[ "$AUTO_MODE" != true ]]; then
-    print_header "Custom Model Naming"
-
-    # Suggest default name with context
-    context_k=$((CONTEXT_LENGTH / 1024))
-    default_name="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
-
-    echo -e "${BLUE}Suggested name: ${default_name}${NC}"
-    echo ""
-    echo "This is the name you'll use with 'ollama run' and OpenCode."
-    echo "Examples of custom names:"
-    echo "  • gemma4-coding-fast    (for quick coding tasks)"
-    echo "  • gemma4-research-deep  (for research with large context)"
-    echo "  • gemma4-31b-balanced   (descriptive of model + purpose)"
-    echo ""
-    echo "Name requirements:"
-    echo "  • Lowercase letters, numbers, hyphens (-), underscores (_), dots (.)"
-    echo "  • No spaces or special characters"
-    echo "  • Should be memorable and descriptive"
-    echo ""
-    read -p "Use suggested name? (Y/n) " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        while true; do
-            echo ""
-            read -r -p "Enter custom model name: " custom_input
-
-            # Use default if empty
-            if [[ -z "$custom_input" ]]; then
-                print_info "No input, using suggested name"
-                CUSTOM_MODEL_NAME="$default_name"
-                break
-            fi
-
-            # Validate format: lowercase alphanumeric + hyphens, underscores, dots only
-            # No spaces, no special chars that could break shell/ollama
-            if [[ "$custom_input" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
-                # Additional validation: reasonable length
-                if [[ ${#custom_input} -gt 64 ]]; then
-                    print_error "Name too long (max 64 characters)"
-                    continue
-                fi
-
-                # Warn if no prefix (recommended to start with "gemma" for clarity)
-                if [[ ! "$custom_input" =~ ^gemma ]]; then
-                    echo ""
-                    print_warning "Name doesn't start with 'gemma' - may be unclear this is a Gemma model"
-                    read -p "Use this name anyway? (y/N) " -n 1 -r
-                    echo
-                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                        continue
-                    fi
-                fi
-
-                CUSTOM_MODEL_NAME="$custom_input"
-                print_status "Using custom name: $CUSTOM_MODEL_NAME"
-                break
-            else
-                print_error "Invalid name format"
-                echo "  • Must start with a letter or number"
-                echo "  • Can only contain: a-z, 0-9, hyphens (-), underscores (_), dots (.)"
-                echo "  • No uppercase, spaces, or special characters"
-            fi
-        done
-    else
-        CUSTOM_MODEL_NAME="$default_name"
-    fi
+    select_custom_name
 else
     # Auto mode: use default naming with context
-    context_k=$((CONTEXT_LENGTH / 1024))
-    CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
+    CUSTOM_MODEL_NAME=$(generate_custom_model_name "$MODEL_SIZE" "$CONTEXT_LENGTH")
 fi
 
 # Validate that selected model will fit on GPU
@@ -389,7 +217,7 @@ kv_cache_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$CONTEXT_LENGTH")
 total_needed_gb=$((model_weight_gb + kv_cache_gb))
 
 echo "Selected Model: $GEMMA_MODEL"
-echo "Context Window: $((CONTEXT_LENGTH / 1024))K tokens"
+echo "Context Window: $(format_context_k "$CONTEXT_LENGTH") tokens"
 echo ""
 echo "GPU Memory Requirements:"
 echo "  • Model weights:     ${model_weight_gb}GB"
@@ -415,8 +243,7 @@ if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
             NUM_CTX=$CONTEXT_LENGTH
             METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
             # Regenerate custom model name with new context
-            context_k=$((CONTEXT_LENGTH / 1024))
-            CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}-${context_k}k"
+            CUSTOM_MODEL_NAME=$(generate_custom_model_name "$MODEL_SIZE" "$CONTEXT_LENGTH")
         fi
     else
         print_error "Cannot proceed in --auto mode with incompatible model"
@@ -437,51 +264,6 @@ fi
 
 #############################################
 # Helper Functions
-#############################################
-
-# Validate model name against allowed list
-validate_model_name() {
-    local model="$1"
-
-    # First check against allowed patterns
-    case "$model" in
-        gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
-            # Verify exact length to detect null bytes or other hidden characters
-            # gemma4:e2b=10, gemma4:latest=13, gemma4:26b=10, gemma4:31b=10
-            # Bash preserves null bytes in length, so 'gemma4:e2b\0' would be length 11
-            local expected_len
-            case "$model" in
-                gemma4:latest) expected_len=13 ;;
-                gemma4:e2b|gemma4:26b|gemma4:31b) expected_len=10 ;;
-            esac
-
-            if [ ${#model} -ne "$expected_len" ]; then
-                print_error "Invalid model name: contains invalid characters"
-                return 1
-            fi
-            return 0
-            ;;
-        *)
-            print_error "Invalid model name: $model"
-            print_info "Allowed models: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b"
-            return 1
-            ;;
-    esac
-}
-
-# Get ollama list output (cached to avoid multiple subprocess calls)
-get_ollama_list() {
-    if [[ -z "$OLLAMA_LIST_CACHE" ]]; then
-        OLLAMA_LIST_CACHE=$(ollama list 2>/dev/null || echo "")
-    fi
-    echo "$OLLAMA_LIST_CACHE"
-}
-
-# Clear ollama list cache (call after pulling new models)
-clear_ollama_cache() {
-    OLLAMA_LIST_CACHE=""
-}
-
 #############################################
 # Validation Functions
 #############################################
@@ -619,7 +401,7 @@ create_launchagent() {
 
     print_info "Creating dynamically optimized LaunchAgent configuration..."
     print_info "Optimizations based on your hardware:"
-    echo "  • Metal Memory:     $(numfmt --to=iec-i --suffix=B "$METAL_MEMORY" 2>/dev/null || echo "${METAL_MEMORY} bytes")"
+    echo "  • Metal Memory:     $(format_bytes "$METAL_MEMORY")"
     echo "  • Parallel Requests: $NUM_PARALLEL"
     echo "  • Context Length:    $(printf "%'d" "$CONTEXT_LENGTH") tokens"
     echo "  • GPU Layers:        All (999)"
@@ -771,11 +553,7 @@ create_custom_model() {
 
     # Format context window for display
     local context_display
-    if [[ $NUM_CTX -ge 100000 ]]; then
-        context_display="$((NUM_CTX / 1024))K"
-    else
-        context_display="$NUM_CTX"
-    fi
+    context_display=$(format_context_display "$NUM_CTX")
 
     print_info "Creating $CUSTOM_MODEL_NAME with ${context_display} token context window..."
     print_info "Configuration optimized for ${DETECTED_RAM_GB}GB RAM"
@@ -1019,11 +797,7 @@ print_usage_instructions() {
 
     # Format context for display
     local context_display
-    if [[ $NUM_CTX -ge 100000 ]]; then
-        context_display="$((NUM_CTX / 1024))K"
-    else
-        context_display="$(printf "%'d" "$NUM_CTX")"
-    fi
+    context_display=$(format_context_display "$NUM_CTX")
 
     cat << EOF
 Your Gemma4 + OpenCode environment is ready to use!
@@ -1033,7 +807,7 @@ Hardware Configuration:
 - Chip:           $DETECTED_M_CHIP
 - RAM:            ${DETECTED_RAM_GB}GB
 - CPU Cores:      $DETECTED_CPU_CORES
-- Metal Memory:   $(numfmt --to=iec-i --suffix=B "$METAL_MEMORY" 2>/dev/null || echo "$((METAL_MEMORY / 1024 / 1024 / 1024))GB")
+- Metal Memory:   $(format_bytes "$METAL_MEMORY")
 - Parallel Reqs:  $NUM_PARALLEL
 
 Quick Start:
