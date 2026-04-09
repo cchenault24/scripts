@@ -232,8 +232,8 @@ else
     print_status "Model will run at 100% GPU - optimal performance!"
 
     # Check for tight fit (less than 10% headroom)
-    local headroom_gb=$((metal_gb - total_needed_gb))
-    local min_headroom=$((metal_gb / 10))
+    headroom_gb=$((metal_gb - total_needed_gb))
+    min_headroom=$((metal_gb / 10))
     if [[ $headroom_gb -lt $min_headroom ]]; then
         print_warning "Running close to GPU memory limit (${headroom_gb}GB headroom)"
         print_info "Performance may degrade under memory pressure or with concurrent apps"
