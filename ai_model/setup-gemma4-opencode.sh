@@ -703,7 +703,6 @@ configure_opencode() {
           "name": "${GEMMA_MODEL}"
         },
         "${CUSTOM_MODEL_NAME}": {
-          "_launch": true,
           "name": "${CUSTOM_MODEL_NAME}:latest"
         }
       }
@@ -729,7 +728,6 @@ EOF
           "name": "${GEMMA_MODEL}"
         },
         "${CUSTOM_MODEL_NAME}": {
-          "_launch": true,
           "name": "${CUSTOM_MODEL_NAME}:latest"
         }
       }
