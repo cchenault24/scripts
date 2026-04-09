@@ -189,7 +189,120 @@ CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}"
 # Calculate optimal settings based on hardware
 METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
 NUM_PARALLEL=$(calculate_num_parallel "$DETECTED_RAM_GB")
-CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
+RECOMMENDED_CONTEXT=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
+CONTEXT_LENGTH=$RECOMMENDED_CONTEXT  # Default to recommended
+
+# Ask about context window (skip in auto mode)
+if [[ "$AUTO_MODE" != true ]]; then
+    print_header "Context Window Selection"
+
+    # Determine model's native max context
+    # e2b and latest: 128K max, 26b and 31b: 256K max
+    local max_context
+    case "$MODEL_SIZE" in
+        e2b|latest|e4b)
+            max_context=131072  # 128K
+            ;;
+        26b|31b)
+            max_context=262144  # 256K
+            ;;
+        *)
+            max_context=131072  # Default to 128K
+            ;;
+    esac
+
+    echo -e "${BLUE}Model: ${GEMMA_MODEL} (native max: $((max_context / 1024))K context)${NC}"
+    echo -e "${BLUE}Recommended context for your hardware: $((RECOMMENDED_CONTEXT / 1024))K tokens${NC}"
+    echo ""
+    echo "Available context window sizes:"
+    echo ""
+
+    # Calculate GPU fit for each context size
+    metal_gb=$((METAL_MEMORY / BYTES_PER_GB))
+    model_weight_gb=$(get_model_weight_gb "$MODEL_SIZE")
+
+    # Context options to display (only up to model's max)
+    declare -a context_options=(32768 65536 131072 262144)
+    declare -a context_labels=("32K" "64K" "128K" "256K")
+
+    for i in "${!context_options[@]}"; do
+        local ctx="${context_options[$i]}"
+        local label="${context_labels[$i]}"
+
+        # Skip options beyond model's native max context
+        if [[ $ctx -gt $max_context ]]; then
+            continue
+        fi
+
+        # Calculate if it fits
+        local kv_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$ctx")
+        local total_gb=$((model_weight_gb + kv_gb))
+
+        if validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$ctx"; then
+            if [[ $ctx -eq $RECOMMENDED_CONTEXT ]]; then
+                echo -e "  ${GREEN}✓ ${label} (${ctx} tokens) - Recommended${NC}"
+            else
+                echo -e "  ${GREEN}✓ ${label} (${ctx} tokens) - 100% GPU${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}⚠ ${label} (${ctx} tokens) - CPU/GPU split (slower)${NC}"
+        fi
+    done
+
+    echo ""
+    read -p "Use recommended $((RECOMMENDED_CONTEXT / 1024))K context? (Y/n) " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        # Build valid options string based on model max
+        local valid_options
+        if [[ $max_context -eq 262144 ]]; then
+            valid_options="32K, 64K, 128K, or 256K"
+        else
+            valid_options="32K, 64K, or 128K"
+        fi
+
+        while true; do
+            echo ""
+            read -r -p "Enter context size ($valid_options): " context_input
+
+            # Parse input (use tr for bash 3.2 compatibility)
+            context_lower=$(echo "$context_input" | tr '[:upper:]' '[:lower:]')
+            case "$context_lower" in
+                32k|32)
+                    CONTEXT_LENGTH=32768
+                    break
+                    ;;
+                64k|64)
+                    CONTEXT_LENGTH=65536
+                    break
+                    ;;
+                128k|128)
+                    CONTEXT_LENGTH=131072
+                    break
+                    ;;
+                256k|256)
+                    if [[ $max_context -lt 262144 ]]; then
+                        print_error "256K exceeds model's native max context ($((max_context / 1024))K)"
+                        print_info "This model supports up to $((max_context / 1024))K context"
+                    else
+                        CONTEXT_LENGTH=262144
+                        break
+                    fi
+                    ;;
+                "")
+                    print_info "No input, using recommended $((RECOMMENDED_CONTEXT / 1024))K"
+                    CONTEXT_LENGTH=$RECOMMENDED_CONTEXT
+                    break
+                    ;;
+                *)
+                    print_error "Invalid input. Please enter $valid_options"
+                    ;;
+            esac
+        done
+    fi
+fi
+
 NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 
 # Validate that selected model will fit on GPU
