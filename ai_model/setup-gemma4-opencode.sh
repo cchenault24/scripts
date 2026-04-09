@@ -331,11 +331,14 @@ install_ollama() {
         ollama_version=$(ollama --version 2>/dev/null || echo "unknown")
         print_status "Ollama already installed: $ollama_version"
 
-        # Check if it's outdated
-        if brew outdated ollama &> /dev/null; then
+        # Check if it's outdated (disable auto-update to avoid hang)
+        print_info "Checking for Ollama updates..."
+        if HOMEBREW_NO_AUTO_UPDATE=1 brew outdated ollama &> /dev/null; then
             print_info "Upgrading Ollama to latest version..."
             brew upgrade ollama
             print_status "Ollama upgraded"
+        else
+            print_info "Ollama is up to date"
         fi
     else
         print_info "Installing Ollama via Homebrew..."
@@ -373,11 +376,14 @@ install_opencode() {
             brew tap anomalyco/tap
         fi
 
-        # Check if it's outdated
-        if brew outdated opencode &> /dev/null; then
+        # Check if it's outdated (disable auto-update to avoid hang)
+        print_info "Checking for OpenCode updates..."
+        if HOMEBREW_NO_AUTO_UPDATE=1 brew outdated opencode &> /dev/null; then
             print_info "Upgrading OpenCode to latest version..."
             brew upgrade opencode
             print_status "OpenCode upgraded"
+        else
+            print_info "OpenCode is up to date"
         fi
     else
         print_info "Adding anomalyco/tap..."
