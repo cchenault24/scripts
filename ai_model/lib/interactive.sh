@@ -42,19 +42,19 @@ display_hardware_and_recommendation() {
     test_latest_context=$(calculate_context_length "$DETECTED_RAM_GB" "latest")
     test_e2b_context=$(calculate_context_length "$DETECTED_RAM_GB" "e2b")
 
-    # Display models based on RAM tiers
+    # Display models based on RAM tiers (ascending order: smallest to largest)
     if [[ $DETECTED_RAM_GB -ge 48 ]]; then
+        display_model_gpu_fit "e2b" "$test_e2b_context"
+        display_model_gpu_fit "latest" "$test_latest_context"
+        display_model_gpu_fit "26b" "$test_26b_context"
         display_model_gpu_fit "31b" "$test_31b_context"
-        display_model_gpu_fit "26b" "$test_26b_context"
-        display_model_gpu_fit "latest" "$test_latest_context"
-        display_model_gpu_fit "e2b" "$test_e2b_context"
     elif [[ $DETECTED_RAM_GB -ge 32 ]]; then
+        display_model_gpu_fit "e2b" "$test_e2b_context"
+        display_model_gpu_fit "latest" "$test_latest_context"
         display_model_gpu_fit "26b" "$test_26b_context"
-        display_model_gpu_fit "latest" "$test_latest_context"
-        display_model_gpu_fit "e2b" "$test_e2b_context"
     elif [[ $DETECTED_RAM_GB -ge 16 ]]; then
-        display_model_gpu_fit "latest" "$test_latest_context"
         display_model_gpu_fit "e2b" "$test_e2b_context"
+        display_model_gpu_fit "latest" "$test_latest_context"
     else
         display_model_gpu_fit "e2b" "$test_e2b_context"
     fi
@@ -98,10 +98,10 @@ display_model_gpu_fit() {
 select_model_interactive() {
     print_header "Model Selection"
 
-    # Build arrays of available models with their specs
-    local -a models=("gemma4:31b" "gemma4:26b" "gemma4:latest" "gemma4:e2b")
-    local -a model_sizes=("31b" "26b" "latest" "e2b")
-    local -a model_weights=("19GB" "17GB" "10GB" "7GB")
+    # Build arrays of available models with their specs (ascending order: smallest to largest)
+    local -a models=("gemma4:e2b" "gemma4:latest" "gemma4:26b" "gemma4:31b")
+    local -a model_sizes=("e2b" "latest" "26b" "31b")
+    local -a model_weights=("7GB" "10GB" "17GB" "19GB")
 
     echo "Select a model from the list below:"
     echo ""
