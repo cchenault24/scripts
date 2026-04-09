@@ -65,7 +65,7 @@ Production-ready scripts for deploying Google's Gemma4 models with OpenCode via 
 ### Configuration
 - **LaunchAgent** - Auto-starts Ollama on boot with optimized settings
 - **OpenCode Config** - Pre-configured for your hardware
-- **Custom Model** - Optimized Gemma4 variant with tuned context window
+- **Custom Model** - Hardware-optimized variant (e.g., gemma4-optimized-31b) with tuned context window
 
 ### Optimizations (Hardware-Dependent)
 - Metal GPU memory allocation (70-75% of total RAM)
@@ -188,7 +188,8 @@ opencode
 
 ### Test the Model
 ```bash
-ollama run gemma4-optimized
+# Custom model name includes the base model variant
+ollama run gemma4-optimized-31b  # Or gemma4-optimized-26b, gemma4-optimized-latest, etc.
 ```
 
 ### Check Status

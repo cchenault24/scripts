@@ -68,8 +68,8 @@ AUTO_MODE=false
 LAUNCHAGENT_LABEL="com.ollama.custom"
 LAUNCHAGENT_PLIST="$HOME/Library/LaunchAgents/${LAUNCHAGENT_LABEL}.plist"
 
-# Custom model name (context window varies: 128K-256K based on base model)
-CUSTOM_MODEL_NAME="gemma4-optimized"
+# Custom model name will be set after model selection (e.g., gemma4-optimized-31b)
+CUSTOM_MODEL_NAME=""
 
 # Ollama configuration
 OLLAMA_HOST="http://localhost:11434"
@@ -183,6 +183,9 @@ fi
 # Extract model size for dynamic configuration
 MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
 
+# Set custom model name to include variant (e.g., gemma4-optimized-31b)
+CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}"
+
 # Calculate optimal settings based on hardware
 METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
 NUM_PARALLEL=$(calculate_num_parallel "$DETECTED_RAM_GB")
@@ -220,6 +223,7 @@ if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
             print_info "Using recommended model instead"
             GEMMA_MODEL="$RECOMMENDED_MODEL"
             MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
+            CUSTOM_MODEL_NAME="gemma4-optimized-${MODEL_SIZE}"
             CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
             NUM_CTX=$CONTEXT_LENGTH
             METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
