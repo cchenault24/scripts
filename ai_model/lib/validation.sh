@@ -7,12 +7,27 @@
 
 set -euo pipefail
 
-# Check if running on macOS
+# Check if running on macOS and minimum version
 check_macos() {
     if [[ "$(uname)" != "Darwin" ]]; then
         print_error "This script requires macOS"
         exit 1
     fi
+
+    # Check minimum macOS version (10.14+, Mojave+)
+    local os_version
+    os_version=$(sw_vers -productVersion)
+    local major minor
+    IFS='.' read -r major minor _ <<< "$os_version"
+
+    if [[ $major -lt 10 ]] || [[ $major -eq 10 && $minor -lt 14 ]]; then
+        print_error "This script requires macOS 10.14 (Mojave) or later"
+        print_info "Your version: $os_version"
+        print_info "Reason: Homebrew requires macOS 10.14+"
+        exit 1
+    fi
+
+    print_status "macOS $os_version detected"
 }
 
 # Check if running on Apple Silicon

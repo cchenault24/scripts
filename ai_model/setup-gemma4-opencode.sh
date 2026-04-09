@@ -28,8 +28,10 @@
 #   --auto           Skip all interactive prompts, use auto-detected defaults
 #
 # Requirements:
-#   - macOS with Apple Silicon (M1 or later recommended)
+#   - macOS 10.14+ (Mojave or later)
+#   - Apple Silicon (M1/M2/M3/M4/M5 recommended, Intel supported but slower)
 #   - Homebrew installed
+#   - Minimum 12GB RAM (16GB+ recommended)
 #   - RAM varies by model:
 #       e2b: 12GB+ (7.2GB model, 128K context)
 #       latest/e4b: 16GB+ (9.6GB model, 128K context)
@@ -90,6 +92,13 @@ OLLAMA_HOST="http://localhost:11434"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --version|-v)
+            echo "Gemma4 + OpenCode Setup Script"
+            echo "Version: 2.0.0 (modular architecture)"
+            echo "Compatible models: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b"
+            echo "Requirements: macOS 10.14+, Homebrew, 12GB+ RAM"
+            exit 0
+            ;;
         --model)
             validate_model_name "$2" || exit 1
             GEMMA_MODEL="$2"

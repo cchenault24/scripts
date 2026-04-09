@@ -113,6 +113,16 @@ EOF
 EOF
     fi
 
+    # Validate JSON syntax (if jq is available)
+    if command -v jq &> /dev/null; then
+        if ! jq empty "$opencode_config" > /dev/null 2>&1; then
+            print_error "OpenCode config JSON validation failed"
+            print_info "Config may contain syntax errors"
+            exit 1
+        fi
+        print_status "OpenCode config JSON validated successfully"
+    fi
+
     print_status "OpenCode configured to use ollama/$CUSTOM_MODEL_NAME"
     print_status "Ollama endpoint: ${OLLAMA_HOST}/v1"
     print_status "Context: $(printf "%'d" "$NUM_CTX") tokens"

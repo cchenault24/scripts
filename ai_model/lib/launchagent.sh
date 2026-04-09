@@ -98,6 +98,14 @@ EOF
 
     print_status "LaunchAgent configuration created with hardware-optimized settings"
 
+    # Validate plist syntax
+    if ! plutil -lint "$LAUNCHAGENT_PLIST" > /dev/null 2>&1; then
+        print_error "LaunchAgent plist validation failed"
+        print_info "This is a bug - please report to the maintainer"
+        exit 1
+    fi
+    print_status "LaunchAgent plist validated successfully"
+
     # Load the LaunchAgent
     print_info "Loading LaunchAgent (starts Ollama)..."
     launchctl load "$LAUNCHAGENT_PLIST"
