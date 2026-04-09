@@ -75,9 +75,6 @@ CUSTOM_MODEL_NAME=""
 # Ollama configuration
 OLLAMA_HOST="http://localhost:11434"
 
-# Cache for ollama list output (avoid multiple subprocess calls)
-OLLAMA_LIST_CACHE=""
-
 #############################################
 # Parse Arguments
 #############################################
@@ -196,9 +193,9 @@ CONTEXT_LENGTH=$RECOMMENDED_CONTEXT  # Default to recommended
 # Ask about context window (skip in auto mode)
 if [[ "$AUTO_MODE" != true ]]; then
     select_context_window
-else
-    NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 fi
+
+NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 
 # Ask about custom model name (skip in auto mode)
 if [[ "$AUTO_MODE" != true ]]; then

@@ -19,10 +19,8 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Byte conversion constants
+# Byte conversion constant
 readonly BYTES_PER_GB=$((1024 * 1024 * 1024))
-readonly BYTES_PER_MB=$((1024 * 1024))
-readonly BYTES_PER_KB=1024
 
 #############################################
 # Print Functions

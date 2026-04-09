@@ -12,7 +12,7 @@ set -euo pipefail
 #############################################
 
 # Interactive context window selection
-# Sets CONTEXT_LENGTH and NUM_CTX globals based on user choice
+# Sets CONTEXT_LENGTH global based on user choice
 # Shows GPU fit status for each option
 #
 # Globals read:
@@ -24,7 +24,6 @@ set -euo pipefail
 #   - BYTES_PER_GB: Bytes per GB constant
 # Globals set:
 #   - CONTEXT_LENGTH: Selected context length in tokens
-#   - NUM_CTX: Same as CONTEXT_LENGTH (Ollama parameter name)
 select_context_window() {
     print_header "Context Window Selection"
 
@@ -127,8 +126,6 @@ select_context_window() {
             esac
         done
     fi
-
-    NUM_CTX=$CONTEXT_LENGTH  # Ollama uses num_ctx parameter name
 }
 
 #############################################

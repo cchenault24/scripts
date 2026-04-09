@@ -331,11 +331,11 @@ test_constants() {
         source "$PROJECT_DIR/lib/hardware-config.sh" 2>/dev/null || true
     fi
 
-    begin_test "Byte conversion constants are defined"
-    if [[ -n "$BYTES_PER_GB" ]] && [[ -n "$BYTES_PER_MB" ]] && [[ -n "$BYTES_PER_KB" ]]; then
+    begin_test "Byte conversion constant is defined"
+    if [[ -n "$BYTES_PER_GB" ]]; then
         pass_test
     else
-        fail_test "Byte conversion constants not defined"
+        fail_test "BYTES_PER_GB constant not defined"
     fi
 
     begin_test "Hardware constants are defined"
