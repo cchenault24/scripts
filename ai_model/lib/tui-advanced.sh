@@ -357,6 +357,18 @@ show_config_preview() {
     local codegemma_size="${7:-}"
     local ide_tools="$8"
 
+    # Check which models are already downloaded
+    local gemma_exists=false
+    local codegemma_exists=false
+    if command -v ollama >/dev/null 2>&1; then
+        if ollama list 2>/dev/null | grep -q "^${gemma_model}"; then
+            gemma_exists=true
+        fi
+        if [[ -n "$codegemma_model" ]] && ollama list 2>/dev/null | grep -q "^${codegemma_model}"; then
+            codegemma_exists=true
+        fi
+    fi
+
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║                  Configuration Preview                    ║"
@@ -364,17 +376,46 @@ show_config_preview() {
     echo "║                                                           ║"
     printf "║  Hardware: %s | %sGB RAM | %s cores%23s║\n" "$chip" "$ram" "$cores" ""
     echo "║                                                           ║"
-    echo "║  Will Download:                                           ║"
-    printf "║    -> %-18s %4sGB  ~%2s min%18s║\n" "$gemma_model" "$gemma_size" "$(estimate_download_time "$gemma_size")" ""
 
+    # Determine header based on what needs downloading
+    if $gemma_exists && { [[ -z "$codegemma_model" ]] || $codegemma_exists; }; then
+        echo "║  Models (Already Downloaded):                             ║"
+    elif ! $gemma_exists && { [[ -z "$codegemma_model" ]] || ! $codegemma_exists; }; then
+        echo "║  Will Download:                                           ║"
+    else
+        echo "║  Models:                                                  ║"
+    fi
+
+    # Show main model
+    if $gemma_exists; then
+        printf "║    ✓ %-18s %4sGB  (cached)%18s║\n" "$gemma_model" "$gemma_size" ""
+    else
+        printf "║    -> %-18s %4sGB  ~%2s min%18s║\n" "$gemma_model" "$gemma_size" "$(estimate_download_time "$gemma_size")" ""
+    fi
+
+    # Show FIM model if requested
     if [[ -n "$codegemma_model" ]]; then
-        printf "║    -> %-18s %4sGB  ~%2s min%18s║\n" "$codegemma_model" "$codegemma_size" "$(estimate_download_time "$codegemma_size")" ""
+        if $codegemma_exists; then
+            printf "║    ✓ %-18s %4sGB  (cached)%18s║\n" "$codegemma_model" "$codegemma_size" ""
+        else
+            printf "║    -> %-18s %4sGB  ~%2s min%18s║\n" "$codegemma_model" "$codegemma_size" "$(estimate_download_time "$codegemma_size")" ""
+        fi
 
-        # Calculate total
-        local total_size=$(echo "$gemma_size + $codegemma_size" | bc)
-        local total_time=$(echo "$(estimate_download_time "$gemma_size") + $(estimate_download_time "$codegemma_size")" | bc)
-        echo "║                         -------  --------                 ║"
-        printf "║                          %4sGB  ~%-2.0f min%17s ║\n" "$total_size" "$total_time" ""
+        # Show totals only if at least one model needs downloading
+        if ! $gemma_exists || ! $codegemma_exists; then
+            local download_size=0
+            local download_time=0
+            if ! $gemma_exists; then
+                download_size=$(echo "$download_size + $gemma_size" | bc)
+                download_time=$(echo "$download_time + $(estimate_download_time "$gemma_size")" | bc)
+            fi
+            if ! $codegemma_exists; then
+                download_size=$(echo "$download_size + $codegemma_size" | bc)
+                download_time=$(echo "$download_time + $(estimate_download_time "$codegemma_size")" | bc)
+            fi
+            echo "║                         -------  --------                 ║"
+            printf "║                          %4sGB  ~%-2.0f min%17s ║\n" "$download_size" "$download_time" ""
+        fi
     fi
 
     echo "║                                                           ║"
