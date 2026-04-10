@@ -252,9 +252,31 @@ recommend_model() {
             continue
         fi
 
-        # This model fits! Track the largest one (proxy for capability)
+        # Verify sufficient headroom for system + other processes
+        # Calculate total memory used (model + KV cache)
         local weight
         weight=$(get_model_weight_gb "$model_key")
+        local kv_cache_gb
+        kv_cache_gb=$(calculate_kv_cache_gb "$model_key" "$context")
+        local total_used=$((weight + kv_cache_gb))
+
+        # Require minimum headroom based on RAM tier
+        local min_headroom
+        if [[ $ram_gb -ge 48 ]]; then
+            min_headroom=8  # 8GB headroom for 48GB+ systems
+        elif [[ $ram_gb -ge 24 ]]; then
+            min_headroom=6  # 6GB headroom for 24-48GB systems
+        else
+            min_headroom=4  # 4GB headroom for <24GB systems
+        fi
+
+        # Calculate available headroom (total RAM - model - KV cache)
+        local headroom=$((ram_gb - total_used))
+        if [[ $headroom -lt $min_headroom ]]; then
+            continue  # Not enough headroom for system + processes
+        fi
+
+        # This model fits with adequate headroom! Track the largest one (proxy for capability)
         if [[ $weight -gt $best_weight ]]; then
             best_model="$model_key"
             best_weight=$weight
