@@ -16,17 +16,33 @@ install_ollama() {
     if command -v ollama &> /dev/null; then
         local ollama_version
         ollama_version=$(ollama --version 2>/dev/null || echo "unknown")
-        print_status "Ollama ($ollama_version)"
+
+        if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+            # Verbose: show tree structure
+            tree_node 0 0 "✓" "Found: Ollama $ollama_version"
+            tree_node 0 0 "⣾" "Checking for updates..."
+        fi
 
         # Check if it's outdated (disable auto-update to avoid hang)
-        print_verbose "Checking for Ollama updates..."
         if HOMEBREW_NO_AUTO_UPDATE=1 brew outdated ollama &> /dev/null; then
-            print_verbose "Upgrading Ollama to latest version..."
+            if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+                tree_node 0 1 "↻" "Upgrading Ollama..."
+            fi
             brew upgrade ollama 2>&1 | grep -v "Downloading" | grep -v "Pouring" || true
-            print_verbose "Ollama upgraded"
+            if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+                tree_node 0 1 "✓" "Ollama upgraded"
+            fi
+        else
+            if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+                tree_node 0 1 "✓" "Up to date"
+            fi
         fi
+
+        print_status "Ollama ($ollama_version)"
     else
-        print_verbose "Installing Ollama via Homebrew..."
+        if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+            tree_node 0 0 "⣾" "Installing Ollama via Homebrew..."
+        fi
         brew install ollama 2>&1 | grep -v "Downloading" | grep -v "Pouring" || true
         print_status "Ollama installed"
     fi
