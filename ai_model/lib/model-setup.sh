@@ -235,3 +235,37 @@ verify_custom_model() {
         exit 1
     fi
 }
+
+# Warm up model by loading it into GPU memory
+# This ensures the first user request is fast (no load delay)
+#
+# Globals read:
+#   - CUSTOM_MODEL_NAME: Name of custom model to warm up
+#   - CONTEXT_LENGTH: Context length for display
+warmup_model() {
+    print_info "Pre-loading model into GPU memory for instant first response..."
+
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        print_verbose "Running warmup inference to load model into GPU..."
+        print_verbose "Model will stay loaded (OLLAMA_KEEP_ALIVE=-1)"
+    fi
+
+    # Run a minimal inference to trigger model loading
+    # Use a simple prompt that exercises the model without taking too long
+    local warmup_start=$(date +%s)
+    if echo "Hi" | ollama run "$CUSTOM_MODEL_NAME" > /dev/null 2>&1; then
+        local warmup_end=$(date +%s)
+        local warmup_time=$((warmup_end - warmup_start))
+
+        print_status "Model loaded into GPU memory (${warmup_time}s warmup)"
+
+        if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+            # Show that model is now resident in memory
+            print_verbose "Model is now resident in GPU memory and ready for instant responses"
+            print_verbose "Check with: ollama ps"
+        fi
+    else
+        # Non-fatal - model will load on first real request
+        print_warning "Model warmup failed, but model will load on first request"
+    fi
+}

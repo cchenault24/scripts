@@ -302,6 +302,14 @@ main() {
     pull_model
     create_custom_model
 
+    # Pre-load model into GPU memory for instant first response
+    # Check if model is already loaded to avoid redundant warmup
+    if ollama ps 2>/dev/null | grep -q "^${CUSTOM_MODEL_NAME}[[:space:]]"; then
+        print_status "Model already loaded in GPU memory"
+    else
+        warmup_model
+    fi
+
     # Pull FIM model if JetBrains is selected
     if [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
         pull_fim_model
