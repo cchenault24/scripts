@@ -18,11 +18,17 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Source test helpers
 source "$SCRIPT_DIR/helpers.sh"
 
+# Source common.sh for validate_model_name function
+source "$PROJECT_DIR/lib/common.sh"
+
 # Source model registry to get list of valid models
 source "$PROJECT_DIR/lib/model-registry.sh"
 
-# Extract validate_model_name function from validation library
-source "$PROJECT_DIR/lib/validation.sh"
+# Verbose mode
+VERBOSE=false
+if [[ "${1:-}" == "--verbose" ]]; then
+    VERBOSE=true
+fi
 
 #############################################
 # Test: validate_model_name()

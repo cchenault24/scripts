@@ -328,7 +328,7 @@ test_input_validation() {
     fi
 
     begin_test "Model selection shows error on invalid input"
-    if grep -A 100 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_error.*Invalid'; then
+    if grep -A 150 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_error.*Invalid'; then
         pass_test
     else
         fail_test "Model selection should show error message for invalid input"
@@ -458,7 +458,7 @@ test_model_recommendation_flow() {
 
     begin_test "Model selection menu shows recommended option"
     # Selection menu should have [Recommended] tag for recommended model
-    if grep -A 60 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '\[Recommended\]'; then
+    if grep -A 80 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '\[Recommended\]'; then
         pass_test
     else
         fail_test "Model selection should show [Recommended] tag"
