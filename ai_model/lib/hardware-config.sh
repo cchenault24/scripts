@@ -306,28 +306,47 @@ recommend_model() {
     fi
 }
 
-# Recommend best FIM model based on available RAM
+# Recommend best FIM model based on available RAM and FIM benchmarks
 # FIM (Fill-In-Middle) models are optimized for code completion in JetBrains
-# Available models: CodeGemma, Codestral, Granite, CodeLlama
+# Uses composite scoring: (fim_score × 10) + weight_GB
+# Prioritizes FIM quality over size within similar weight classes
 recommend_fim_model() {
     local ram_gb=$1
 
-    # Recommend based on RAM tiers:
-    # - <8GB: CodeGemma 2B (2GB) - smallest
-    # - 8-12GB: CodeLlama 7B (4GB) - good balance
-    # - 12-16GB: CodeGemma 7B (5GB) - best FIM quality in range
-    # - 16-24GB: CodeLlama 13B (8GB) - higher quality
-    # - 24GB+: Codestral (12GB) - most capable (FIM + test generation)
-    if [[ $ram_gb -lt 8 ]]; then
-        echo "codegemma:2b-code"
-    elif [[ $ram_gb -lt 12 ]]; then
-        echo "codellama:7b-code"
-    elif [[ $ram_gb -lt 16 ]]; then
-        echo "codegemma:7b-code"
-    elif [[ $ram_gb -lt 24 ]]; then
-        echo "codellama:13b-code"
+    # FIM models are small and don't need headroom calculations
+    # (main model already uses most RAM, FIM is secondary)
+    # Just ensure model fits in remaining RAM (8GB already reserved for main model)
+    local available_for_fim=$((ram_gb - 8))
+
+    local best_model=""
+    local best_score=0
+
+    while IFS= read -r model_key; do
+        local weight
+        weight=$(get_fim_model_weight_gb "$model_key")
+
+        # Skip if doesn't fit in available RAM
+        if [[ $weight -gt $available_for_fim ]]; then
+            continue
+        fi
+
+        # Calculate composite score: FIM quality matters more than size
+        local fim_score
+        fim_score=$(get_fim_coding_priority "$model_key")
+        local composite_score=$((fim_score * 10 + weight))
+
+        if [[ $composite_score -gt $best_score ]]; then
+            best_model="$model_key"
+            best_score=$composite_score
+        fi
+    done < <(list_fim_models)
+
+    # Return best model, or fallback to smallest if none fit
+    if [[ -n "$best_model" ]]; then
+        echo "$best_model"
     else
-        echo "codestral:latest"
+        # Fallback: return smallest model (codegemma:2b-code)
+        echo "codegemma:2b-code"
     fi
 }
 
