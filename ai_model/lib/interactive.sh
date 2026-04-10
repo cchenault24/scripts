@@ -521,7 +521,7 @@ select_ide_tools() {
     echo ""
     echo "  2) JetBrains AI Assistant only"
     echo "     • Official JetBrains AI integration"
-    echo "     • Uses: Gemma4 (core + instant helpers) + CodeGemma (completion)"
+    echo "     • Uses: Gemma4 (core) + CodeGemma (instant helpers + completion)"
     echo "     • Works with IntelliJ, PyCharm, WebStorm, etc."
     echo ""
     echo "  3) Both OpenCode and JetBrains"

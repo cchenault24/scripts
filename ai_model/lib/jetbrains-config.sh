@@ -8,7 +8,7 @@
 #
 # JetBrains AI Assistant Model Configuration:
 # - Core features: Gemma4 (in-editor code generation, commit messages)
-# - Instant helpers: Gemma4 (chat context, title generation, name suggestions)
+# - Instant helpers: CodeGemma (chat context, title generation, name suggestions)
 # - Completion model: CodeGemma (inline code completion via FIM)
 
 set -euo pipefail
@@ -39,16 +39,19 @@ configure_jetbrains() {
     echo "     Used for: In-editor code generation, commit messages, etc."
     echo "     Model: ${CUSTOM_MODEL_NAME} (Gemma4)"
     echo ""
-    echo -e "  ${YELLOW}2. Instant helpers:${NC}"
-    echo "     Used for: Chat context collection, title generation, name suggestions"
-    echo "     Model: ${CUSTOM_MODEL_NAME} (Gemma4) - same as Core"
-    echo ""
     if [[ -n "$CODEGEMMA_MODEL" ]]; then
+        echo -e "  ${YELLOW}2. Instant helpers:${NC}"
+        echo "     Used for: Chat context collection, title generation, name suggestions"
+        echo "     Model: ${CODEGEMMA_MODEL} (CodeGemma)"
+        echo ""
         echo -e "  ${YELLOW}3. Completion model:${NC}"
         echo "     Used for: Inline code completion (requires FIM)"
         echo "     Model: ${CODEGEMMA_MODEL} (CodeGemma)"
         echo ""
     else
+        echo -e "  ${YELLOW}2. Instant helpers:${NC}"
+        echo "     Not configured - CodeGemma needed"
+        echo ""
         echo -e "  ${YELLOW}3. Completion model:${NC}"
         echo "     Not configured - CodeGemma needed for FIM completion"
         echo ""
@@ -66,10 +69,11 @@ configure_jetbrains() {
     echo ""
     echo "4. Assign models to each slot:"
     echo -e "   ${YELLOW}Core features:${NC}      ${CUSTOM_MODEL_NAME}"
-    echo -e "   ${YELLOW}Instant helpers:${NC}    ${CUSTOM_MODEL_NAME}"
     if [[ -n "$CODEGEMMA_MODEL" ]]; then
+        echo -e "   ${YELLOW}Instant helpers:${NC}    ${CODEGEMMA_MODEL}"
         echo -e "   ${YELLOW}Completion model:${NC}   ${CODEGEMMA_MODEL}"
     else
+        echo -e "   ${YELLOW}Instant helpers:${NC}    (not configured)"
         echo -e "   ${YELLOW}Completion model:${NC}   (not configured)"
     fi
     echo ""
@@ -98,21 +102,20 @@ Context Window:   $(printf "%'d" "$NUM_CTX") tokens
 API Key:          ollama (or leave empty)
 Purpose:          In-editor code generation, commit message generation, etc.
 
-2. Instant Helpers Model (Gemma4):
-----------------------------------
-Provider Type:    OpenAI-compatible
-API Base URL:     ${OLLAMA_HOST}/v1
-Model Name:       ${CUSTOM_MODEL_NAME}
-Base Model:       ${GEMMA_MODEL}
-Context Window:   $(printf "%'d" "$NUM_CTX") tokens
-API Key:          ollama (or leave empty)
-Purpose:          Chat context collection, chat title generation, name suggestions
-Note:             Use the same model as Core Features for consistency
-
 EOF
 
     if [[ -n "$CODEGEMMA_MODEL" ]]; then
         cat >> "$config_ref" << EOF
+2. Instant Helpers Model (CodeGemma):
+--------------------------------------
+Provider Type:    OpenAI-compatible
+API Base URL:     ${OLLAMA_HOST}/v1
+Model Name:       ${CODEGEMMA_MODEL}
+Context:          8K tokens (optimized for fast responses)
+API Key:          ollama (or leave empty)
+Purpose:          Chat context collection, chat title generation, name suggestions
+Note:             Lightweight model for fast helper tasks
+
 3. Completion Model (CodeGemma FIM):
 ------------------------------------
 Provider Type:    OpenAI-compatible
@@ -125,10 +128,17 @@ Requirements:     Must support Fill-In-the-Middle (FIM)
 Features:         • Real-time code completion
                   • Code infilling
                   • Context-aware suggestions
+Note:             Same CodeGemma model used for both Instant helpers and Completion
 
 EOF
     else
         cat >> "$config_ref" << EOF
+2. Instant Helpers Model:
+--------------------------
+Status:           Not configured
+Note:             CodeGemma needed for fast helper tasks
+                  Run setup again and select JetBrains to configure CodeGemma
+
 3. Completion Model:
 --------------------
 Status:           Not configured
@@ -150,21 +160,26 @@ Configuration Steps:
    - API Key: ollama (or leave empty)
 5. Assign models to the 3 slots:
    • Core features:      ${CUSTOM_MODEL_NAME}
-   • Instant helpers:    ${CUSTOM_MODEL_NAME}
 EOF
 
     if [[ -n "$CODEGEMMA_MODEL" ]]; then
         cat >> "$config_ref" << EOF
+   • Instant helpers:    ${CODEGEMMA_MODEL}
    • Completion model:   ${CODEGEMMA_MODEL}
 6. Test connection for each model
 7. Save settings and start using AI Assistant
+
+Notes:
+- Core features uses Gemma4 for complex code generation tasks
+- Instant helpers and Completion both use CodeGemma for speed and FIM support
 EOF
     else
         cat >> "$config_ref" << EOF
-   • Completion model:   (skip for now, or configure later)
+   • Instant helpers:    (not configured - needs CodeGemma)
+   • Completion model:   (not configured - needs CodeGemma)
 6. Test connection
 7. Save settings
-   Note: Without CodeGemma, inline completion will not be available
+   Note: Without CodeGemma, instant helpers and inline completion will not be available
 EOF
     fi
 
