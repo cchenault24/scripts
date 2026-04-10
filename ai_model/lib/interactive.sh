@@ -76,8 +76,11 @@ select_model_interactive() {
 
     print_header "Model Selection"
 
-    # Build arrays dynamically from registry
-    local -a models=()
+    # Build arrays dynamically from registry with composite scoring
+    # Score = (coding_priority * 10) + weight_GB
+    # This prioritizes coding quality but considers model capability (size)
+    local -a scored_models=()
+
     while IFS= read -r model_key; do
         # Get minimum RAM required
         local min_ram
@@ -85,9 +88,24 @@ select_model_interactive() {
 
         # Only include models that meet minimum RAM requirement
         if [[ $DETECTED_RAM_GB -ge $min_ram ]]; then
-            models+=("$model_key")
+            # Calculate composite score for sorting
+            local weight
+            weight=$(get_registry_model_weight_gb "$model_key")
+            local coding_priority
+            coding_priority=$(get_registry_coding_priority "$model_key")
+            local score=$((coding_priority * 10 + weight))
+
+            # Store as "score:model_key" for sorting
+            scored_models+=("${score}:${model_key}")
         fi
     done < <(list_all_models)
+
+    # Sort by score (descending - highest score first)
+    # Use process substitution to sort and rebuild array
+    local -a models=()
+    while IFS=':' read -r score model_key; do
+        models+=("$model_key")
+    done < <(printf '%s\n' "${scored_models[@]}" | sort -t: -k1 -rn)
 
     # Find recommended index if provided
     local recommended_idx=0
@@ -101,6 +119,7 @@ select_model_interactive() {
     fi
 
     echo "Select a model from the list below:"
+    echo -e "${GRAY}(Sorted by coding quality + capability, best first)${NC}"
     echo ""
 
     # Display models with GPU fit status
@@ -186,11 +205,9 @@ select_fim_model_interactive() {
     echo "  • Context-aware auto-completion"
     echo ""
 
-    # Build arrays dynamically from registry
-    local -a models=()
-    local -a weights=()
-    local -a display_names=()
-    local -a descriptions=()
+    # Build scored array dynamically from registry
+    # Score = (fim_priority * 10) + weight_GB (prioritizes FIM quality over size)
+    local -a scored_models=()
 
     while IFS= read -r model_key; do
         local weight
@@ -199,12 +216,30 @@ select_fim_model_interactive() {
         # Only include models that fit in available RAM (leave 8GB headroom)
         local available_ram=$((DETECTED_RAM_GB - 8))
         if [[ $weight -le $available_ram ]]; then
-            models+=("$model_key")
-            weights+=("${weight}GB")
-            display_names+=("$(get_fim_model_display_name "$model_key")")
-            descriptions+=("$(get_fim_model_description "$model_key")")
+            # Calculate composite score for sorting
+            local fim_priority
+            fim_priority=$(get_fim_coding_priority "$model_key")
+            local score=$((fim_priority * 10 + weight))
+
+            # Store as "score:model_key" for sorting
+            scored_models+=("${score}:${model_key}")
         fi
     done < <(list_fim_models)
+
+    # Sort by score (descending - highest score first)
+    local -a models=()
+    local -a weights=()
+    local -a display_names=()
+    local -a descriptions=()
+
+    while IFS=':' read -r score model_key; do
+        models+=("$model_key")
+        local weight
+        weight=$(get_fim_model_weight_gb "$model_key")
+        weights+=("${weight}GB")
+        display_names+=("$(get_fim_model_display_name "$model_key")")
+        descriptions+=("$(get_fim_model_description "$model_key")")
+    done < <(printf '%s\n' "${scored_models[@]}" | sort -t: -k1 -rn)
 
     # Display models with recommendations
     local recommended_model
@@ -212,6 +247,7 @@ select_fim_model_interactive() {
     local recommended_idx=-1
 
     echo "Select a FIM model:"
+    echo -e "${GRAY}(Sorted by FIM quality + capability, best first)${NC}"
     echo ""
 
     for i in "${!models[@]}"; do
