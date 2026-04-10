@@ -291,5 +291,5 @@ print_setup_summary() {
         echo "  • Run 'opencode' to start coding"
     fi
     echo ""
-    echo -e "${GRAY}Run './setup-gemma4-opencode.sh --help' for more options${NC}"
+    echo -e "${GRAY}Run './setup-ai-opencode.sh --help' for more options${NC}"
 }

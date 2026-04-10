@@ -147,7 +147,7 @@ preflight_checks() {
     local all_good=true
 
     # Check that we're in the right directory
-    if [[ ! -f "$PROJECT_DIR/setup-gemma4-opencode.sh" ]]; then
+    if [[ ! -f "$PROJECT_DIR/setup-ai-opencode.sh" ]]; then
         print_error "Not in ai_model project directory"
         all_good=false
     else

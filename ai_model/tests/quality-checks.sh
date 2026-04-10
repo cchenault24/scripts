@@ -388,7 +388,7 @@ check_documentation() {
     fi
 
     # Check main scripts have usage information
-    local scripts=("$PROJECT_DIR/setup-gemma4-opencode.sh" "$PROJECT_DIR/uninstall-gemma4-opencode.sh")
+    local scripts=("$PROJECT_DIR/setup-ai-opencode.sh" "$PROJECT_DIR/uninstall-gemma4-opencode.sh")
     for script in "${scripts[@]}"; do
         if [[ -f "$script" ]]; then
             local script_name

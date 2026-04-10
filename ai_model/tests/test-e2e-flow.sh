@@ -39,7 +39,7 @@ run_setup_with_input() {
     local flags="${2:-}"
 
     # Use process substitution to provide input
-    TEST_OUTPUT=$(echo -e "$input" | "$PROJECT_DIR/setup-gemma4-opencode.sh" $flags --help 2>&1 || true)
+    TEST_OUTPUT=$(echo -e "$input" | "$PROJECT_DIR/setup-ai-opencode.sh" $flags --help 2>&1 || true)
 }
 
 # Check if output contains expected text
@@ -70,7 +70,7 @@ test_help_flag() {
     print_section "Testing Help Flag Output"
 
     begin_test "Help flag shows usage information"
-    TEST_OUTPUT=$("$PROJECT_DIR/setup-gemma4-opencode.sh" --help 2>&1 || true)
+    TEST_OUTPUT=$("$PROJECT_DIR/setup-ai-opencode.sh" --help 2>&1 || true)
     if output_contains "Usage:" && output_contains "Options:"; then
         pass_test
     else
@@ -104,7 +104,7 @@ test_interactive_mode_headers() {
     # So we test that the script sources the right libraries and has the functions
 
     begin_test "setup script sources lib/interactive.sh"
-    if grep -q 'source.*lib/interactive.sh' "$PROJECT_DIR/setup-gemma4-opencode.sh"; then
+    if grep -q 'source.*lib/interactive.sh' "$PROJECT_DIR/setup-ai-opencode.sh"; then
         pass_test
     else
         fail_test "setup script doesn't source lib/interactive.sh"
@@ -141,14 +141,14 @@ test_function_call_order() {
 
     # Extract the main flow logic to verify correct ordering
     local main_logic
-    main_logic=$(grep -A 100 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-gemma4-opencode.sh" | head -50)
+    main_logic=$(grep -A 100 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-ai-opencode.sh" | head -50)
 
     begin_test "Model selection comes before context selection"
     # Look for select_model_interactive pattern before select_context_window pattern
     local model_line
     local context_line
-    model_line=$(grep -n "select_model_interactive" "$PROJECT_DIR/setup-gemma4-opencode.sh" | head -1 | cut -d: -f1 || echo "999999")
-    context_line=$(grep -n "select_context_window" "$PROJECT_DIR/setup-gemma4-opencode.sh" | head -1 | cut -d: -f1 || echo "0")
+    model_line=$(grep -n "select_model_interactive" "$PROJECT_DIR/setup-ai-opencode.sh" | head -1 | cut -d: -f1 || echo "999999")
+    context_line=$(grep -n "select_context_window" "$PROJECT_DIR/setup-ai-opencode.sh" | head -1 | cut -d: -f1 || echo "0")
 
     if [[ "$model_line" -lt "$context_line" ]]; then
         pass_test
@@ -158,7 +158,7 @@ test_function_call_order() {
 
     begin_test "Context selection comes before custom naming"
     local naming_line
-    naming_line=$(grep -n "select_custom_name" "$PROJECT_DIR/setup-gemma4-opencode.sh" | head -1 | cut -d: -f1 || echo "0")
+    naming_line=$(grep -n "select_custom_name" "$PROJECT_DIR/setup-ai-opencode.sh" | head -1 | cut -d: -f1 || echo "0")
 
     if [[ "$context_line" -lt "$naming_line" ]]; then
         pass_test
@@ -178,7 +178,7 @@ test_auto_mode_flow() {
     # Check that select_model_interactive is inside the AUTO_MODE != true block
     # Extract the block that's guarded by the AUTO_MODE check (get more context)
     local auto_logic
-    auto_logic=$(grep -A 30 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-gemma4-opencode.sh" | head -35)
+    auto_logic=$(grep -A 30 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-ai-opencode.sh" | head -35)
 
     # If select_model_interactive appears in the AUTO_MODE guarded block, it's properly protected
     if echo "$auto_logic" | grep -q "select_model_interactive"; then
@@ -190,7 +190,7 @@ test_auto_mode_flow() {
 
     begin_test "Auto mode skips context selection prompt"
     # select_context_window should only be called when AUTO_MODE != true
-    if grep -A 3 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q "select_context_window"; then
+    if grep -A 3 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q "select_context_window"; then
         pass_test
     else
         fail_test "Context selection should be conditional on AUTO_MODE"
@@ -198,7 +198,7 @@ test_auto_mode_flow() {
 
     begin_test "Auto mode skips custom naming prompt"
     # select_custom_name should only be called when AUTO_MODE != true
-    if grep -A 3 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q "select_custom_name"; then
+    if grep -A 3 'if \[\[ "$AUTO_MODE" != true \]\]' "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q "select_custom_name"; then
         pass_test
     else
         fail_test "Custom naming should be conditional on AUTO_MODE"
@@ -206,7 +206,7 @@ test_auto_mode_flow() {
 
     begin_test "Auto mode uses generate_custom_model_name() function"
     # In auto mode's else branch, should call generate_custom_model_name
-    if grep -A 5 "else" "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q "generate_custom_model_name"; then
+    if grep -A 5 "else" "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q "generate_custom_model_name"; then
         pass_test
     else
         fail_test "Auto mode should use generate_custom_model_name()"
@@ -221,23 +221,23 @@ test_model_override_flag() {
     print_section "Testing Model Override Flag Behavior"
 
     begin_test "Model override flag is parsed correctly"
-    if grep -q '\-\-model)' "$PROJECT_DIR/setup-gemma4-opencode.sh"; then
+    if grep -q '\-\-model)' "$PROJECT_DIR/setup-ai-opencode.sh"; then
         pass_test
     else
         fail_test "--model flag parsing not found"
     fi
 
-    begin_test "Model override sets GEMMA_MODEL variable"
-    # Check that --model flag sets GEMMA_MODEL
-    if grep -A 3 '\-\-model)' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q 'GEMMA_MODEL='; then
+    begin_test "Model override sets SELECTED_MODEL variable"
+    # Check that --model flag sets SELECTED_MODEL
+    if grep -A 3 '\-\-model)' "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q 'SELECTED_MODEL='; then
         pass_test
     else
-        fail_test "--model flag should set GEMMA_MODEL"
+        fail_test "--model flag should set SELECTED_MODEL"
     fi
 
     begin_test "Model override is validated"
     # Check that model name validation happens
-    if grep -q 'validate_model_name' "$PROJECT_DIR/setup-gemma4-opencode.sh"; then
+    if grep -q 'validate_model_name' "$PROJECT_DIR/setup-ai-opencode.sh"; then
         pass_test
     else
         fail_test "Model name validation not found"
@@ -409,7 +409,7 @@ test_num_ctx_assignment() {
     fi
 
     begin_test "NUM_CTX is set in main script after context determination"
-    if grep -q 'NUM_CTX.*CONTEXT_LENGTH' "$PROJECT_DIR/setup-gemma4-opencode.sh"; then
+    if grep -q 'NUM_CTX.*CONTEXT_LENGTH' "$PROJECT_DIR/setup-ai-opencode.sh"; then
         pass_test
     else
         fail_test "NUM_CTX should be set in main script"
@@ -419,7 +419,7 @@ test_num_ctx_assignment() {
     # NUM_CTX can be set multiple times (e.g., after recalculation when model doesn't fit)
     # The important thing is it's NOT set inside select_context_window()
     local num_ctx_count
-    num_ctx_count=$(grep -c 'NUM_CTX.*CONTEXT_LENGTH' "$PROJECT_DIR/setup-gemma4-opencode.sh" || echo "0")
+    num_ctx_count=$(grep -c 'NUM_CTX.*CONTEXT_LENGTH' "$PROJECT_DIR/setup-ai-opencode.sh" || echo "0")
     if [[ "$num_ctx_count" -ge 1 ]]; then
         pass_test
     else
@@ -435,14 +435,14 @@ test_model_recommendation_flow() {
     print_section "Testing Model Recommendation Flow"
 
     begin_test "Setup script calls recommend_model()"
-    if grep -q 'recommend_model' "$PROJECT_DIR/setup-gemma4-opencode.sh"; then
+    if grep -q 'recommend_model' "$PROJECT_DIR/setup-ai-opencode.sh"; then
         pass_test
     else
         fail_test "Setup script should call recommend_model()"
     fi
 
     begin_test "Recommended model is displayed to user"
-    if grep -A 10 'recommend_model' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q 'RECOMMENDED_MODEL'; then
+    if grep -A 10 'recommend_model' "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q 'RECOMMENDED_MODEL'; then
         pass_test
     else
         fail_test "Recommended model should be shown to user"
@@ -450,7 +450,7 @@ test_model_recommendation_flow() {
 
     begin_test "Interactive mode always shows model selection menu"
     # New behavior: always show selection menu with recommended tag
-    if grep -A 20 'GEMMA_MODEL' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q 'select_model_interactive'; then
+    if grep -A 20 'SELECTED_MODEL' "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q 'select_model_interactive'; then
         pass_test
     else
         fail_test "Should call select_model_interactive in interactive mode"

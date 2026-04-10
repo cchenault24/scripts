@@ -245,31 +245,62 @@ get_registry_display_name() {
 # Coding Priority Scoring
 #############################################
 
-# Get coding specialization priority score
-# Higher scores indicate better coding performance/specialization
+# Get coding performance score based on real benchmarks
+# Based on LiveCodeBench v6, HumanEval, and reasoning benchmarks
+# Higher scores = better coding quality
 # Args: model_key (format: "family:variant")
-# Returns: integer priority score (1-3)
-#   3 = Code-specialized models (granite-code, codegemma)
-#   2 = General purpose with strong coding (gemma4, llama3.1, mistral)
-#   1 = Reasoning-focused or general purpose (phi4-reasoning, phi4)
+# Returns: integer score (0-15, inverted rank where 1st place = 15 points)
+#
+# Benchmark Sources:
+#   - gemma4:31b: 80.0% LiveCodeBench v6 (Rank #1)
+#   - gemma4:26b: 77.1% LiveCodeBench v6 (Rank #2)
+#   - phi4-reasoning:plus: ~65% est, best reasoning depth (Rank #3)
+#   - phi4-reasoning:latest: Exceeds DeepSeek-R1 Distill 70B (Rank #4)
+#   - phi4:latest: ~58% est, fastest Phi4 (Rank #5)
+#   - gemma4:latest: 52.0% LiveCodeBench (Rank #6)
+#   - granite-code:34b: ~48% est, gov/enterprise (Rank #7)
+#   - mistral-small:latest: ~45% est (Rank #8)
+#   - llama3.1:70b: 88% HumanEval but impractical on <64GB (Rank #9)
+#   - granite-code:8b: ~42% est, FIM bonus (Rank #10)
+#   - gemma4:e2b: 44.0% LiveCodeBench (Rank #11)
+#   - codegemma:7b: ~38% est, FIM only (Rank #12)
+#   - llama3.1:8b: 68.1% HumanEval, general purpose (Rank #13)
+#   - mistral:latest: 43.6% HumanEval (Rank #14)
+#   - phi4-mini:latest: ~35% est, too small (Rank #15)
 get_registry_coding_priority() {
     local model_key="$1"
 
     case "$model_key" in
-        # Code-specialized models (highest priority)
-        granite-code:*) echo "3" ;;
-        codegemma:*) echo "3" ;;
+        # Rank 1-2: Exceptional coding quality (15-14 points)
+        gemma4:31b) echo "15" ;;                    # 80.0% LCB, #1
+        gemma4:26b) echo "14" ;;                    # 77.1% LCB, #2
 
-        # General purpose with strong coding performance
-        gemma4:*) echo "2" ;;
-        llama3.1:*) echo "2" ;;
-        mistral:latest) echo "2" ;;
-        mistral-small:latest) echo "2" ;;
+        # Rank 3-4: Excellent reasoning + coding (13-12 points)
+        phi4-reasoning:plus) echo "13" ;;           # ~65%, best reasoning
+        phi4-reasoning:latest) echo "12" ;;         # Beats DSR1-70B
 
-        # Reasoning-focused or general purpose
-        phi4-reasoning:*) echo "1" ;;
-        phi4:latest) echo "1" ;;
-        phi4-mini:latest) echo "1" ;;
+        # Rank 5-6: Very good (11-10 points)
+        phi4:latest) echo "11" ;;                   # ~58%, fastest Phi4
+        gemma4:latest) echo "10" ;;                 # 52.0% LCB
+
+        # Rank 7-8: Good (9-8 points)
+        granite-code:34b) echo "9" ;;               # ~48%, gov/enterprise
+        mistral-small:latest) echo "8" ;;           # ~45%
+
+        # Rank 9-10: Decent (7-6 points)
+        llama3.1:70b) echo "7" ;;                   # 88% HE, impractical <64GB
+        granite-code:8b) echo "6" ;;                # ~42%, FIM bonus
+
+        # Rank 11-12: Adequate (5-4 points)
+        gemma4:e2b) echo "5" ;;                     # 44.0% LCB
+        codegemma:7b) echo "4" ;;                   # ~38%, FIM only
+
+        # Rank 13-14: Fair (3-2 points)
+        llama3.1:8b) echo "3" ;;                    # 68.1% HE, general purpose
+        mistral:latest) echo "2" ;;                 # 43.6% HE
+
+        # Rank 15: Basic (1 point)
+        phi4-mini:latest) echo "1" ;;               # ~35%, too small
 
         *)
             echo "ERROR: Unknown model '$model_key' in get_registry_coding_priority" >&2

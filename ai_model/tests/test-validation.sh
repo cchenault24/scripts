@@ -437,14 +437,14 @@ test_validation_integration() {
 
     # Test that validation is actually used in the setup script
     begin_test "setup script contains validate_model_name function"
-    if grep -q "validate_model_name" "$PROJECT_DIR/setup-gemma4-opencode.sh"; then
+    if grep -q "validate_model_name" "$PROJECT_DIR/setup-ai-opencode.sh"; then
         pass_test
     else
         fail_test "setup script should use validation"
     fi
 
     begin_test "setup script validates user input"
-    if grep -A 5 "validate_model_name" "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q "exit 1"; then
+    if grep -A 5 "validate_model_name" "$PROJECT_DIR/setup-ai-opencode.sh" | grep -q "exit 1"; then
         pass_test
     else
         fail_test "setup script should exit on validation failure"

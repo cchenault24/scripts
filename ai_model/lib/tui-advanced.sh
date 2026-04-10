@@ -471,7 +471,7 @@ show_final_menu() {
                 read -p "Press Enter to continue..."
                 ;;
             [Hh])
-                ./setup-gemma4-opencode.sh --help | less
+                ./setup-ai-opencode.sh --help | less
                 ;;
             [Qq])
                 echo "Goodbye!"

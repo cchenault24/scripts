@@ -33,7 +33,7 @@ test_help_text() {
 
     begin_test "setup script has --help flag"
     local help_output
-    help_output=$("$PROJECT_DIR/setup-gemma4-opencode.sh" --help 2>&1 || true)
+    help_output=$("$PROJECT_DIR/setup-ai-opencode.sh" --help 2>&1 || true)
     if [[ "$help_output" == *"Usage:"* ]] || [[ "$help_output" == *"usage:"* ]]; then
         pass_test
     else
@@ -378,7 +378,7 @@ test_directory_structure() {
     assert_file_exists "$PROJECT_DIR/lib/hardware-config.sh"
 
     begin_test "setup script exists"
-    assert_file_exists "$PROJECT_DIR/setup-gemma4-opencode.sh"
+    assert_file_exists "$PROJECT_DIR/setup-ai-opencode.sh"
 
     begin_test "README.md exists"
     assert_file_exists "$PROJECT_DIR/README.md"
@@ -392,7 +392,7 @@ test_script_permissions() {
     print_section "Testing Script Permissions"
 
     begin_test "setup script is executable"
-    if [[ -x "$PROJECT_DIR/setup-gemma4-opencode.sh" ]]; then
+    if [[ -x "$PROJECT_DIR/setup-ai-opencode.sh" ]]; then
         pass_test
     else
         fail_test "setup script is not executable"
