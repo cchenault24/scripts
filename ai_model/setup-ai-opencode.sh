@@ -310,11 +310,11 @@ main() {
         # In interactive mode, ask user; in auto mode, always warmup
         local should_warmup=true
         if [[ "$AUTO_MODE" != true ]]; then
-            read -p "Pre-load model into GPU memory now for instant first response? (Y/n) " -n 1 -r
+            read -p "Pre-load model into GPU memory now for faster first response? (Y/n) " -n 1 -r
             echo ""
             if [[ $REPLY =~ ^[Nn]$ ]]; then
                 should_warmup=false
-                print_info "Skipping warmup - model will load on first request (~5-10s delay)"
+                print_info "Skipping warmup - model will load on first request (this will delay the models response time)"
             fi
         fi
 

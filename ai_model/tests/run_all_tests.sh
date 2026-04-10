@@ -36,7 +36,10 @@ fi
 # Test suites to run
 TEST_SUITES=(
     "quality-checks.sh|Quality Checks (Shellcheck + Security)|critical"
+    "test-model-registry.sh|Model Registry Tests|unit"
     "test-hardware-config.sh|Hardware Configuration Tests|unit"
+    "test-launchagent.sh|LaunchAgent Configuration Tests|unit"
+    "test-model-warmup.sh|Model Warmup Tests|unit"
     "test-validation.sh|Input Validation Tests|unit"
     "test-integration.sh|Integration Tests|integration"
     "test-e2e-flow.sh|E2E Interactive Flow Tests|e2e"
@@ -310,9 +313,13 @@ EXAMPLES:
 
 TEST SUITES:
     quality-checks.sh         - Shellcheck + security audit
+    test-model-registry.sh    - Model registry lookup tests
     test-hardware-config.sh   - Hardware configuration tests
+    test-launchagent.sh       - LaunchAgent configuration tests
+    test-model-warmup.sh      - Model warmup functionality tests
     test-validation.sh        - Input validation tests
     test-integration.sh       - Integration tests
+    test-e2e-flow.sh          - End-to-end interactive flow tests
 
 EXIT CODES:
     0    All tests passed

@@ -18,36 +18,11 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Source test helpers
 source "$SCRIPT_DIR/helpers.sh"
 
-# Source setup script to get validation functions
-# We need to source it carefully to avoid running main()
-# Extract just the validate_model_name function
-validate_model_name() {
-    local model="$1"
+# Source model registry to get list of valid models
+source "$PROJECT_DIR/lib/model-registry.sh"
 
-    # First check against allowed patterns
-    case "$model" in
-        gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
-            # Verify exact length to detect truncation or appended characters
-            # Note: Bash cannot store null bytes in variables - they act as terminators
-            # So $'gemma4:e2b\0' becomes just "gemma4:e2b" (length 10)
-            # This check catches if someone tries to append data after what bash sees
-            local expected_len
-            case "$model" in
-                gemma4:latest) expected_len=13 ;;
-                gemma4:e2b|gemma4:26b|gemma4:31b) expected_len=10 ;;
-            esac
-
-            # Length check: ensures no extra characters (spaces, tabs, etc.)
-            if [ ${#model} -ne "$expected_len" ]; then
-                return 1
-            fi
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
+# Extract validate_model_name function from validation library
+source "$PROJECT_DIR/lib/validation.sh"
 
 #############################################
 # Test: validate_model_name()
@@ -56,33 +31,22 @@ validate_model_name() {
 test_validate_model_name_valid() {
     print_section "Testing validate_model_name() - Valid Models"
 
-    # Test valid model names
-    begin_test "gemma4:e2b is valid"
-    if validate_model_name "gemma4:e2b"; then
-        pass_test
-    else
-        fail_test "Should be valid"
-    fi
+    # Test all models from registry are valid
+    local all_valid=true
+    local test_count=0
+    while IFS= read -r model_key; do
+        begin_test "$model_key is valid"
+        if validate_model_name "$model_key"; then
+            pass_test
+        else
+            fail_test "Model from registry should be valid: $model_key"
+            all_valid=false
+        fi
+        ((test_count++))
+    done < <(list_all_models)
 
-    begin_test "gemma4:latest is valid"
-    if validate_model_name "gemma4:latest"; then
-        pass_test
-    else
-        fail_test "Should be valid"
-    fi
-
-    begin_test "gemma4:26b is valid"
-    if validate_model_name "gemma4:26b"; then
-        pass_test
-    else
-        fail_test "Should be valid"
-    fi
-
-    begin_test "gemma4:31b is valid"
-    if validate_model_name "gemma4:31b"; then
-        pass_test
-    else
-        fail_test "Should be valid"
+    if [[ "$VERBOSE" == true ]]; then
+        echo "    Tested $test_count models from registry"
     fi
 }
 
@@ -111,9 +75,16 @@ test_validate_model_name_invalid() {
         pass_test
     fi
 
-    begin_test "llama3 is invalid (wrong model family)"
-    if validate_model_name "llama3"; then
-        fail_test "Wrong model family should be invalid"
+    begin_test "qwen:7b is invalid (Chinese model, not in registry)"
+    if validate_model_name "qwen:7b"; then
+        fail_test "Qwen should be invalid (not in registry)"
+    else
+        pass_test
+    fi
+
+    begin_test "deepseek:latest is invalid (Chinese model, not in registry)"
+    if validate_model_name "deepseek:latest"; then
+        fail_test "DeepSeek should be invalid (not in registry)"
     else
         pass_test
     fi
@@ -121,6 +92,13 @@ test_validate_model_name_invalid() {
     begin_test "gemma4:40b is invalid (non-existent variant)"
     if validate_model_name "gemma4:40b"; then
         fail_test "Non-existent variant should be invalid"
+    else
+        pass_test
+    fi
+
+    begin_test "random:model is invalid"
+    if validate_model_name "random:model"; then
+        fail_test "Random model should be invalid"
     else
         pass_test
     fi
