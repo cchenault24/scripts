@@ -221,75 +221,79 @@ fi
 validate_and_prompt_gpu_fit
 
 #############################################
-# Configuration Preview
-#############################################
-
-if [[ "$AUTO_MODE" != true ]] && [[ $VERBOSITY_LEVEL -ge 1 ]]; then
-    # Format IDE tools for display
-    local ide_display=""
-    if [[ " ${IDE_TOOLS[*]} " =~ " opencode " ]] && [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
-        ide_display="OpenCode + JetBrains"
-    elif [[ " ${IDE_TOOLS[*]} " =~ " opencode " ]]; then
-        ide_display="OpenCode"
-    elif [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
-        ide_display="JetBrains AI Assistant"
-    else
-        ide_display="None"
-    fi
-
-    # Get model sizes
-    local gemma_size
-    gemma_size=$(get_model_specs "$MODEL_SIZE" | awk '{print $1}')
-
-    local codegemma_size=""
-    if [[ -n "$CODEGEMMA_MODEL" ]]; then
-        local codegemma_variant="${CODEGEMMA_MODEL#*:}"
-        if [[ "$codegemma_variant" == "2b" ]]; then
-            codegemma_size="1.6"
-        elif [[ "$codegemma_variant" == "7b" ]]; then
-            codegemma_size="5.0"
-        fi
-    fi
-
-    # Show preview
-    show_config_preview \
-        "$DETECTED_M_CHIP" \
-        "$DETECTED_RAM_GB" \
-        "$DETECTED_CPU_CORES" \
-        "$GEMMA_MODEL" \
-        "$gemma_size" \
-        "${CODEGEMMA_MODEL:-}" \
-        "${codegemma_size:-}" \
-        "$ide_display"
-
-    # Get confirmation
-    while true; do
-        read -p "Your choice [C/E/Q]: " -n 1 -r choice
-        echo ""
-        case "$choice" in
-            [Cc])
-                break
-                ;;
-            [Ee])
-                echo "Configuration editing not yet implemented. Please restart the script."
-                exit 0
-                ;;
-            [Qq])
-                echo "Setup cancelled."
-                exit 0
-                ;;
-            *)
-                echo "Invalid choice. Press C to continue, E to edit, or Q to quit."
-                ;;
-        esac
-    done
-fi
-
-#############################################
 # Main Installation Flow
 #############################################
 
 main() {
+    #############################################
+    # Configuration Preview
+    #############################################
+
+    if [[ "$AUTO_MODE" != true ]] && [[ $VERBOSITY_LEVEL -ge 1 ]]; then
+        # Format IDE tools for display
+        local ide_display=""
+        if [[ " ${IDE_TOOLS[*]} " =~ " opencode " ]] && [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
+            ide_display="OpenCode + JetBrains"
+        elif [[ " ${IDE_TOOLS[*]} " =~ " opencode " ]]; then
+            ide_display="OpenCode"
+        elif [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
+            ide_display="JetBrains AI Assistant"
+        else
+            ide_display="None"
+        fi
+
+        # Get model sizes
+        local gemma_size
+        gemma_size=$(get_model_specs "$MODEL_SIZE" | awk '{print $1}')
+
+        local codegemma_size=""
+        if [[ -n "$CODEGEMMA_MODEL" ]]; then
+            local codegemma_variant="${CODEGEMMA_MODEL#*:}"
+            if [[ "$codegemma_variant" == "2b" ]]; then
+                codegemma_size="1.6"
+            elif [[ "$codegemma_variant" == "7b" ]]; then
+                codegemma_size="5.0"
+            fi
+        fi
+
+        # Show preview
+        show_config_preview \
+            "$DETECTED_M_CHIP" \
+            "$DETECTED_RAM_GB" \
+            "$DETECTED_CPU_CORES" \
+            "$GEMMA_MODEL" \
+            "$gemma_size" \
+            "${CODEGEMMA_MODEL:-}" \
+            "${codegemma_size:-}" \
+            "$ide_display"
+
+        # Get confirmation
+        while true; do
+            read -p "Your choice [C/E/Q]: " -n 1 -r choice
+            echo ""
+            case "$choice" in
+                [Cc])
+                    break
+                    ;;
+                [Ee])
+                    echo "Configuration editing not yet implemented. Please restart the script."
+                    exit 0
+                    ;;
+                [Qq])
+                    echo "Setup cancelled."
+                    exit 0
+                    ;;
+                *)
+                    echo "Invalid choice. Press C to continue, E to edit, or Q to quit."
+                    ;;
+            esac
+        done
+    fi
+
+    #############################################
+    # Installation Header
+    #############################################
+
     if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
         # Verbose: show traditional header
         print_header "Gemma4 + OpenCode Setup for Teams"
