@@ -243,7 +243,7 @@ verify_custom_model() {
 #   - CUSTOM_MODEL_NAME: Name of custom model to warm up
 #   - CONTEXT_LENGTH: Context length for display
 warmup_model() {
-    print_info "Pre-loading model into GPU memory for instant first response..."
+    print_info "Pre-loading model into GPU memory for faster first response..."
 
     if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
         print_verbose "Running warmup inference to load model into GPU..."

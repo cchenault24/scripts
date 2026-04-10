@@ -302,7 +302,7 @@ main() {
     pull_model
     create_custom_model
 
-    # Pre-load model into GPU memory for instant first response
+    # Pre-load model into GPU memory for faster first response
     # Check if model is already loaded to avoid redundant warmup
     if ollama ps 2>/dev/null | grep -q "^${CUSTOM_MODEL_NAME}[[:space:]]"; then
         print_status "Model already loaded in GPU memory"
