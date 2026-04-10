@@ -361,10 +361,14 @@ show_config_preview() {
     local gemma_exists=false
     local codegemma_exists=false
     if command -v ollama >/dev/null 2>&1; then
-        if ollama list 2>/dev/null | grep -q "^${gemma_model}"; then
+        local ollama_models
+        ollama_models=$(ollama list 2>/dev/null || echo "")
+
+        if echo "$ollama_models" | grep -q "^${gemma_model}[[:space:]]"; then
             gemma_exists=true
         fi
-        if [[ -n "$codegemma_model" ]] && ollama list 2>/dev/null | grep -q "^${codegemma_model}"; then
+
+        if [[ -n "$codegemma_model" ]] && echo "$ollama_models" | grep -q "^${codegemma_model}[[:space:]]"; then
             codegemma_exists=true
         fi
     fi
