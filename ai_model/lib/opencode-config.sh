@@ -17,7 +17,7 @@ set -euo pipefail
 #   - NUM_CTX: Context length
 #   - AUTO_MODE: Whether in auto mode
 configure_opencode() {
-    print_header "Step 6: Configuring OpenCode"
+    print_step "6/6" "Configuring OpenCode"
 
     local opencode_config="$HOME/.config/opencode/opencode.json"
 
@@ -26,18 +26,18 @@ configure_opencode() {
 
     # Check if config already exists
     if [[ -f "$opencode_config" ]]; then
-        print_info "OpenCode config already exists"
+        print_verbose "OpenCode config already exists"
 
         # Backup existing config
         local backup_path
         backup_path="${opencode_config}.backup.$(date +%Y%m%d_%H%M%S)"
         cp "$opencode_config" "$backup_path"
-        print_info "Existing config backed up to: $backup_path"
+        print_verbose "Existing config backed up"
     fi
 
-    # Ask about superpowers plugin (skip in auto mode)
+    # Ask about superpowers plugin (skip in auto mode or quiet mode)
     local install_plugin=false
-    if [[ "$AUTO_MODE" != true ]]; then
+    if [[ "$AUTO_MODE" != true ]] && [[ $VERBOSITY_LEVEL -ge 1 ]]; then
         echo ""
         echo -e "${BLUE}Optional: Superpowers Plugin${NC}"
         echo "The superpowers plugin adds enhanced OpenCode capabilities:"
@@ -52,9 +52,9 @@ configure_opencode() {
         fi
     fi
 
-    print_info "Creating OpenCode configuration..."
-    print_info "Model: ollama/$CUSTOM_MODEL_NAME"
-    print_info "Context window: $(printf "%'d" "$NUM_CTX") tokens"
+    print_verbose "Creating OpenCode configuration..."
+    print_verbose "Model: ollama/$CUSTOM_MODEL_NAME"
+    print_verbose "Context window: $(printf "%'d" "$NUM_CTX") tokens"
 
     # OpenCode uses model format: "ollama/model-name"
     # Ollama API URL needs /v1 suffix for OpenAI-compatible endpoint
@@ -117,19 +117,26 @@ EOF
     if command -v jq &> /dev/null; then
         if ! jq empty "$opencode_config" > /dev/null 2>&1; then
             print_error "OpenCode config JSON validation failed"
-            print_info "Config may contain syntax errors"
+            print_verbose "Config may contain syntax errors"
             exit 1
         fi
-        print_status "OpenCode config JSON validated successfully"
+        print_verbose "OpenCode config JSON validated successfully"
     fi
 
-    print_status "OpenCode configured to use ollama/$CUSTOM_MODEL_NAME"
-    print_status "Ollama endpoint: ${OLLAMA_HOST}/v1"
-    print_status "Context: $(printf "%'d" "$NUM_CTX") tokens"
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        print_status "OpenCode configured to use ollama/$CUSTOM_MODEL_NAME"
+        print_status "Ollama endpoint: ${OLLAMA_HOST}/v1"
+        print_status "Context: $(printf "%'d" "$NUM_CTX") tokens"
 
-    if [[ "$install_plugin" == true ]]; then
-        print_status "Plugin: superpowers (github.com/obra/superpowers)"
+        if [[ "$install_plugin" == true ]]; then
+            print_status "Plugin: superpowers"
+        else
+            print_info "No plugins configured"
+        fi
     else
-        print_info "No plugins configured (you can add them later to opencode.json)"
+        print_status "OpenCode configured"
+        if [[ "$install_plugin" == true ]]; then
+            print_verbose "Plugin: superpowers"
+        fi
     fi
 }

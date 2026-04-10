@@ -23,17 +23,28 @@ set -euo pipefail
 #   - RECOMMENDED_MODEL: Recommended model
 display_hardware_and_recommendation() {
     print_header "Hardware Detection & Model Recommendation"
-    echo -e "${BLUE}Detected Hardware:${NC}"
-    echo "  • Chip:      $DETECTED_M_CHIP"
-    echo "  • RAM:       ${DETECTED_RAM_GB}GB"
-    echo "  • CPU Cores: $DETECTED_CPU_CORES"
-    echo ""
-    echo -e "${GREEN}Recommended Model: $RECOMMENDED_MODEL${NC}"
-    echo ""
+
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        # Verbose: show all details
+        echo -e "${BLUE}Detected Hardware:${NC}"
+        echo "  • Chip:      $DETECTED_M_CHIP"
+        echo "  • RAM:       ${DETECTED_RAM_GB}GB"
+        echo "  • CPU Cores: $DETECTED_CPU_CORES"
+        echo ""
+        echo -e "${GREEN}Recommended Model: $RECOMMENDED_MODEL${NC}"
+        echo ""
+    else
+        # Normal: compact display
+        echo -e "  ${GRAY}Hardware: $DETECTED_M_CHIP / ${DETECTED_RAM_GB}GB RAM / $DETECTED_CPU_CORES cores${NC}"
+        echo -e "  ${GREEN}Recommended: $RECOMMENDED_MODEL${NC}"
+        echo ""
+    fi
 
     # Show available options with GPU compatibility indicators
-    echo "Available Gemma4 models (✓ = 100% GPU, ⚠ = CPU/GPU split):"
-    echo ""
+    if [[ $VERBOSITY_LEVEL -ge 1 ]]; then
+        echo "Available Gemma4 models (✓ = 100% GPU, ⚠ = CPU/GPU split):"
+        echo ""
+    fi
 
     # Check each model's GPU fit
     local test_31b_context test_26b_context test_latest_context test_e2b_context

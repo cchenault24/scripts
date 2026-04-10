@@ -6,8 +6,17 @@
 # - Print functions (print_header, print_info, print_status, print_warning, print_error, print_action, print_dry_run)
 # - Hardware detection functions
 # - Display formatting utilities
+# - Verbosity control (VERBOSITY_LEVEL: 0=quiet, 1=normal, 2=verbose)
 
 set -euo pipefail
+
+#############################################
+# Verbosity Control
+#############################################
+# 0 = Quiet (only errors and final summary)
+# 1 = Normal (default, standard output)
+# 2 = Verbose (all details including debug info)
+VERBOSITY_LEVEL=${VERBOSITY_LEVEL:-1}
 
 #############################################
 # Color Definitions
@@ -17,6 +26,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Byte conversion constant
@@ -26,34 +37,73 @@ readonly BYTES_PER_GB=$((1024 * 1024 * 1024))
 # Print Functions
 #############################################
 
+# Clean, compact header (always shown)
 print_header() {
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}========================================${NC}\n"
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        # Verbose: show traditional headers
+        echo -e "\n${BLUE}========================================${NC}"
+        echo -e "${BLUE}$1${NC}"
+        echo -e "${BLUE}========================================${NC}\n"
+    else
+        # Normal: clean compact header
+        echo ""
+        echo -e "${BOLD}${BLUE}▸ $1${NC}"
+    fi
 }
 
+# Info messages (hidden in quiet mode)
 print_info() {
-    echo -e "${BLUE}ℹ $1${NC}"
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
+    echo -e "${GRAY}  $1${NC}"
 }
 
+# Verbose-only info (only shown with -v)
+print_verbose() {
+    [[ $VERBOSITY_LEVEL -lt 2 ]] && return
+    echo -e "${GRAY}  [v] $1${NC}"
+}
+
+# Status messages (always shown except quiet mode)
 print_status() {
-    echo -e "${GREEN}✓ $1${NC}"
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
+    echo -e "${GREEN}✓${NC} $1"
 }
 
+# Warning messages (always shown)
 print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
+    echo -e "${YELLOW}⚠${NC} $1"
 }
 
+# Error messages (always shown)
 print_error() {
-    echo -e "${RED}✗ $1${NC}" >&2
+    echo -e "${RED}✗${NC} $1" >&2
 }
 
+# Action messages (shown in normal/verbose)
 print_action() {
-    echo -e "${CYAN}→ $1${NC}"
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
+    echo -e "${CYAN}→${NC} $1"
 }
 
+# Dry run messages
 print_dry_run() {
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
     echo -e "${YELLOW}[DRY-RUN]${NC} $1"
+}
+
+# Step indicator (compact, always shown except quiet)
+print_step() {
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
+    local step_num=$1
+    local step_desc=$2
+    echo -e "\n${BOLD}[$step_num]${NC} $step_desc"
+}
+
+# Compact summary line (always shown except quiet)
+print_summary() {
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return
+    echo -e "${BLUE}▸${NC} $1"
 }
 
 #############################################
@@ -188,4 +238,54 @@ get_ollama_list() {
 # Clear ollama list cache (call after pulling new models)
 clear_ollama_cache() {
     OLLAMA_LIST_CACHE=""
+}
+
+#############################################
+# Summary Display Functions
+#############################################
+
+# Print final setup summary in table format
+print_setup_summary() {
+    local chip=$1
+    local ram=$2
+    local cores=$3
+    local gemma_model=$4
+    local context=$5
+    local codegemma=${6:-""}
+    local ide_tools=$7
+
+    echo ""
+    echo -e "${BOLD}${GREEN}✨ Setup Complete!${NC}"
+    echo ""
+
+    # Configuration table
+    echo "Configuration:"
+    echo "┌─────────────────┬──────────────────────────────────────────────┐"
+    printf "│ %-15s │ %-44s │\n" "Hardware" "${chip}, ${ram}GB RAM, ${cores} cores"
+    printf "│ %-15s │ %-44s │\n" "Gemma4 Model" "${gemma_model} (${context}K)"
+    if [[ -n "$codegemma" ]]; then
+        printf "│ %-15s │ %-44s │\n" "CodeGemma" "${codegemma} (8K)"
+    fi
+    printf "│ %-15s │ %-44s │\n" "IDE Tools" "${ide_tools}"
+    echo "└─────────────────┴──────────────────────────────────────────────┘"
+    echo ""
+
+    # Quick start
+    echo -e "${BOLD}Quick Start:${NC}"
+    if [[ "$ide_tools" == *"OpenCode"* ]] || [[ "$ide_tools" == *"opencode"* ]]; then
+        echo "  opencode                             # Launch OpenCode"
+    fi
+    echo "  ollama run ${gemma_model}           # Test model"
+    echo ""
+
+    # Next steps
+    echo -e "${BOLD}Next Steps:${NC}"
+    if [[ "$ide_tools" == *"JetBrains"* ]] || [[ "$ide_tools" == *"jetbrains"* ]]; then
+        echo "  • Configure JetBrains AI Assistant (see: ~/.config/gemma4-setup/jetbrains-config-reference.txt)"
+    fi
+    if [[ "$ide_tools" == *"OpenCode"* ]] || [[ "$ide_tools" == *"opencode"* ]]; then
+        echo "  • Run 'opencode' to start coding"
+    fi
+    echo ""
+    echo -e "${GRAY}Run './setup-gemma4-opencode.sh --help' for more options${NC}"
 }

@@ -23,13 +23,13 @@ set -euo pipefail
 #   - NUM_CTX: Context length
 #   - AUTO_MODE: Whether in auto mode
 configure_jetbrains() {
-    print_header "Configuring JetBrains AI Assistant"
+    print_step "6/6" "Configuring JetBrains AI Assistant"
 
     # JetBrains stores settings in IDE-specific locations
     # For AI Assistant, we need to configure the LLM provider
     local jetbrains_base="$HOME/Library/Application Support/JetBrains"
 
-    print_info "JetBrains AI Assistant setup requires manual configuration"
+    print_info "Manual configuration required"
     echo ""
     echo -e "${BLUE}Configuration Instructions:${NC}"
     echo ""
@@ -193,12 +193,18 @@ Documentation:
 • CodeGemma FIM: https://ai.google.dev/gemma/docs/codegemma
 EOF
 
-    print_status "Configuration reference saved to:"
-    print_status "  $config_ref"
-    echo ""
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        print_status "Configuration reference saved to:"
+        print_status "  $config_ref"
+        echo ""
+    else
+        print_status "JetBrains config saved"
+        print_verbose "Reference: $config_ref"
+    fi
 
     # Optional: Open the config reference
-    if [[ "$AUTO_MODE" != true ]]; then
+    if [[ "$AUTO_MODE" != true ]] && [[ $VERBOSITY_LEVEL -ge 1 ]]; then
+        echo ""
         read -p "Open configuration reference now? (Y/n) " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
@@ -210,6 +216,7 @@ EOF
         fi
     fi
 
-    print_status "JetBrains AI Assistant configuration instructions provided"
-    print_info "You can reference these settings anytime at: $config_ref"
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        print_info "You can reference these settings anytime at: $config_ref"
+    fi
 }

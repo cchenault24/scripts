@@ -15,74 +15,92 @@ set -euo pipefail
 #   - GEMMA_MODEL: Base model name
 #   - CUSTOM_MODEL_NAME: Custom model name
 verify_setup() {
-    print_header "Verification"
+    [[ $VERBOSITY_LEVEL -eq 0 ]] && return 0  # Skip in quiet mode
 
-    local all_good=true
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        # Verbose: show all checks
+        print_header "Verification"
 
-    # Check Ollama
-    if command -v ollama &> /dev/null; then
-        print_status "Ollama: $(ollama --version 2>/dev/null | head -1)"
+        local all_good=true
+
+        # Check Ollama
+        if command -v ollama &> /dev/null; then
+            print_status "Ollama: $(ollama --version 2>/dev/null | head -1)"
+        else
+            print_error "Ollama: NOT FOUND"
+            all_good=false
+        fi
+
+        # Check OpenCode
+        if command -v opencode &> /dev/null; then
+            print_status "OpenCode: $(opencode --version 2>/dev/null || echo 'installed')"
+        else
+            print_error "OpenCode: NOT FOUND"
+            all_good=false
+        fi
+
+        # Check Ollama server
+        if curl -s "$OLLAMA_HOST/api/tags" > /dev/null 2>&1; then
+            print_status "Ollama Server: Running at $OLLAMA_HOST"
+        else
+            print_error "Ollama Server: NOT RUNNING"
+            all_good=false
+        fi
+
+        # Check LaunchAgent
+        if launchctl list | grep -q "$LAUNCHAGENT_LABEL"; then
+            print_status "LaunchAgent: Loaded and active"
+        else
+            print_error "LaunchAgent: NOT LOADED"
+            all_good=false
+        fi
+
+        # Check models (using cached list for efficiency)
+        local model_list
+        model_list=$(get_ollama_list)
+
+        if echo "$model_list" | grep -q "^${GEMMA_MODEL}"; then
+            print_status "Base Model: $GEMMA_MODEL"
+        else
+            print_error "Base Model: $GEMMA_MODEL NOT FOUND"
+            all_good=false
+        fi
+
+        if echo "$model_list" | grep -q "^${CUSTOM_MODEL_NAME}"; then
+            print_status "Custom Model: $CUSTOM_MODEL_NAME"
+        else
+            print_error "Custom Model: $CUSTOM_MODEL_NAME NOT FOUND"
+            all_good=false
+        fi
+
+        # Check OpenCode config
+        if [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
+            print_status "OpenCode Config: $HOME/.config/opencode/opencode.json"
+        else
+            print_error "OpenCode Config: NOT FOUND"
+            all_good=false
+        fi
+
+        echo
+        if [[ "$all_good" == true ]]; then
+            print_status "All checks passed! ✨"
+        else
+            print_error "Some checks failed - review output above"
+            return 1
+        fi
     else
-        print_error "Ollama: NOT FOUND"
-        all_good=false
-    fi
+        # Normal: quick verification
+        local all_good=true
 
-    # Check OpenCode
-    if command -v opencode &> /dev/null; then
-        print_status "OpenCode: $(opencode --version 2>/dev/null || echo 'installed')"
-    else
-        print_error "OpenCode: NOT FOUND"
-        all_good=false
-    fi
+        # Silent checks
+        command -v ollama &> /dev/null || all_good=false
+        command -v opencode &> /dev/null || all_good=false
+        curl -s "$OLLAMA_HOST/api/tags" > /dev/null 2>&1 || all_good=false
 
-    # Check Ollama server
-    if curl -s "$OLLAMA_HOST/api/tags" > /dev/null 2>&1; then
-        print_status "Ollama Server: Running at $OLLAMA_HOST"
-    else
-        print_error "Ollama Server: NOT RUNNING"
-        all_good=false
-    fi
-
-    # Check LaunchAgent
-    if launchctl list | grep -q "$LAUNCHAGENT_LABEL"; then
-        print_status "LaunchAgent: Loaded and active"
-    else
-        print_error "LaunchAgent: NOT LOADED"
-        all_good=false
-    fi
-
-    # Check models (using cached list for efficiency)
-    local model_list
-    model_list=$(get_ollama_list)
-
-    if echo "$model_list" | grep -q "^${GEMMA_MODEL}"; then
-        print_status "Base Model: $GEMMA_MODEL"
-    else
-        print_error "Base Model: $GEMMA_MODEL NOT FOUND"
-        all_good=false
-    fi
-
-    if echo "$model_list" | grep -q "^${CUSTOM_MODEL_NAME}"; then
-        print_status "Custom Model: $CUSTOM_MODEL_NAME"
-    else
-        print_error "Custom Model: $CUSTOM_MODEL_NAME NOT FOUND"
-        all_good=false
-    fi
-
-    # Check OpenCode config
-    if [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
-        print_status "OpenCode Config: $HOME/.config/opencode/opencode.json"
-    else
-        print_error "OpenCode Config: NOT FOUND"
-        all_good=false
-    fi
-
-    echo
-    if [[ "$all_good" == true ]]; then
-        print_status "All checks passed! ✨"
-    else
-        print_error "Some checks failed - review output above"
-        return 1
+        if [[ "$all_good" != true ]]; then
+            print_error "Verification failed - run with -v for details"
+            return 1
+        fi
     fi
 }
 
@@ -99,14 +117,32 @@ verify_setup() {
 #   - NUM_CTX: Context length
 #   - OLLAMA_HOST: Ollama server URL
 #   - LAUNCHAGENT_PLIST: Path to LaunchAgent plist
+#   - CODEGEMMA_MODEL: CodeGemma model (if configured)
+#   - IDE_TOOLS: Array of selected IDE tools
 print_usage_instructions() {
-    print_header "Setup Complete! 🚀"
-
     # Format context for display
     local context_display
     context_display=$(format_context_display "$NUM_CTX")
+    local context_k=$((NUM_CTX / 1024))
 
-    cat << EOF
+    # Format IDE tools for display
+    local ide_display=""
+    if [[ " ${IDE_TOOLS[*]} " =~ " opencode " ]] && [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
+        ide_display="OpenCode + JetBrains"
+    elif [[ " ${IDE_TOOLS[*]} " =~ " opencode " ]]; then
+        ide_display="OpenCode"
+    elif [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
+        ide_display="JetBrains AI Assistant"
+    else
+        ide_display="None"
+    fi
+
+    # Use compact summary in normal mode, detailed in verbose mode
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        # Verbose mode: show full details
+        print_header "Setup Complete! 🚀"
+
+        cat << EOF
 Your Gemma4 + OpenCode environment is ready to use!
 
 Hardware Configuration:
@@ -179,9 +215,23 @@ Share With Your Team:
 # Specify a model:
   $ ./setup-gemma4-opencode.sh --model gemma4:26b
 
-# Interactive (shows recommendations):
-  $ ./setup-gemma4-opencode.sh
+# Verbose mode (show all details):
+  $ ./setup-gemma4-opencode.sh -v
+
+# Quiet mode (minimal output):
+  $ ./setup-gemma4-opencode.sh -q
 
 Happy coding! 🎉
 EOF
+    else
+        # Normal mode: compact summary
+        print_setup_summary \
+            "$DETECTED_M_CHIP" \
+            "$DETECTED_RAM_GB" \
+            "$DETECTED_CPU_CORES" \
+            "$CUSTOM_MODEL_NAME" \
+            "$context_k" \
+            "${CODEGEMMA_MODEL:-}" \
+            "$ide_display"
+    fi
 }

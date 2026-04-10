@@ -19,7 +19,7 @@ set -euo pipefail
 #   - NUM_CTX: Same as CONTEXT_LENGTH (Ollama parameter name)
 #   - OLLAMA_HOST: Ollama server URL
 create_launchagent() {
-    print_header "Step 3: Configuring Ollama LaunchAgent"
+    print_step "3/6" "Configuring LaunchAgent"
 
     # Create LaunchAgents directory if it doesn't exist
     mkdir -p "$HOME/Library/LaunchAgents"
@@ -27,11 +27,11 @@ create_launchagent() {
     # Check if LaunchAgent already exists and is loaded
     local needs_reload=false
     if [[ -f "$LAUNCHAGENT_PLIST" ]]; then
-        print_info "LaunchAgent already exists at $LAUNCHAGENT_PLIST"
+        print_verbose "LaunchAgent already exists"
 
         # Check if it's already loaded
         if launchctl list | grep -q "$LAUNCHAGENT_LABEL"; then
-            print_info "Unloading existing LaunchAgent..."
+            print_verbose "Unloading existing LaunchAgent..."
             launchctl unload "$LAUNCHAGENT_PLIST" 2>/dev/null || true
             sleep 2
         fi
@@ -42,13 +42,15 @@ create_launchagent() {
     local brew_prefix
     brew_prefix=$(brew --prefix)
 
-    print_info "Creating dynamically optimized LaunchAgent configuration..."
-    print_info "Optimizations based on your hardware:"
-    echo "  • Metal Memory:     $(format_bytes "$METAL_MEMORY")"
-    echo "  • Parallel Requests: $NUM_PARALLEL"
-    echo "  • Context Length:    $(printf "%'d" "$CONTEXT_LENGTH") tokens"
-    echo "  • GPU Layers:        All (999)"
-    echo ""
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        print_verbose "Creating optimized LaunchAgent configuration..."
+        print_verbose "Optimizations based on your hardware:"
+        echo "  • Metal Memory:     $(format_bytes "$METAL_MEMORY")"
+        echo "  • Parallel Requests: $NUM_PARALLEL"
+        echo "  • Context Length:    $(printf "%'d" "$CONTEXT_LENGTH") tokens"
+        echo "  • GPU Layers:        All (999)"
+        echo ""
+    fi
 
     # Create log directory
     mkdir -p "$HOME/.local/var/log"

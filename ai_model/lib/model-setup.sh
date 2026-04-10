@@ -14,16 +14,13 @@ set -euo pipefail
 #   - GEMMA_MODEL: Model name (e.g., "gemma4:31b")
 #   - DETECTED_RAM_GB: Detected RAM for validation
 pull_model() {
-    print_header "Step 4: Pulling Gemma4 Model"
+    print_step "4/6" "Pulling Gemma4 Model"
 
     # Check if model already exists (using cached list)
     if get_ollama_list | grep -q "^${GEMMA_MODEL}"; then
-        print_status "Model $GEMMA_MODEL already pulled"
+        print_status "$GEMMA_MODEL (already downloaded)"
         return 0
     fi
-
-    print_info "Pulling model: $GEMMA_MODEL"
-    print_warning "This may take 15-30 minutes depending on your internet connection..."
 
     # Get model specifications from data structure
     local model_variant="${GEMMA_MODEL#*:}"
@@ -33,21 +30,20 @@ pull_model() {
     if [[ -n "$specs" ]]; then
         # Parse specifications
         read -r size_gb context_k min_ram_gb <<< "$specs"
+        print_info "Downloading ${GEMMA_MODEL} (${size_gb}GB)..."
 
-        print_info "Model: gemma4:${model_variant} (${size_gb}GB download, ${context_k}K context)"
-        print_info "Recommended RAM: ${min_ram_gb}GB+"
-
-        if [[ $DETECTED_RAM_GB -lt $min_ram_gb ]]; then
-            print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - ${min_ram_gb}GB+ recommended"
-        else
-            print_status "Your ${DETECTED_RAM_GB}GB RAM is sufficient for this model"
+        if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+            print_verbose "Recommended RAM: ${min_ram_gb}GB+"
+            if [[ $DETECTED_RAM_GB -lt $min_ram_gb ]]; then
+                print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - ${min_ram_gb}GB+ recommended"
+            fi
         fi
     else
         print_info "Downloading ${GEMMA_MODEL}..."
     fi
 
-    if ollama pull "$GEMMA_MODEL"; then
-        print_status "Model $GEMMA_MODEL pulled successfully"
+    if ollama pull "$GEMMA_MODEL" 2>&1 | grep -E "pulling|success" || true; then
+        print_status "$GEMMA_MODEL downloaded"
         clear_ollama_cache  # Invalidate cache after pulling new model
     else
         print_error "Failed to pull model $GEMMA_MODEL"
@@ -64,7 +60,7 @@ pull_model() {
 #   - DETECTED_RAM_GB: Detected RAM
 #   - AUTO_MODE: Whether in auto mode
 create_custom_model() {
-    print_header "Step 5: Creating High-Context Model Variant"
+    print_step "5/6" "Creating Custom Model"
 
     # Check if custom model already exists (using cached list)
     if get_ollama_list | grep -q "^${CUSTOM_MODEL_NAME}"; then
@@ -140,42 +136,35 @@ EOF
 #   - CODEGEMMA_MODEL: CodeGemma model name (e.g., "codegemma:7b")
 #   - DETECTED_RAM_GB: Detected RAM for validation
 pull_codegemma() {
-    print_header "Pulling CodeGemma Model (for JetBrains)"
-
     # Check if CodeGemma model variable is set
     if [[ -z "$CODEGEMMA_MODEL" ]]; then
-        print_info "No CodeGemma model configured (skipping)"
         return 0
     fi
+
+    print_step "5.5/6" "Pulling CodeGemma (FIM)"
 
     # Check if model already exists
     if get_ollama_list | grep -q "^${CODEGEMMA_MODEL}"; then
-        print_status "Model $CODEGEMMA_MODEL already pulled"
+        print_status "$CODEGEMMA_MODEL (already downloaded)"
         return 0
     fi
-
-    print_info "Pulling CodeGemma model: $CODEGEMMA_MODEL"
-    print_info "CodeGemma supports Fill-In-Middle (FIM) for code completion"
-    print_warning "This may take 5-15 minutes depending on your internet connection..."
 
     # Get model size info
     local model_variant="${CODEGEMMA_MODEL#*:}"
     case "$model_variant" in
         2b)
-            print_info "Model: codegemma:2b (1.6GB download, 8K context)"
-            print_info "Optimized for fast code completion on constrained systems"
+            print_info "Downloading codegemma:2b (1.6GB)..."
             ;;
         7b)
-            print_info "Model: codegemma:7b (5.0GB download, 8K context)"
-            print_info "Recommended for 16GB+ RAM - more accurate completions"
+            print_info "Downloading codegemma:7b (5.0GB)..."
             ;;
         *)
             print_info "Downloading ${CODEGEMMA_MODEL}..."
             ;;
     esac
 
-    if ollama pull "$CODEGEMMA_MODEL"; then
-        print_status "Model $CODEGEMMA_MODEL pulled successfully"
+    if ollama pull "$CODEGEMMA_MODEL" 2>&1 | grep -E "pulling|success" || true; then
+        print_status "$CODEGEMMA_MODEL downloaded"
         clear_ollama_cache  # Invalidate cache after pulling new model
     else
         print_error "Failed to pull model $CODEGEMMA_MODEL"

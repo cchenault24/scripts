@@ -20,13 +20,15 @@
 # │ gemma4:31b   │ 20GB   │ 256K    │ 48GB+        │ Best Quality │
 # └──────────────┴────────┴─────────┴──────────────┴──────────────┘
 #
-# Usage: ./setup-gemma4-opencode.sh [--model MODEL] [--auto]
+# Usage: ./setup-gemma4-opencode.sh [OPTIONS]
 #
 # Options:
 #   --model MODEL    Specify Gemma4 variant (auto-detected by default)
 #                    Available: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b
 #                    See: https://ollama.com/library/gemma4/tags
 #   --auto           Skip all interactive prompts, use auto-detected defaults
+#   -v, --verbose    Show detailed output (all steps and debug info)
+#   -q, --quiet      Minimal output (only errors and final summary)
 #
 # Requirements:
 #   - macOS 10.14+ (Mojave or later)
@@ -97,9 +99,9 @@ OLLAMA_HOST="http://localhost:11434"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --version|-v)
+        --version)
             echo "Gemma4 + OpenCode Setup Script"
-            echo "Version: 2.0.0 (modular architecture)"
+            echo "Version: 2.1.0 (modular architecture with improved UI)"
             echo "Compatible models: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b"
             echo "Requirements: macOS 10.14+, Homebrew, 12GB+ RAM"
             exit 0
@@ -111,6 +113,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --auto)
             AUTO_MODE=true
+            shift
+            ;;
+        -v|--verbose)
+            export VERBOSITY_LEVEL=2
+            shift
+            ;;
+        -q|--quiet)
+            export VERBOSITY_LEVEL=0
             shift
             ;;
         --help|-h)
@@ -214,15 +224,24 @@ validate_and_prompt_gpu_fit
 #############################################
 
 main() {
-    print_header "Gemma4 + OpenCode Setup for Teams"
-    print_info "Hardware-optimized setup with dynamic configuration"
-    print_info "This script is idempotent - safe to run multiple times"
-    echo
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        # Verbose: show traditional header
+        print_header "Gemma4 + OpenCode Setup for Teams"
+        print_info "Hardware-optimized setup with dynamic configuration"
+        print_info "This script is idempotent - safe to run multiple times"
+        echo
+    elif [[ $VERBOSITY_LEVEL -eq 1 ]]; then
+        # Normal: compact header
+        echo ""
+        echo -e "${BOLD}${BLUE}Gemma4 + IDE Tools Setup${NC}"
+        echo ""
+    fi
+    # Quiet: no header
 
-    # Platform validation
-    check_macos
-    check_apple_silicon
-    check_homebrew
+    # Platform validation (silent unless errors)
+    check_macos > /dev/null 2>&1 || check_macos
+    check_apple_silicon > /dev/null 2>&1 || check_apple_silicon
+    check_homebrew > /dev/null 2>&1 || check_homebrew
 
     # Installation
     install_ollama
