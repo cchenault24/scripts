@@ -10,14 +10,16 @@ set -euo pipefail
 
 # Create and load Ollama LaunchAgent with hardware-optimized settings
 #
+# Note: Context length and GPU settings are baked into the custom Modelfile,
+# not set as LaunchAgent environment variables. Only global Ollama settings
+# (parallel requests, keep-alive) are set here.
+#
 # Globals read:
 #   - LAUNCHAGENT_LABEL: LaunchAgent identifier
 #   - LAUNCHAGENT_PLIST: Path to plist file
-#   - METAL_MEMORY: Calculated Metal memory allocation
-#   - NUM_PARALLEL: Calculated parallel request count
-#   - CONTEXT_LENGTH: Selected context length
-#   - NUM_CTX: Same as CONTEXT_LENGTH (Ollama parameter name)
-#   - OLLAMA_HOST: Ollama server URL
+#   - NUM_PARALLEL: Calculated parallel request count (set via OLLAMA_NUM_PARALLEL)
+#   - CONTEXT_LENGTH: For display only (actual value baked into Modelfile)
+#   - OLLAMA_HOST: Ollama server URL (set via OLLAMA_HOST)
 create_launchagent() {
     print_step "3/6" "Configuring LaunchAgent"
 
@@ -44,17 +46,21 @@ create_launchagent() {
 
     if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
         print_verbose "Creating optimized LaunchAgent configuration..."
-        print_verbose "Optimizations based on your hardware:"
-        echo "  • Metal Memory:     $(format_bytes "$METAL_MEMORY")"
-        echo "  • Parallel Requests: $NUM_PARALLEL"
-        echo "  • Context Length:    $(printf "%'d" "$CONTEXT_LENGTH") tokens"
-        echo "  • GPU Layers:        All (999)"
+        print_verbose "Optimizations applied to your setup:"
+        echo "  • Parallel Requests: $NUM_PARALLEL (set via OLLAMA_NUM_PARALLEL)"
+        echo "  • Context Length:    $(printf "%'d" "$CONTEXT_LENGTH") tokens (baked into custom model)"
+        echo "  • Metal GPU:         100% usage (Ollama auto-detects available memory)"
+        echo "  • Model Keep-Alive:  Unlimited (stays loaded for fast responses)"
         echo ""
     fi
 
     # Create log directory
     mkdir -p "$HOME/.local/var/log"
 
+    # Create LaunchAgent plist
+    # Note: Only setting global Ollama server settings here
+    # Model-specific settings (context, GPU layers, temperature) are baked into
+    # the custom Modelfile when created. Metal memory is auto-detected by Ollama.
     cat > "$LAUNCHAGENT_PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -75,20 +81,10 @@ create_launchagent() {
     <dict>
         <key>OLLAMA_HOST</key>
         <string>127.0.0.1:11434</string>
-        <key>OLLAMA_METAL_MEMORY</key>
-        <string>${METAL_MEMORY}</string>
         <key>OLLAMA_KEEP_ALIVE</key>
         <string>-1</string>
         <key>OLLAMA_NUM_PARALLEL</key>
         <string>${NUM_PARALLEL}</string>
-        <key>OLLAMA_FLASH_ATTENTION</key>
-        <string>1</string>
-        <key>OLLAMA_GPU_LAYERS</key>
-        <string>999</string>
-        <key>OLLAMA_CONTEXT_LENGTH</key>
-        <string>${CONTEXT_LENGTH}</string>
-        <key>OLLAMA_NUM_CTX</key>
-        <string>${NUM_CTX}</string>
     </dict>
     <key>StandardOutPath</key>
     <string>$HOME/.local/var/log/ollama.stdout.log</string>
