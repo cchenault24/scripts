@@ -25,17 +25,17 @@ echo ""
 
 # Test 2: Progress Bar
 echo "=== Test 2: Progress Bar ==="
-for i in {0..100..10}; do
+for i in 0 10 20 30 40 50 60 70 80 90 100; do
     draw_progress_bar $i 100
     echo ""
-    sleep 0.3
+    sleep 0.2
 done
 print_status "Progress complete"
 echo ""
 
 # Test 3: Download Progress
 echo "=== Test 3: Download Progress with ETA ==="
-for i in {0..500..50}; do
+for i in 0 50 100 150 200 250 300 350 400 450 500; do
     draw_download_progress $i 500 5.2
     sleep 0.2
 done
