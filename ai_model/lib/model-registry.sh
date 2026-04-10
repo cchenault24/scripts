@@ -242,6 +242,43 @@ get_registry_display_name() {
 }
 
 #############################################
+# Coding Priority Scoring
+#############################################
+
+# Get coding specialization priority score
+# Higher scores indicate better coding performance/specialization
+# Args: model_key (format: "family:variant")
+# Returns: integer priority score (1-3)
+#   3 = Code-specialized models (granite-code, codegemma)
+#   2 = General purpose with strong coding (gemma4, llama3.1, mistral)
+#   1 = Reasoning-focused or general purpose (phi4-reasoning, phi4)
+get_registry_coding_priority() {
+    local model_key="$1"
+
+    case "$model_key" in
+        # Code-specialized models (highest priority)
+        granite-code:*) echo "3" ;;
+        codegemma:*) echo "3" ;;
+
+        # General purpose with strong coding performance
+        gemma4:*) echo "2" ;;
+        llama3.1:*) echo "2" ;;
+        mistral:latest) echo "2" ;;
+        mistral-small:latest) echo "2" ;;
+
+        # Reasoning-focused or general purpose
+        phi4-reasoning:*) echo "1" ;;
+        phi4:latest) echo "1" ;;
+        phi4-mini:latest) echo "1" ;;
+
+        *)
+            echo "ERROR: Unknown model '$model_key' in get_registry_coding_priority" >&2
+            return 1
+            ;;
+    esac
+}
+
+#############################################
 # List All Models
 #############################################
 

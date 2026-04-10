@@ -220,6 +220,7 @@ calculate_context_length() {
 # Only recommends models that can run at 100% GPU with a reasonable context window
 # Requires minimum 8K context for practical coding work (speed-optimized)
 # Iterates over all models in registry and picks the best fit
+# Prioritizes code-specialized models over general purpose when similarly sized
 recommend_model() {
     local ram_gb=$1
     local min_useful_context=8192  # 8K minimum for practical coding (speed-optimized)
@@ -227,6 +228,7 @@ recommend_model() {
     # Get all models from registry and test each one
     local best_model=""
     local best_weight=0
+    local best_coding_priority=0
 
     while IFS= read -r model_key; do
         # Get model's minimum RAM requirement
@@ -276,10 +278,22 @@ recommend_model() {
             continue  # Not enough headroom for system + processes
         fi
 
-        # This model fits with adequate headroom! Track the largest one (proxy for capability)
-        if [[ $weight -gt $best_weight ]]; then
+        # This model fits with adequate headroom!
+        # Use composite scoring: coding priority is important but weight (capability) matters more
+        # Score = (coding_priority * 10) + weight
+        # This ensures:
+        # - Code-specialized models get a boost (30 points vs 20 points)
+        # - But much larger models still win (e.g., 40GB general > 20GB code-specialized)
+        # - Within similar sizes, code-specialized models are preferred
+        local coding_priority
+        coding_priority=$(get_registry_coding_priority "$model_key")
+        local current_score=$((coding_priority * 10 + weight))
+        local best_score=$((best_coding_priority * 10 + best_weight))
+
+        if [[ $current_score -gt $best_score ]]; then
             best_model="$model_key"
             best_weight=$weight
+            best_coding_priority=$coding_priority
         fi
     done < <(list_all_models)
 
