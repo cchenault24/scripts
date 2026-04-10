@@ -307,7 +307,20 @@ main() {
     if ollama ps 2>/dev/null | grep -q "^${CUSTOM_MODEL_NAME}[[:space:]]"; then
         print_status "Model already loaded in GPU memory"
     else
-        warmup_model
+        # In interactive mode, ask user; in auto mode, always warmup
+        local should_warmup=true
+        if [[ "$AUTO_MODE" != true ]]; then
+            read -p "Pre-load model into GPU memory now for instant first response? (Y/n) " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Nn]$ ]]; then
+                should_warmup=false
+                print_info "Skipping warmup - model will load on first request (~5-10s delay)"
+            fi
+        fi
+
+        if [[ "$should_warmup" == true ]]; then
+            warmup_model
+        fi
     fi
 
     # Pull FIM model if JetBrains is selected
