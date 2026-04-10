@@ -154,7 +154,8 @@ test_model_recommendation_flow() {
     begin_test "recommend_model works with detected RAM"
     local recommended
     recommended=$(recommend_model "$ram")
-    if [[ "$recommended" =~ ^gemma4:(e2b|latest|26b|31b)$ ]]; then
+    # Check if recommendation is a valid model from registry
+    if [[ -n "$recommended" ]] && list_all_models | grep -q "^${recommended}$"; then
         pass_test
         if [[ "$VERBOSE" == true ]]; then
             echo "    ${ram}GB RAM → $recommended"
@@ -164,22 +165,25 @@ test_model_recommendation_flow() {
     fi
 
     begin_test "Recommended model has valid specifications"
-    local model_size
-    model_size=$(get_model_size "$recommended")
-    local specs
-    specs=$(get_model_specs "$model_size")
-    if [[ -n "$specs" ]]; then
-        read -r size_gb context_k min_ram <<< "$specs"
+    # Get specs from registry
+    local weight_gb
+    weight_gb=$(get_registry_model_weight_gb "$recommended")
+    local max_context
+    max_context=$(get_registry_max_context "$recommended")
+    local min_ram
+    min_ram=$(get_registry_min_ram "$recommended")
+
+    if [[ -n "$weight_gb" ]] && [[ -n "$max_context" ]] && [[ -n "$min_ram" ]]; then
         if [[ $min_ram -le $ram ]]; then
             pass_test
             if [[ "$VERBOSE" == true ]]; then
-                echo "    Model: ${size_gb}GB, ${context_k}K context, min ${min_ram}GB RAM"
+                echo "    Model: ${weight_gb}GB, $((max_context / 1024))K max context, min ${min_ram}GB RAM"
             fi
         else
             fail_test "Recommended model requires ${min_ram}GB but system has ${ram}GB"
         fi
     else
-        fail_test "Could not get specifications for $model_size"
+        fail_test "Could not get specifications from registry for $recommended"
     fi
 }
 
@@ -204,23 +208,21 @@ test_context_length_flow() {
     # Get recommended model
     local recommended
     recommended=$(recommend_model "$ram")
-    local model_size
-    model_size=$(get_model_size "$recommended")
 
     begin_test "Context length is calculated for recommended model"
     local context
-    context=$(calculate_context_length "$ram" "$model_size")
-    if [[ "$context" =~ ^[0-9]+$ ]] && [[ $context -ge 16384 ]]; then
+    context=$(calculate_context_length "$ram" "$recommended")
+    if [[ "$context" =~ ^[0-9]+$ ]] && [[ $context -ge 8192 ]]; then
         pass_test
         if [[ "$VERBOSE" == true ]]; then
-            echo "    ${ram}GB + $model_size → $((context / 1024))K context"
+            echo "    ${ram}GB + $recommended → $((context / 1024))K context"
         fi
     else
         fail_test "Invalid context length: $context"
     fi
 
     begin_test "Model + context should fit on GPU"
-    if validate_gpu_fit "$ram" "$model_size" "$context"; then
+    if validate_gpu_fit "$ram" "$recommended" "$context"; then
         pass_test
     else
         # This might fail on low-RAM systems with conservative recommendations

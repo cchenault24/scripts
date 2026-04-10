@@ -39,59 +39,23 @@ display_hardware_and_recommendation() {
         echo -e "  ${GREEN}Recommended: $RECOMMENDED_MODEL${NC}"
         echo ""
     fi
-
-    # Show available options with GPU compatibility indicators
-    if [[ $VERBOSITY_LEVEL -ge 1 ]]; then
-        echo "Available Gemma4 models (✓ = 100% GPU, ⚠ = CPU/GPU split):"
-        echo ""
-    fi
-
-    # Check each model's GPU fit
-    local test_31b_context test_26b_context test_latest_context test_e2b_context
-    test_31b_context=$(calculate_context_length "$DETECTED_RAM_GB" "31b")
-    test_26b_context=$(calculate_context_length "$DETECTED_RAM_GB" "26b")
-    test_latest_context=$(calculate_context_length "$DETECTED_RAM_GB" "latest")
-    test_e2b_context=$(calculate_context_length "$DETECTED_RAM_GB" "e2b")
-
-    # Display models based on RAM tiers (ascending order: smallest to largest)
-    if [[ $DETECTED_RAM_GB -ge 48 ]]; then
-        display_model_gpu_fit "e2b" "$test_e2b_context"
-        display_model_gpu_fit "latest" "$test_latest_context"
-        display_model_gpu_fit "26b" "$test_26b_context"
-        display_model_gpu_fit "31b" "$test_31b_context"
-    elif [[ $DETECTED_RAM_GB -ge 32 ]]; then
-        display_model_gpu_fit "e2b" "$test_e2b_context"
-        display_model_gpu_fit "latest" "$test_latest_context"
-        display_model_gpu_fit "26b" "$test_26b_context"
-    elif [[ $DETECTED_RAM_GB -ge 16 ]]; then
-        display_model_gpu_fit "e2b" "$test_e2b_context"
-        display_model_gpu_fit "latest" "$test_latest_context"
-    else
-        display_model_gpu_fit "e2b" "$test_e2b_context"
-    fi
-    echo ""
-    print_info "Models marked with ⚠ will use CPU fallback (slower performance)"
-    echo ""
 }
 
 # Helper: Display single model with GPU fit indicator
 display_model_gpu_fit() {
-    local model_size=$1
+    local model_key=$1
     local context=$2
 
-    local model_weight
-    case "$model_size" in
-        31b) model_weight="19GB" ;;
-        26b) model_weight="17GB" ;;
-        latest) model_weight="10GB" ;;
-        e2b) model_weight="7GB" ;;
-        *) model_weight="unknown" ;;
-    esac
+    # Get model weight and display name from registry
+    local model_weight_gb
+    model_weight_gb=$(get_registry_model_weight_gb "$model_key")
+    local display_name
+    display_name=$(get_registry_display_name "$model_key")
 
-    if validate_gpu_fit "$DETECTED_RAM_GB" "$model_size" "$context"; then
-        echo "  ✓ gemma4:$model_size    ($model_weight model, $((context/1024))K context, 100% GPU)"
+    if validate_gpu_fit "$DETECTED_RAM_GB" "$model_key" "$context"; then
+        echo "  ✓ $model_key    (${model_weight_gb}GB model, $((context/1024))K context, 100% GPU)"
     else
-        echo "  ⚠ gemma4:$model_size    ($model_weight model, $((context/1024))K context, CPU/GPU split - not recommended)"
+        echo "  ⚠ $model_key    (${model_weight_gb}GB model, $((context/1024))K context, CPU/GPU split - not recommended)"
     fi
 }
 
@@ -100,22 +64,30 @@ display_model_gpu_fit() {
 #############################################
 
 # Interactive model selection from available models
-# Sets GEMMA_MODEL global based on user choice
+# Sets SELECTED_MODEL global based on user choice
 #
 # Globals read:
 #   - DETECTED_RAM_GB: Detected RAM in GB
 #   - RECOMMENDED_MODEL: Recommended model (optional)
 # Globals set:
-#   - GEMMA_MODEL: Selected model name (e.g., "gemma4:31b")
+#   - SELECTED_MODEL: Selected model name (e.g., "gemma4:31b", "phi4:latest")
 select_model_interactive() {
     local show_default="${1:-false}"  # Whether to show default in prompt
 
     print_header "Model Selection"
 
-    # Build arrays of available models with their specs (ascending order: smallest to largest)
-    local -a models=("gemma4:e2b" "gemma4:latest" "gemma4:26b" "gemma4:31b")
-    local -a model_sizes=("e2b" "latest" "26b" "31b")
-    local -a model_weights=("7GB" "10GB" "17GB" "19GB")
+    # Build arrays dynamically from registry
+    local -a models=()
+    while IFS= read -r model_key; do
+        # Get minimum RAM required
+        local min_ram
+        min_ram=$(get_registry_min_ram "$model_key")
+
+        # Only include models that meet minimum RAM requirement
+        if [[ $DETECTED_RAM_GB -ge $min_ram ]]; then
+            models+=("$model_key")
+        fi
+    done < <(list_all_models)
 
     # Find recommended index if provided
     local recommended_idx=0
@@ -134,13 +106,17 @@ select_model_interactive() {
     # Display models with GPU fit status
     for i in "${!models[@]}"; do
         local idx=$((i + 1))
-        local model="${models[$i]}"
-        local size="${model_sizes[$i]}"
-        local weight="${model_weights[$i]}"
+        local model_key="${models[$i]}"
+
+        # Get specs from registry
+        local weight_gb
+        weight_gb=$(get_registry_model_weight_gb "$model_key")
+        local display_name
+        display_name=$(get_registry_display_name "$model_key")
 
         # Get context for this model at current RAM
         local context
-        context=$(calculate_context_length "$DETECTED_RAM_GB" "$size")
+        context=$(calculate_context_length "$DETECTED_RAM_GB" "$model_key")
         local context_k=$((context / 1024))
 
         # Check if it fits on GPU and if it's recommended
@@ -149,36 +125,37 @@ select_model_interactive() {
             suffix=" [Recommended]"
         fi
 
-        if validate_gpu_fit "$DETECTED_RAM_GB" "$size" "$context"; then
-            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, ${context_k}K context, 100% GPU)$suffix"
+        if validate_gpu_fit "$DETECTED_RAM_GB" "$model_key" "$context"; then
+            echo -e "  ${GREEN}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K context, 100% GPU)$suffix"
         else
-            echo -e "  ${YELLOW}$idx) $model${NC} ($weight model, ${context_k}K context, CPU/GPU split)$suffix"
+            echo -e "  ${YELLOW}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K context, CPU/GPU split)$suffix"
         fi
     done
 
     echo ""
 
     # Get user selection
+    local num_models=${#models[@]}
     while true; do
         if [[ "$show_default" == "true" && $recommended_idx -gt 0 ]]; then
-            read -r -p "Enter selection (1-4, recommended: $recommended_idx): " selection
+            read -r -p "Enter selection (1-$num_models, recommended: $recommended_idx): " selection
 
             # Default to recommended if empty
             if [[ -z "$selection" ]]; then
                 selection=$recommended_idx
             fi
         else
-            read -r -p "Enter selection (1-4): " selection
+            read -r -p "Enter selection (1-$num_models): " selection
         fi
 
-        # Validate numeric input in range 1-4
-        if [[ "$selection" =~ ^[1-4]$ ]]; then
+        # Validate numeric input in range
+        if [[ "$selection" =~ ^[0-9]+$ ]] && [[ $selection -ge 1 ]] && [[ $selection -le $num_models ]]; then
             local idx=$((selection - 1))
-            GEMMA_MODEL="${models[$idx]}"
-            print_status "Selected: $GEMMA_MODEL"
+            SELECTED_MODEL="${models[$idx]}"
+            print_status "Selected: $SELECTED_MODEL"
             break
         else
-            print_error "Invalid selection. Please enter a number between 1 and 4."
+            print_error "Invalid selection. Please enter a number between 1 and $num_models."
         fi
     done
 }
@@ -274,8 +251,7 @@ select_codegemma_interactive() {
 # Shows GPU fit status for each option
 #
 # Globals read:
-#   - MODEL_SIZE: Model variant (e.g., "31b", "26b")
-#   - GEMMA_MODEL: Full model name (e.g., "gemma4:31b")
+#   - SELECTED_MODEL: Full model name (e.g., "gemma4:31b", "phi4:latest")
 #   - RECOMMENDED_CONTEXT: Hardware-recommended context length
 #   - DETECTED_RAM_GB: Detected RAM in GB
 # Globals set:
@@ -283,22 +259,11 @@ select_codegemma_interactive() {
 select_context_window() {
     print_header "Context Window Selection"
 
-    # Determine model's native max context
-    # e2b and latest: 128K max, 26b and 31b: 256K max
+    # Get model's native max context from registry
     local max_context
-    case "$MODEL_SIZE" in
-        e2b|latest|e4b)
-            max_context=131072  # 128K
-            ;;
-        26b|31b)
-            max_context=262144  # 256K
-            ;;
-        *)
-            max_context=131072  # Default to 128K
-            ;;
-    esac
+    max_context=$(get_registry_max_context "$SELECTED_MODEL")
 
-    echo -e "${BLUE}Model: ${GEMMA_MODEL} (native max: $((max_context / 1024))K context)${NC}"
+    echo -e "${BLUE}Model: ${SELECTED_MODEL} (native max: $((max_context / 1024))K context)${NC}"
     echo -e "${BLUE}Recommended context for your hardware: $((RECOMMENDED_CONTEXT / 1024))K tokens${NC}"
 
     # Explain why this context was recommended
@@ -338,7 +303,7 @@ select_context_window() {
         fi
 
         # Display with GPU fit status
-        if validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$ctx"; then
+        if validate_gpu_fit "$DETECTED_RAM_GB" "$SELECTED_MODEL" "$ctx"; then
             if [[ $ctx -eq $RECOMMENDED_CONTEXT ]]; then
                 echo -e "  ${GREEN}$display_idx) ${label} (${ctx} tokens) - Recommended${NC}"
             else
@@ -385,16 +350,16 @@ select_context_window() {
 # Allows user to continue with incompatible model or fallback to recommended
 #
 # Globals read:
-#   - GEMMA_MODEL: Selected model
-#   - MODEL_SIZE: Model variant
+#   - SELECTED_MODEL: Selected model
+#   - MODEL_VARIANT: Model variant
 #   - CONTEXT_LENGTH: Selected context length
 #   - DETECTED_RAM_GB: Detected RAM
 #   - METAL_MEMORY: Calculated Metal memory
 #   - RECOMMENDED_MODEL: Recommended model
 #   - AUTO_MODE: Whether in auto mode
 # Globals set (if fallback chosen):
-#   - GEMMA_MODEL: Updated to recommended model
-#   - MODEL_SIZE: Updated model size
+#   - SELECTED_MODEL: Updated to recommended model
+#   - MODEL_VARIANT: Updated model variant
 #   - CONTEXT_LENGTH: Updated context length
 #   - CUSTOM_MODEL_NAME: Regenerated with new settings
 validate_and_prompt_gpu_fit() {
@@ -405,11 +370,11 @@ validate_and_prompt_gpu_fit() {
     local kv_cache_gb
     local total_needed_gb
 
-    model_weight_gb=$(get_model_weight_gb "$MODEL_SIZE")
-    kv_cache_gb=$(calculate_kv_cache_gb "$MODEL_SIZE" "$CONTEXT_LENGTH")
+    model_weight_gb=$(get_model_weight_gb "$SELECTED_MODEL")
+    kv_cache_gb=$(calculate_kv_cache_gb "$SELECTED_MODEL" "$CONTEXT_LENGTH")
     total_needed_gb=$((model_weight_gb + kv_cache_gb))
 
-    echo "Selected Model: $GEMMA_MODEL"
+    echo "Selected Model: $SELECTED_MODEL"
     echo "Context Window: $(format_context_k "$CONTEXT_LENGTH") tokens"
     echo ""
     echo "GPU Memory Requirements:"
@@ -419,8 +384,8 @@ validate_and_prompt_gpu_fit() {
     echo "  • Available Metal:   ${metal_gb}GB"
     echo ""
 
-    if ! validate_gpu_fit "$DETECTED_RAM_GB" "$MODEL_SIZE" "$CONTEXT_LENGTH"; then
-        print_error "Model $GEMMA_MODEL will NOT fit entirely on GPU!"
+    if ! validate_gpu_fit "$DETECTED_RAM_GB" "$SELECTED_MODEL" "$CONTEXT_LENGTH"; then
+        print_error "Model $SELECTED_MODEL will NOT fit entirely on GPU!"
         print_warning "This will result in CPU/GPU split and poor performance"
         echo ""
         echo "Recommended alternative: $RECOMMENDED_MODEL"
@@ -430,12 +395,12 @@ validate_and_prompt_gpu_fit() {
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 print_info "Using recommended model instead"
-                GEMMA_MODEL="$RECOMMENDED_MODEL"
-                MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
-                CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$MODEL_SIZE")
+                SELECTED_MODEL="$RECOMMENDED_MODEL"
+                MODEL_VARIANT=$(get_model_variant "$SELECTED_MODEL")
+                CONTEXT_LENGTH=$(calculate_context_length "$DETECTED_RAM_GB" "$SELECTED_MODEL")
                 METAL_MEMORY=$(calculate_metal_memory "$DETECTED_RAM_GB")
                 # Regenerate custom model name with new context
-                CUSTOM_MODEL_NAME=$(generate_custom_model_name "$MODEL_SIZE" "$CONTEXT_LENGTH")
+                CUSTOM_MODEL_NAME=$(generate_custom_model_name "$SELECTED_MODEL" "$CONTEXT_LENGTH")
             fi
         else
             print_error "Cannot proceed in --auto mode with incompatible model"
@@ -463,7 +428,7 @@ validate_and_prompt_gpu_fit() {
 # Sets CUSTOM_MODEL_NAME global based on user choice
 #
 # Globals read:
-#   - MODEL_SIZE: Model variant (e.g., "31b", "26b")
+#   - MODEL_VARIANT: Model variant (e.g., "31b", "latest")
 #   - CONTEXT_LENGTH: Selected context length in tokens
 # Globals set:
 #   - CUSTOM_MODEL_NAME: User's custom model name or generated default
@@ -472,7 +437,7 @@ select_custom_name() {
 
     # Suggest default name with context
     local default_name
-    default_name=$(generate_custom_model_name "$MODEL_SIZE" "$CONTEXT_LENGTH")
+    default_name=$(generate_custom_model_name "$SELECTED_MODEL" "$CONTEXT_LENGTH")
 
     echo -e "${BLUE}Suggested name: ${default_name}${NC}"
     echo ""
@@ -511,10 +476,11 @@ select_custom_name() {
                     continue
                 fi
 
-                # Warn if no prefix (recommended to start with "gemma" for clarity)
-                if [[ ! "$custom_input" =~ ^gemma ]]; then
+                # Warn if no model family prefix (recommended for clarity)
+                local model_family="${SELECTED_MODEL%%:*}"
+                if [[ ! "$custom_input" =~ ^${model_family} ]]; then
                     echo ""
-                    print_warning "Name doesn't start with 'gemma' - may be unclear this is a Gemma model"
+                    print_warning "Name doesn't start with '${model_family}' - may be unclear which model family this is"
                     read -p "Use this name anyway? (y/N) " -n 1 -r
                     echo
                     if [[ ! $REPLY =~ ^[Yy]$ ]]; then

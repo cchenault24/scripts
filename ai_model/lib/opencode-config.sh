@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # Globals read:
 #   - CUSTOM_MODEL_NAME: Name of custom model
-#   - GEMMA_MODEL: Base model name
+#   - SELECTED_MODEL: Base model name
 #   - OLLAMA_HOST: Ollama server URL
 #   - NUM_CTX: Context length
 #   - AUTO_MODE: Whether in auto mode
@@ -75,8 +75,8 @@ configure_opencode() {
         "baseURL": "${OLLAMA_HOST}/v1"
       },
       "models": {
-        "${GEMMA_MODEL}": {
-          "name": "${GEMMA_MODEL}"
+        "${SELECTED_MODEL}": {
+          "name": "${SELECTED_MODEL}"
         },
         "${CUSTOM_MODEL_NAME}": {
           "name": "${CUSTOM_MODEL_NAME}:latest"
@@ -100,8 +100,8 @@ EOF
         "baseURL": "${OLLAMA_HOST}/v1"
       },
       "models": {
-        "${GEMMA_MODEL}": {
-          "name": "${GEMMA_MODEL}"
+        "${SELECTED_MODEL}": {
+          "name": "${SELECTED_MODEL}"
         },
         "${CUSTOM_MODEL_NAME}": {
           "name": "${CUSTOM_MODEL_NAME}:latest"

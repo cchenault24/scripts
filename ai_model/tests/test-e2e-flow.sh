@@ -281,8 +281,8 @@ test_gpu_fit_indicators() {
     print_section "Testing GPU Fit Indicators"
 
     begin_test "Model selection shows GPU fit status"
-    # Should call validate_gpu_fit and show status
-    if grep -A 50 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'validate_gpu_fit'; then
+    # Should call validate_gpu_fit and show status (function is longer now, need more lines)
+    if grep -A 100 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'validate_gpu_fit'; then
         pass_test
     else
         fail_test "Model selection should check GPU fit for each model"
@@ -290,7 +290,7 @@ test_gpu_fit_indicators() {
 
     begin_test "Model selection uses green/yellow colors for GPU status"
     local model_sel_func
-    model_sel_func=$(grep -A 50 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh")
+    model_sel_func=$(grep -A 100 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh")
     if echo "$model_sel_func" | grep -q '\${GREEN}' && echo "$model_sel_func" | grep -q '\${YELLOW}'; then
         pass_test
     else
@@ -319,15 +319,16 @@ test_gpu_fit_indicators() {
 test_input_validation() {
     print_section "Testing Input Validation in Interactive Prompts"
 
-    begin_test "Model selection validates numeric input (1-4)"
-    if grep -A 80 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '\[1-4\]'; then
+    begin_test "Model selection validates numeric input range"
+    # Check for dynamic range validation (1-$num_models pattern)
+    if grep -A 100 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '1.*num_models'; then
         pass_test
     else
-        fail_test "Model selection should validate input is 1-4"
+        fail_test "Model selection should validate input range dynamically"
     fi
 
     begin_test "Model selection shows error on invalid input"
-    if grep -A 80 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_error.*Invalid'; then
+    if grep -A 100 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_error.*Invalid'; then
         pass_test
     else
         fail_test "Model selection should show error message for invalid input"

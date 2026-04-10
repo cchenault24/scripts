@@ -17,8 +17,8 @@ set -euo pipefail
 #
 # Globals read:
 #   - CUSTOM_MODEL_NAME: Name of custom model
-#   - GEMMA_MODEL: Base model name
-#   - CODEGEMMA_MODEL: CodeGemma model for FIM
+#   - SELECTED_MODEL: Base model name
+#   - CODESELECTED_MODEL: CodeGemma model for FIM
 #   - OLLAMA_HOST: Ollama server URL
 #   - NUM_CTX: Context length
 #   - AUTO_MODE: Whether in auto mode
@@ -39,14 +39,14 @@ configure_jetbrains() {
     echo "     Used for: In-editor code generation, commit messages, etc."
     echo "     Model: ${CUSTOM_MODEL_NAME} (Gemma4)"
     echo ""
-    if [[ -n "$CODEGEMMA_MODEL" ]]; then
+    if [[ -n "$CODESELECTED_MODEL" ]]; then
         echo -e "  ${YELLOW}2. Instant helpers:${NC}"
         echo "     Used for: Chat context collection, title generation, name suggestions"
-        echo "     Model: ${CODEGEMMA_MODEL} (CodeGemma)"
+        echo "     Model: ${CODESELECTED_MODEL} (CodeGemma)"
         echo ""
         echo -e "  ${YELLOW}3. Completion model:${NC}"
         echo "     Used for: Inline code completion (requires FIM)"
-        echo "     Model: ${CODEGEMMA_MODEL} (CodeGemma)"
+        echo "     Model: ${CODESELECTED_MODEL} (CodeGemma)"
         echo ""
     else
         echo -e "  ${YELLOW}2. Instant helpers:${NC}"
@@ -75,9 +75,9 @@ configure_jetbrains() {
     echo ""
     echo "5. Assign models to each slot:"
     echo -e "   ${YELLOW}Core features:${NC}      ${CUSTOM_MODEL_NAME}"
-    if [[ -n "$CODEGEMMA_MODEL" ]]; then
-        echo -e "   ${YELLOW}Instant helpers:${NC}    ${CODEGEMMA_MODEL}"
-        echo -e "   ${YELLOW}Completion model:${NC}   ${CODEGEMMA_MODEL}"
+    if [[ -n "$CODESELECTED_MODEL" ]]; then
+        echo -e "   ${YELLOW}Instant helpers:${NC}    ${CODESELECTED_MODEL}"
+        echo -e "   ${YELLOW}Completion model:${NC}   ${CODESELECTED_MODEL}"
     else
         echo -e "   ${YELLOW}Instant helpers:${NC}    (not configured)"
         echo -e "   ${YELLOW}Completion model:${NC}   (not configured)"
@@ -103,20 +103,20 @@ JetBrains AI Assistant uses 3 model slots:
 Provider Type:    OpenAI-compatible
 API Base URL:     ${OLLAMA_HOST}/v1
 Model Name:       ${CUSTOM_MODEL_NAME}
-Base Model:       ${GEMMA_MODEL}
+Base Model:       ${SELECTED_MODEL}
 Context Window:   $(printf "%'d" "$NUM_CTX") tokens
 API Key:          ollama (or leave empty)
 Purpose:          In-editor code generation, commit message generation, etc.
 
 EOF
 
-    if [[ -n "$CODEGEMMA_MODEL" ]]; then
+    if [[ -n "$CODESELECTED_MODEL" ]]; then
         cat >> "$config_ref" << EOF
 2. Instant Helpers Model (CodeGemma):
 --------------------------------------
 Provider Type:    OpenAI-compatible
 API Base URL:     ${OLLAMA_HOST}/v1
-Model Name:       ${CODEGEMMA_MODEL}
+Model Name:       ${CODESELECTED_MODEL}
 Context:          8K tokens (optimized for fast responses)
 API Key:          ollama (or leave empty)
 Purpose:          Chat context collection, chat title generation, name suggestions
@@ -126,7 +126,7 @@ Note:             Lightweight model for fast helper tasks
 ------------------------------------
 Provider Type:    OpenAI-compatible
 API Base URL:     ${OLLAMA_HOST}/v1
-Model Name:       ${CODEGEMMA_MODEL}
+Model Name:       ${CODESELECTED_MODEL}
 Context:          8K tokens (optimized for FIM)
 API Key:          ollama (or leave empty)
 Purpose:          Inline code completion in the main editor
@@ -178,10 +178,10 @@ Configuration Steps:
    • Core features:      ${CUSTOM_MODEL_NAME}
 EOF
 
-    if [[ -n "$CODEGEMMA_MODEL" ]]; then
+    if [[ -n "$CODESELECTED_MODEL" ]]; then
         cat >> "$config_ref" << EOF
-   • Instant helpers:    ${CODEGEMMA_MODEL}
-   • Completion model:   ${CODEGEMMA_MODEL}
+   • Instant helpers:    ${CODESELECTED_MODEL}
+   • Completion model:   ${CODESELECTED_MODEL}
 
 7. Test connection for each model
 
@@ -232,9 +232,9 @@ Troubleshooting:
 • Test chat model: ollama run ${CUSTOM_MODEL_NAME}
 EOF
 
-    if [[ -n "$CODEGEMMA_MODEL" ]]; then
+    if [[ -n "$CODESELECTED_MODEL" ]]; then
         cat >> "$config_ref" << EOF
-• Test CodeGemma: ollama run ${CODEGEMMA_MODEL}
+• Test CodeGemma: ollama run ${CODESELECTED_MODEL}
 EOF
     fi
 

@@ -190,40 +190,44 @@ format_context_display() {
 
 # Generate custom model name with context suffix
 generate_custom_model_name() {
-    local model_size=$1
+    local model_variant=$1
     local context_tokens=$2
     local context_k=$((context_tokens / 1024))
-    echo "gemma4-optimized-${model_size}-${context_k}k"
+
+    # Extract model family from variant if it contains a colon (full model key)
+    # Otherwise assume it's just the variant and use generic naming
+    if [[ "$model_variant" == *:* ]]; then
+        # Full model key like "gemma4:31b"
+        local model_family="${model_variant%%:*}"
+        local variant="${model_variant#*:}"
+        echo "${model_family}-optimized-${variant}-${context_k}k"
+    else
+        # Just variant like "31b" (legacy support)
+        echo "gemma4-optimized-${model_variant}-${context_k}k"
+    fi
 }
 
-# Validate model name against allowed list
+# Validate model name against model registry
 validate_model_name() {
     local model="$1"
 
-    # First check against allowed patterns
-    case "$model" in
-        gemma4:e2b|gemma4:latest|gemma4:26b|gemma4:31b)
-            # Verify exact length to detect null bytes or other hidden characters
-            # gemma4:e2b=10, gemma4:latest=13, gemma4:26b=10, gemma4:31b=10
-            # Bash preserves null bytes in length, so 'gemma4:e2b\0' would be length 11
-            local expected_len
-            case "$model" in
-                gemma4:latest) expected_len=13 ;;
-                gemma4:e2b|gemma4:26b|gemma4:31b) expected_len=10 ;;
-            esac
-
-            if [ ${#model} -ne "$expected_len" ]; then
-                print_error "Invalid model name: contains invalid characters"
+    # Check if model exists in registry
+    while IFS= read -r valid_model; do
+        if [[ "$model" == "$valid_model" ]]; then
+            # Basic sanity check: no null bytes or excessive length
+            if [[ ${#model} -gt 100 ]]; then
+                print_error "Invalid model name: too long"
                 return 1
             fi
             return 0
-            ;;
-        *)
-            print_error "Invalid model name: $model"
-            print_info "Allowed models: gemma4:e2b, gemma4:latest, gemma4:26b, gemma4:31b"
-            return 1
-            ;;
-    esac
+        fi
+    done < <(list_all_models)
+
+    # Model not found in registry
+    print_error "Invalid model name: $model"
+    print_info "Available models:"
+    list_all_models | sed 's/^/  • /'
+    return 1
 }
 
 # Get ollama list output (cached to avoid multiple subprocess calls)

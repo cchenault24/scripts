@@ -12,7 +12,7 @@ set -euo pipefail
 # Globals read:
 #   - OLLAMA_HOST: Ollama server URL
 #   - LAUNCHAGENT_LABEL: LaunchAgent identifier
-#   - GEMMA_MODEL: Base model name
+#   - SELECTED_MODEL: Base model name
 #   - CUSTOM_MODEL_NAME: Custom model name
 verify_setup() {
     [[ $VERBOSITY_LEVEL -eq 0 ]] && return 0  # Skip in quiet mode
@@ -59,10 +59,10 @@ verify_setup() {
         local model_list
         model_list=$(get_ollama_list)
 
-        if echo "$model_list" | grep -q "^${GEMMA_MODEL}"; then
-            print_status "Base Model: $GEMMA_MODEL"
+        if echo "$model_list" | grep -q "^${SELECTED_MODEL}"; then
+            print_status "Base Model: $SELECTED_MODEL"
         else
-            print_error "Base Model: $GEMMA_MODEL NOT FOUND"
+            print_error "Base Model: $SELECTED_MODEL NOT FOUND"
             all_good=false
         fi
 
@@ -113,11 +113,11 @@ verify_setup() {
 #   - METAL_MEMORY: Calculated Metal memory
 #   - NUM_PARALLEL: Calculated parallel requests
 #   - CUSTOM_MODEL_NAME: Custom model name
-#   - GEMMA_MODEL: Base model name
+#   - SELECTED_MODEL: Base model name
 #   - NUM_CTX: Context length
 #   - OLLAMA_HOST: Ollama server URL
 #   - LAUNCHAGENT_PLIST: Path to LaunchAgent plist
-#   - CODEGEMMA_MODEL: CodeGemma model (if configured)
+#   - CODESELECTED_MODEL: CodeGemma model (if configured)
 #   - IDE_TOOLS: Array of selected IDE tools
 #   - AUTO_MODE: Whether in auto mode
 print_usage_instructions() {
@@ -145,7 +145,7 @@ print_usage_instructions() {
         print_header "Setup Complete! 🚀"
 
         cat << EOF
-Your Gemma4 + OpenCode environment is ready to use!
+Your AI Model + OpenCode environment is ready to use!
 
 Hardware Configuration:
 ----------------------
@@ -176,7 +176,7 @@ Server Management:
 
 Model Information:
 -----------------
-- Base Model:      ${GEMMA_MODEL}
+- Base Model:      ${SELECTED_MODEL}
 - Custom Model:    ${CUSTOM_MODEL_NAME}
 - Context Window:  ${context_display} tokens (optimized for ${DETECTED_RAM_GB}GB RAM)
 - Optimizations:   Metal GPU, Flash Attention, Keep Alive, ${NUM_PARALLEL}x Parallel
@@ -200,7 +200,7 @@ Troubleshooting:
 ---------------
 - If OpenCode can't connect: curl ${OLLAMA_HOST}/api/tags
 - If model is slow: Check GPU usage in Activity Monitor
-- If out of memory: Try a smaller model (./setup-gemma4-opencode.sh --model gemma4:e2b)
+- If out of memory: Try a smaller model (./setup-ai-opencode.sh --model gemma4:e2b)
 - View errors: tail -f $HOME/.local/var/log/ollama.stderr.log
 
 Documentation:
@@ -212,16 +212,16 @@ Documentation:
 Share With Your Team:
 --------------------
 # Auto-detect and setup:
-  $ ./setup-gemma4-opencode.sh --auto
+  $ ./setup-ai-opencode.sh --auto
 
 # Specify a model:
-  $ ./setup-gemma4-opencode.sh --model gemma4:26b
+  $ ./setup-ai-opencode.sh --model gemma4:26b
 
 # Verbose mode (show all details):
-  $ ./setup-gemma4-opencode.sh -v
+  $ ./setup-ai-opencode.sh -v
 
 # Quiet mode (minimal output):
-  $ ./setup-gemma4-opencode.sh -q
+  $ ./setup-ai-opencode.sh -q
 
 Happy coding! 🎉
 EOF
@@ -235,7 +235,7 @@ EOF
                 "$DETECTED_CPU_CORES" \
                 "$CUSTOM_MODEL_NAME" \
                 "$context_k" \
-                "${CODEGEMMA_MODEL:-}" \
+                "${CODESELECTED_MODEL:-}" \
                 "$ide_display"
         fi
         # If not auto mode, the interactive menu will be shown next, so skip summary

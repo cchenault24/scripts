@@ -1,5 +1,5 @@
 #!/bin/bash
-# lib/model-setup.sh - Gemma4 model download and custom model creation
+# lib/model-setup.sh - Model download and custom model creation
 #
 # Provides:
 # - Model pulling from Ollama registry
@@ -8,55 +8,52 @@
 
 set -euo pipefail
 
-# Pull Gemma4 model from Ollama registry
+# Pull model from Ollama registry
 #
 # Globals read:
-#   - GEMMA_MODEL: Model name (e.g., "gemma4:31b")
+#   - SELECTED_MODEL: Model name (e.g., "gemma4:31b", "phi4:latest")
 #   - DETECTED_RAM_GB: Detected RAM for validation
 pull_model() {
-    print_step "4/6" "Pulling Gemma4 Model"
+    print_step "4/6" "Pulling Model"
 
     # Check if model already exists (using cached list)
-    if get_ollama_list | grep -q "^${GEMMA_MODEL}"; then
-        print_status "$GEMMA_MODEL (already downloaded)"
+    if get_ollama_list | grep -q "^${SELECTED_MODEL}"; then
+        print_status "$SELECTED_MODEL (already downloaded)"
         return 0
     fi
 
-    # Get model specifications from data structure
-    local model_variant="${GEMMA_MODEL#*:}"
-    local specs
-    specs=$(get_model_specs "$model_variant")
+    # Get model specifications from registry
+    local size_gb
+    size_gb=$(get_registry_model_weight_gb "$SELECTED_MODEL")
+    local context_tokens
+    context_tokens=$(get_registry_max_context "$SELECTED_MODEL")
+    local context_k=$((context_tokens / 1024))
+    local min_ram_gb
+    min_ram_gb=$(get_registry_min_ram "$SELECTED_MODEL")
 
-    if [[ -n "$specs" ]]; then
-        # Parse specifications
-        read -r size_gb context_k min_ram_gb <<< "$specs"
-
-        if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
-            print_verbose "Model: ${GEMMA_MODEL} (${size_gb}GB download, ${context_k}K context)"
-            print_verbose "Recommended RAM: ${min_ram_gb}GB+"
-            if [[ $DETECTED_RAM_GB -lt $min_ram_gb ]]; then
-                print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - ${min_ram_gb}GB+ recommended"
-            fi
-        else
-            print_info "Downloading ${GEMMA_MODEL} (${size_gb}GB)..."
+    if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
+        print_verbose "Model: ${SELECTED_MODEL} (${size_gb}GB download, ${context_k}K context)"
+        print_verbose "Recommended RAM: ${min_ram_gb}GB+"
+        if [[ $DETECTED_RAM_GB -lt $min_ram_gb ]]; then
+            print_warning "Your system has ${DETECTED_RAM_GB}GB RAM - ${min_ram_gb}GB+ recommended"
         fi
     else
-        print_info "Downloading ${GEMMA_MODEL}..."
+        print_info "Downloading ${SELECTED_MODEL} (${size_gb}GB)..."
     fi
 
     # Use spinner for download
     if [[ $VERBOSITY_LEVEL -eq 1 ]]; then
-        start_spinner "Downloading ${GEMMA_MODEL}..."
-        if ollama pull "$GEMMA_MODEL" > /dev/null 2>&1; then
+        start_spinner "Downloading ${SELECTED_MODEL}..."
+        if ollama pull "$SELECTED_MODEL" > /dev/null 2>&1; then
             stop_spinner
-            print_status "$GEMMA_MODEL downloaded"
+            print_status "$SELECTED_MODEL downloaded"
             clear_ollama_cache
         else
             stop_spinner
-            print_error "Failed to pull model $GEMMA_MODEL"
+            print_error "Failed to pull model $SELECTED_MODEL"
             draw_error_box \
                 "Model Download Failed" \
-                "Failed to download $GEMMA_MODEL from Ollama registry.
+                "Failed to download $SELECTED_MODEL from Ollama registry.
 
 Possible causes:
   • Network connection issues
@@ -89,11 +86,11 @@ Check logs for details." \
         fi
     else
         # Verbose mode: show full output
-        if ollama pull "$GEMMA_MODEL" 2>&1 | grep -E "pulling|success" || true; then
-            print_status "$GEMMA_MODEL downloaded"
+        if ollama pull "$SELECTED_MODEL" 2>&1 | grep -E "pulling|success" || true; then
+            print_status "$SELECTED_MODEL downloaded"
             clear_ollama_cache
         else
-            print_error "Failed to pull model $GEMMA_MODEL"
+            print_error "Failed to pull model $SELECTED_MODEL"
             exit 1
         fi
     fi
@@ -103,7 +100,7 @@ Check logs for details." \
 #
 # Globals read:
 #   - CUSTOM_MODEL_NAME: Name for custom model
-#   - GEMMA_MODEL: Base model name
+#   - SELECTED_MODEL: Base model name
 #   - NUM_CTX: Context length
 #   - DETECTED_RAM_GB: Detected RAM
 #   - AUTO_MODE: Whether in auto mode
@@ -145,7 +142,7 @@ create_custom_model() {
         exit 1
     }
     cat > "$modelfile_path" << EOF
-FROM ${GEMMA_MODEL}
+FROM ${SELECTED_MODEL}
 
 # Set context window optimized for ${DETECTED_RAM_GB}GB RAM
 PARAMETER num_ctx ${NUM_CTX}
