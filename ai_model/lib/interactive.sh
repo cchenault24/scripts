@@ -104,15 +104,29 @@ display_model_gpu_fit() {
 #
 # Globals read:
 #   - DETECTED_RAM_GB: Detected RAM in GB
+#   - RECOMMENDED_MODEL: Recommended model (optional)
 # Globals set:
 #   - GEMMA_MODEL: Selected model name (e.g., "gemma4:31b")
 select_model_interactive() {
+    local show_default="${1:-false}"  # Whether to show default in prompt
+
     print_header "Model Selection"
 
     # Build arrays of available models with their specs (ascending order: smallest to largest)
     local -a models=("gemma4:e2b" "gemma4:latest" "gemma4:26b" "gemma4:31b")
     local -a model_sizes=("e2b" "latest" "26b" "31b")
     local -a model_weights=("7GB" "10GB" "17GB" "19GB")
+
+    # Find recommended index if provided
+    local recommended_idx=0
+    if [[ -n "${RECOMMENDED_MODEL:-}" ]]; then
+        for i in "${!models[@]}"; do
+            if [[ "${models[$i]}" == "$RECOMMENDED_MODEL" ]]; then
+                recommended_idx=$((i + 1))
+                break
+            fi
+        done
+    fi
 
     echo "Select a model from the list below:"
     echo ""
@@ -129,11 +143,16 @@ select_model_interactive() {
         context=$(calculate_context_length "$DETECTED_RAM_GB" "$size")
         local context_k=$((context / 1024))
 
-        # Check if it fits on GPU
+        # Check if it fits on GPU and if it's recommended
+        local suffix=""
+        if [[ $idx -eq $recommended_idx ]]; then
+            suffix=" [Recommended]"
+        fi
+
         if validate_gpu_fit "$DETECTED_RAM_GB" "$size" "$context"; then
-            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, ${context_k}K context, 100% GPU)"
+            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, ${context_k}K context, 100% GPU)$suffix"
         else
-            echo -e "  ${YELLOW}$idx) $model${NC} ($weight model, ${context_k}K context, CPU/GPU split)"
+            echo -e "  ${YELLOW}$idx) $model${NC} ($weight model, ${context_k}K context, CPU/GPU split)$suffix"
         fi
     done
 
@@ -141,7 +160,16 @@ select_model_interactive() {
 
     # Get user selection
     while true; do
-        read -r -p "Enter selection (1-4): " selection
+        if [[ "$show_default" == "true" && $recommended_idx -gt 0 ]]; then
+            read -r -p "Enter selection (1-4, recommended: $recommended_idx): " selection
+
+            # Default to recommended if empty
+            if [[ -z "$selection" ]]; then
+                selection=$recommended_idx
+            fi
+        else
+            read -r -p "Enter selection (1-4): " selection
+        fi
 
         # Validate numeric input in range 1-4
         if [[ "$selection" =~ ^[1-4]$ ]]; then
@@ -210,9 +238,20 @@ select_codegemma_interactive() {
 
     echo ""
 
+    # Determine recommended index
+    local recommended_idx=2  # Default to 7b
+    if [[ $DETECTED_RAM_GB -lt 16 ]]; then
+        recommended_idx=1  # Use 2b for low RAM
+    fi
+
     # Get user selection
     while true; do
-        read -r -p "Enter selection (1-2): " selection
+        read -r -p "Enter selection (1-2, recommended: $recommended_idx): " selection
+
+        # Default to recommended if empty
+        if [[ -z "$selection" ]]; then
+            selection=$recommended_idx
+        fi
 
         # Validate numeric input in range 1-2
         if [[ "$selection" =~ ^[1-2]$ ]]; then
@@ -319,7 +358,7 @@ select_context_window() {
     # Get user selection
     local num_options=${#available_contexts[@]}
     while true; do
-        read -r -p "Enter selection (1-$num_options, default=$recommended_idx): " selection
+        read -r -p "Enter selection (1-$num_options, recommended: $recommended_idx): " selection
 
         # Default to recommended if empty
         if [[ -z "$selection" ]]; then
@@ -448,7 +487,7 @@ select_custom_name() {
     echo "  • No spaces or special characters"
     echo "  • Should be memorable and descriptive"
     echo ""
-    read -p "Use suggested name? (Y/n) " -n 1 -r
+    read -p "Use suggested name \"$default_name\"? (Y/n) " -n 1 -r
     echo
 
     if [[ $REPLY =~ ^[Nn]$ ]]; then
@@ -532,7 +571,12 @@ select_ide_tools() {
 
     # Get user selection
     while true; do
-        read -r -p "Enter selection (1-3): " selection
+        read -r -p "Enter selection (1-3, recommended: 3): " selection
+
+        # Default to option 3 (both) if empty
+        if [[ -z "$selection" ]]; then
+            selection=3
+        fi
 
         case "$selection" in
             1)

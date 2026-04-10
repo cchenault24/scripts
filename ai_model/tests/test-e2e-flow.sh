@@ -252,7 +252,7 @@ test_interactive_prompts_have_headers() {
     print_section "Testing Interactive Prompts Have Headers"
 
     begin_test "Model selection shows header"
-    if grep -A 2 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_header.*Model Selection'; then
+    if grep -A 5 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_header.*Model Selection'; then
         pass_test
     else
         fail_test "Model selection should show 'Model Selection' header"
@@ -320,14 +320,14 @@ test_input_validation() {
     print_section "Testing Input Validation in Interactive Prompts"
 
     begin_test "Model selection validates numeric input (1-4)"
-    if grep -A 50 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '\[1-4\]'; then
+    if grep -A 80 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '\[1-4\]'; then
         pass_test
     else
         fail_test "Model selection should validate input is 1-4"
     fi
 
     begin_test "Model selection shows error on invalid input"
-    if grep -A 50 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_error.*Invalid'; then
+    if grep -A 80 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'print_error.*Invalid'; then
         pass_test
     else
         fail_test "Model selection should show error message for invalid input"
@@ -362,11 +362,11 @@ test_input_validation() {
 test_default_values() {
     print_section "Testing Default Values and Skip Options"
 
-    begin_test "Context selection shows numbered menu with default"
-    if grep -A 100 'select_context_window()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'default='; then
+    begin_test "Context selection shows numbered menu with recommended option"
+    if grep -A 100 'select_context_window()' "$PROJECT_DIR/lib/interactive.sh" | grep -q 'recommended:'; then
         pass_test
     else
-        fail_test "Context selection should show numbered menu with default option"
+        fail_test "Context selection should show numbered menu with recommended option"
     fi
 
     begin_test "Custom naming accepts Y/n for suggested name"
@@ -447,19 +447,20 @@ test_model_recommendation_flow() {
         fail_test "Recommended model should be shown to user"
     fi
 
-    begin_test "User can accept or reject recommended model"
-    # Should have Y/n prompt for recommended model
-    if grep -A 20 'RECOMMENDED_MODEL' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q 'Y/n'; then
+    begin_test "Interactive mode always shows model selection menu"
+    # New behavior: always show selection menu with recommended tag
+    if grep -A 20 'GEMMA_MODEL' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q 'select_model_interactive'; then
         pass_test
     else
-        fail_test "Should offer Y/n choice for recommended model"
+        fail_test "Should call select_model_interactive in interactive mode"
     fi
 
-    begin_test "Rejecting recommendation shows model selection menu"
-    if grep -A 20 'RECOMMENDED_MODEL' "$PROJECT_DIR/setup-gemma4-opencode.sh" | grep -q 'select_model_interactive'; then
+    begin_test "Model selection menu shows recommended option"
+    # Selection menu should have [Recommended] tag for recommended model
+    if grep -A 60 'select_model_interactive()' "$PROJECT_DIR/lib/interactive.sh" | grep -q '\[Recommended\]'; then
         pass_test
     else
-        fail_test "Should call select_model_interactive when recommendation rejected"
+        fail_test "Model selection should show [Recommended] tag"
     fi
 }
 

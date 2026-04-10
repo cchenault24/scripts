@@ -153,18 +153,13 @@ fi
 
 # Set model if not specified
 if [[ -z "$GEMMA_MODEL" ]]; then
-    GEMMA_MODEL="$RECOMMENDED_MODEL"
-
-    # Show recommendation to user (unless --auto mode)
     if [[ "$AUTO_MODE" != true ]]; then
+        # Interactive mode: show hardware and let user select
         display_hardware_and_recommendation
-
-        read -p "Use recommended model $RECOMMENDED_MODEL? (Y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            echo ""
-            select_model_interactive
-        fi
+        select_model_interactive "true"  # Pass true to show default
+    else
+        # Auto mode: use recommended model
+        GEMMA_MODEL="$RECOMMENDED_MODEL"
     fi
 fi
 
@@ -300,13 +295,8 @@ main() {
         print_info "Hardware-optimized setup with dynamic configuration"
         print_info "This script is idempotent - safe to run multiple times"
         echo
-    elif [[ $VERBOSITY_LEVEL -eq 1 ]]; then
-        # Normal: compact header
-        echo ""
-        echo -e "${BOLD}${BLUE}Gemma4 + IDE Tools Setup${NC}"
-        echo ""
     fi
-    # Quiet: no header
+    # Normal/Quiet: no header (config preview already shown)
 
     # Platform validation (silent unless errors)
     check_macos > /dev/null 2>&1 || check_macos

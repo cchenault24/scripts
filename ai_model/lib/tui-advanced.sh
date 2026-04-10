@@ -362,26 +362,26 @@ show_config_preview() {
     echo "║                  Configuration Preview                    ║"
     echo "╠═══════════════════════════════════════════════════════════╣"
     echo "║                                                           ║"
-    printf "║  Hardware:  %-45s ║\n" "$chip • ${ram}GB RAM • $cores cores"
+    printf "║  Hardware: %s | %sGB RAM | %s cores%23s║\n" "$chip" "$ram" "$cores" ""
     echo "║                                                           ║"
     echo "║  Will Download:                                           ║"
-    printf "║    → %-20s %6s   ⏱️  ~%-4s min            ║\n" "$gemma_model" "$gemma_size" "$(estimate_download_time "$gemma_size")"
+    printf "║    -> %-18s %4sGB  ~%2s min%18s║\n" "$gemma_model" "$gemma_size" "$(estimate_download_time "$gemma_size")" ""
 
     if [[ -n "$codegemma_model" ]]; then
-        printf "║    → %-20s %6s   ⏱️  ~%-4s min            ║\n" "$codegemma_model" "$codegemma_size" "$(estimate_download_time "$codegemma_size")"
+        printf "║    -> %-18s %4sGB  ~%2s min%18s║\n" "$codegemma_model" "$codegemma_size" "$(estimate_download_time "$codegemma_size")" ""
 
         # Calculate total
         local total_size=$(echo "$gemma_size + $codegemma_size" | bc)
         local total_time=$(echo "$(estimate_download_time "$gemma_size") + $(estimate_download_time "$codegemma_size")" | bc)
-        echo "║                       ─────    ─────────                  ║"
-        printf "║                       %5sGB    ~%2.0f min                  ║\n" "$total_size" "$total_time"
+        echo "║                         -------  --------                 ║"
+        printf "║                          %4sGB  ~%-2.0f min%17s ║\n" "$total_size" "$total_time" ""
     fi
 
     echo "║                                                           ║"
     echo "║  Will Configure:                                          ║"
-    printf "║    ✓ %-52s ║\n" "IDE Tools: $ide_tools"
-    echo "║    ✓ Local Ollama provider                                ║"
-    echo "║    ✓ LaunchAgent for auto-start                           ║"
+    printf "║    * IDE Tools: %-41s ║\n" "$ide_tools"
+    echo "║    * Local Ollama provider                                ║"
+    echo "║    * LaunchAgent for auto-start                           ║"
     echo "║                                                           ║"
     echo "╠═══════════════════════════════════════════════════════════╣"
     echo "║  [C]ontinue  [E]dit Configuration  [Q]uit                 ║"
@@ -410,7 +410,7 @@ show_final_menu() {
     while true; do
         echo ""
         echo "╔═══════════════════════════════════════════════════════════╗"
-        echo "║            ✨ Setup Complete! ✨                           ║"
+        echo "║            ✨ Setup Complete! ✨                          ║"
         echo "╠═══════════════════════════════════════════════════════════╣"
         echo "║  Quick Actions:                                           ║"
         echo "║                                                           ║"
@@ -431,11 +431,11 @@ show_final_menu() {
         echo "║    [Q] Quit                                               ║"
         echo "║                                                           ║"
         echo "╠═══════════════════════════════════════════════════════════╣"
-        echo "║  Tip: Run './setup-gemma4-opencode.sh -v' for verbose    ║"
+        echo "║  Tip: Run './setup-gemma4-opencode.sh -v' for verbose     ║"
         echo "╚═══════════════════════════════════════════════════════════╝"
         echo ""
 
-        read -p "Select action [1-5, H, Q]: " -n 1 -r choice
+        read -p "Select action: " -n 1 -r choice
         echo ""
 
         case "$choice" in

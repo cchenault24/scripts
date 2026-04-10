@@ -119,6 +119,7 @@ verify_setup() {
 #   - LAUNCHAGENT_PLIST: Path to LaunchAgent plist
 #   - CODEGEMMA_MODEL: CodeGemma model (if configured)
 #   - IDE_TOOLS: Array of selected IDE tools
+#   - AUTO_MODE: Whether in auto mode
 print_usage_instructions() {
     # Format context for display
     local context_display
@@ -138,6 +139,7 @@ print_usage_instructions() {
     fi
 
     # Use compact summary in normal mode, detailed in verbose mode
+    # Skip summary in normal interactive mode (final menu will be shown instead)
     if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
         # Verbose mode: show full details
         print_header "Setup Complete! 🚀"
@@ -224,14 +226,18 @@ Share With Your Team:
 Happy coding! 🎉
 EOF
     else
-        # Normal mode: compact summary
-        print_setup_summary \
-            "$DETECTED_M_CHIP" \
-            "$DETECTED_RAM_GB" \
-            "$DETECTED_CPU_CORES" \
-            "$CUSTOM_MODEL_NAME" \
-            "$context_k" \
-            "${CODEGEMMA_MODEL:-}" \
-            "$ide_display"
+        # Normal mode: only show summary if interactive menu won't be shown
+        # (i.e., in auto mode or when explicitly skipping the menu)
+        if [[ "$AUTO_MODE" == true ]]; then
+            print_setup_summary \
+                "$DETECTED_M_CHIP" \
+                "$DETECTED_RAM_GB" \
+                "$DETECTED_CPU_CORES" \
+                "$CUSTOM_MODEL_NAME" \
+                "$context_k" \
+                "${CODEGEMMA_MODEL:-}" \
+                "$ide_display"
+        fi
+        # If not auto mode, the interactive menu will be shown next, so skip summary
     fi
 }

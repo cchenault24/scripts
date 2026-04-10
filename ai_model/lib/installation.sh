@@ -28,7 +28,7 @@ install_ollama() {
             if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
                 tree_node 0 1 "↻" "Upgrading Ollama..."
             fi
-            brew upgrade ollama 2>&1 | grep -v "Downloading" | grep -v "Pouring" || true
+            brew upgrade ollama 2>&1 | grep -v "Downloading" | grep -v "Pouring" | grep -v "Warning:" || true
             if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
                 tree_node 0 1 "✓" "Ollama upgraded"
             fi
@@ -43,7 +43,7 @@ install_ollama() {
         if [[ $VERBOSITY_LEVEL -ge 2 ]]; then
             tree_node 0 0 "⣾" "Installing Ollama via Homebrew..."
         fi
-        brew install ollama 2>&1 | grep -v "Downloading" | grep -v "Pouring" || true
+        brew install ollama 2>&1 | grep -v "Downloading" | grep -v "Pouring" | grep -v "Warning:" || true
         print_status "Ollama installed"
     fi
 
@@ -80,14 +80,14 @@ install_opencode() {
         print_verbose "Checking for OpenCode updates..."
         if HOMEBREW_NO_AUTO_UPDATE=1 brew outdated opencode &> /dev/null; then
             print_verbose "Upgrading OpenCode to latest version..."
-            brew upgrade opencode 2>&1 | grep -v "Downloading" | grep -v "Pouring" || true
+            brew upgrade opencode 2>&1 | grep -v "Downloading" | grep -v "Pouring" | grep -v "Warning:" || true
         fi
     else
         print_verbose "Adding anomalyco/tap..."
         brew tap anomalyco/tap 2>&1 | tail -1
 
         print_verbose "Installing OpenCode via Homebrew..."
-        brew install anomalyco/tap/opencode 2>&1 | grep -v "Downloading" | grep -v "Pouring" || true
+        brew install anomalyco/tap/opencode 2>&1 | grep -v "Downloading" | grep -v "Pouring" | grep -v "Warning:" || true
         print_status "OpenCode installed"
     fi
 }
