@@ -60,14 +60,20 @@ configure_jetbrains() {
     echo ""
     echo "1. Open your JetBrains IDE (IntelliJ IDEA, PyCharm, WebStorm, etc.)"
     echo "2. Go to: Preferences/Settings → Tools → AI Assistant"
-    echo "3. Under 'Language Models', click '+' to add a custom provider"
+    echo ""
+    echo -e "${YELLOW}3. IMPORTANT - Disable Cloud Features (for local-only operation):${NC}"
+    echo "   □ Uncheck 'Enable cloud completion suggestions'"
+    echo "   □ Uncheck 'Enable next edit suggestions'"
+    echo -e "   ${GRAY}These features send data to JetBrains cloud - disable for privacy/compliance${NC}"
+    echo ""
+    echo "4. Under 'Language Models', click '+' to add a custom provider"
     echo ""
     echo -e "${GREEN}Configure Ollama Provider:${NC}"
     echo -e "   Provider Type:    ${BLUE}OpenAI-compatible${NC}"
     echo -e "   API Base URL:     ${BLUE}${OLLAMA_HOST}/v1${NC}"
     echo -e "   API Key:          ${BLUE}ollama${NC} (or leave empty)"
     echo ""
-    echo "4. Assign models to each slot:"
+    echo "5. Assign models to each slot:"
     echo -e "   ${YELLOW}Core features:${NC}      ${CUSTOM_MODEL_NAME}"
     if [[ -n "$CODEGEMMA_MODEL" ]]; then
         echo -e "   ${YELLOW}Instant helpers:${NC}    ${CODEGEMMA_MODEL}"
@@ -77,8 +83,8 @@ configure_jetbrains() {
         echo -e "   ${YELLOW}Completion model:${NC}   (not configured)"
     fi
     echo ""
-    echo "5. Click 'Test Connection' to verify"
-    echo "6. Save settings"
+    echo "6. Click 'Test Connection' to verify"
+    echo "7. Save settings"
     echo ""
 
     # Create a reference file with these settings
@@ -153,12 +159,22 @@ Configuration Steps:
 -------------------
 1. Open JetBrains IDE (IntelliJ IDEA, PyCharm, WebStorm, etc.)
 2. Navigate to: Preferences/Settings → Tools → AI Assistant
-3. Click '+' to add custom provider
-4. Configure provider:
+
+3. IMPORTANT - Disable Cloud Features (for local-only operation):
+   ⚠️  Uncheck 'Enable cloud completion suggestions'
+   ⚠️  Uncheck 'Enable next edit suggestions'
+
+   Why: These features send your code to JetBrains cloud servers. Disable them
+        to ensure all AI operations stay 100% local for privacy/compliance.
+
+4. Click '+' to add custom provider
+
+5. Configure provider:
    - Provider Type: OpenAI-compatible
    - API Base URL: ${OLLAMA_HOST}/v1
    - API Key: ollama (or leave empty)
-5. Assign models to the 3 slots:
+
+6. Assign models to the 3 slots:
    • Core features:      ${CUSTOM_MODEL_NAME}
 EOF
 
@@ -166,24 +182,49 @@ EOF
         cat >> "$config_ref" << EOF
    • Instant helpers:    ${CODEGEMMA_MODEL}
    • Completion model:   ${CODEGEMMA_MODEL}
-6. Test connection for each model
-7. Save settings and start using AI Assistant
+
+7. Test connection for each model
+
+8. Save settings and start using AI Assistant
 
 Notes:
 - Core features uses Gemma4 for complex code generation tasks
 - Instant helpers and Completion both use CodeGemma for speed and FIM support
+- Always keep cloud features disabled to ensure 100% local operation
 EOF
     else
         cat >> "$config_ref" << EOF
    • Instant helpers:    (not configured - needs CodeGemma)
    • Completion model:   (not configured - needs CodeGemma)
-6. Test connection
-7. Save settings
+
+7. Test connection
+
+8. Save settings
    Note: Without CodeGemma, instant helpers and inline completion will not be available
+
+IMPORTANT: Always keep cloud features disabled to ensure 100% local operation
 EOF
     fi
 
     cat >> "$config_ref" << EOF
+
+Privacy & Compliance:
+--------------------
+🔒 For 100% Local Operation (No Data Leaves Your Machine):
+
+CRITICAL: Disable these JetBrains cloud features in AI Assistant settings:
+  ❌ Enable cloud completion suggestions
+  ❌ Enable next edit suggestions
+
+These features send your code to JetBrains cloud servers for analysis. When
+disabled, all AI operations run exclusively through your local Ollama instance.
+
+Benefits of Local-Only Setup:
+  ✓ Complete data privacy - no code leaves your machine
+  ✓ Compliance-friendly for sensitive codebases
+  ✓ No internet required after initial model download
+  ✓ Lower latency (no round-trip to cloud)
+  ✓ No usage limits or API rate limiting
 
 Troubleshooting:
 ---------------
