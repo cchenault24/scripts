@@ -243,12 +243,8 @@ main() {
 
         local codegemma_size=""
         if [[ -n "$CODEGEMMA_MODEL" ]]; then
-            local codegemma_variant="${CODEGEMMA_MODEL#*:}"
-            if [[ "$codegemma_variant" == "2b" ]]; then
-                codegemma_size="1.6"
-            elif [[ "$codegemma_variant" == "7b" ]]; then
-                codegemma_size="5.0"
-            fi
+            # Use registry lookup for FIM model size (supports all FIM models)
+            codegemma_size=$(get_fim_model_weight_gb "$CODEGEMMA_MODEL")
         fi
 
         # Show preview

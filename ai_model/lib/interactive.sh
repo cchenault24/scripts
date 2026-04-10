@@ -126,9 +126,13 @@ select_model_interactive() {
         fi
 
         if validate_gpu_fit "$DETECTED_RAM_GB" "$model_key" "$context"; then
-            echo -e "  ${GREEN}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K recommended, 100% GPU)$suffix"
+            if [[ $idx -eq $recommended_idx ]]; then
+                echo -e "  ${GREEN}$idx) $model_key (${weight_gb}GB, 100% GPU)$suffix${NC}"
+            else
+                echo -e "  $idx) $model_key (${weight_gb}GB, 100% GPU)$suffix"
+            fi
         else
-            echo -e "  ${YELLOW}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K recommended, CPU/GPU split)$suffix"
+            echo -e "  ${YELLOW}$idx) $model_key (${weight_gb}GB, CPU/GPU split)$suffix${NC}"
         fi
     done
 
@@ -220,7 +224,7 @@ select_fim_model_interactive() {
         # Mark recommended model
         if [[ "$model" == "$recommended_model" ]]; then
             recommended_idx=$idx
-            echo -e "  ${GREEN}$idx) $display${NC} ($weight) - $desc ${GREEN}[Recommended]${NC}"
+            echo -e "  ${GREEN}$idx) $display ($weight) - $desc [Recommended]${NC}"
         else
             echo -e "  $idx) $display ($weight) - $desc"
         fi
@@ -277,20 +281,21 @@ select_context_window() {
     # Explain why this context was recommended
     local next_context
     case "$RECOMMENDED_CONTEXT" in
+        4096)   next_context="8K" ;;
+        8192)   next_context="16K" ;;
+        16384)  next_context="32K" ;;
         32768)  next_context="64K" ;;
-        65536)  next_context="128K" ;;
-        131072) next_context="256K" ;;
         *)      next_context="larger" ;;
     esac
-    echo -e "${BLUE}Why: Largest context that fits 100% on GPU. $next_context+ requires CPU/GPU split (slower).${NC}"
+    echo -e "${BLUE}Why: Optimized for fast responses. ${next_context}+ will be slower but provide more context.${NC}"
 
     echo ""
     echo "Select a context window size:"
     echo ""
 
-    # Build available context options (only up to model's max)
-    local -a context_options=(32768 65536 131072 262144)
-    local -a context_labels=("32K" "64K" "128K" "256K")
+    # Build available context options (speed-focused, smaller sizes)
+    local -a context_options=(4096 8192 16384 32768 65536 131072 262144)
+    local -a context_labels=("4K" "8K" "16K" "32K" "64K" "128K" "256K")
     local -a available_contexts=()
     local -a available_labels=()
     local recommended_idx=-1
@@ -315,7 +320,7 @@ select_context_window() {
             if [[ $ctx -eq $RECOMMENDED_CONTEXT ]]; then
                 echo -e "  ${GREEN}$display_idx) ${label} (${ctx} tokens) - Recommended${NC}"
             else
-                echo -e "  ${GREEN}$display_idx) ${label} (${ctx} tokens) - 100% GPU${NC}"
+                echo -e "  $display_idx) ${label} (${ctx} tokens) - 100% GPU"
             fi
         else
             echo -e "  ${YELLOW}$display_idx) ${label} (${ctx} tokens) - CPU/GPU split (slower)${NC}"
@@ -515,6 +520,40 @@ select_custom_name() {
 # IDE Tool Selection
 #############################################
 
+# Detect if JetBrains IDE is installed
+# Returns 0 if found, 1 if not found
+detect_jetbrains_ide() {
+    local jetbrains_apps=(
+        "IntelliJ IDEA"
+        "PyCharm"
+        "WebStorm"
+        "PhpStorm"
+        "CLion"
+        "GoLand"
+        "RubyMine"
+        "Rider"
+        "DataGrip"
+        "AppCode"
+        "Fleet"
+    )
+
+    # Check /Applications
+    for app in "${jetbrains_apps[@]}"; do
+        if ls /Applications/"${app}"*.app &>/dev/null; then
+            return 0
+        fi
+    done
+
+    # Check ~/Applications (Toolbox installs here)
+    for app in "${jetbrains_apps[@]}"; do
+        if ls "$HOME/Applications/${app}"*.app &>/dev/null; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 # Interactive IDE tool selection
 # Sets IDE_TOOLS global array with selected tools
 #
@@ -523,33 +562,73 @@ select_custom_name() {
 select_ide_tools() {
     print_header "IDE Tool Configuration"
 
+    # Detect JetBrains IDE installation
+    local has_jetbrains=false
+    if detect_jetbrains_ide; then
+        has_jetbrains=true
+    fi
+
     echo "Which IDE tool(s) would you like to configure?"
     echo ""
     echo -e "${BLUE}Available Options:${NC}"
     echo ""
-    echo "  1) OpenCode only"
-    echo "     • VS Code extension for AI-assisted coding"
-    echo "     • Uses: Gemma4 for all features"
-    echo "     • Open source: https://opencode.ai"
+
+    # Calculate hardware-based recommendation
+    local recommended_option=1  # Default to OpenCode only
+    local max_option=1
+
+    if [[ "$has_jetbrains" == true ]]; then
+        max_option=3
+        # Hardware-based recommendation (only if JetBrains is installed)
+        if [[ $DETECTED_RAM_GB -ge 16 ]]; then
+            recommended_option=3  # Both - plenty of resources
+        elif [[ $DETECTED_RAM_GB -ge 12 ]]; then
+            recommended_option=2  # JetBrains only - enough for one tool + FIM
+        else
+            recommended_option=1  # OpenCode only - limited RAM
+        fi
+    fi
+
+    # Show option 1 (always available)
+    if [[ $recommended_option -eq 1 ]]; then
+        echo -e "  ${GREEN}1) OpenCode Terminal UI only${NC}"
+    else
+        echo "  1) OpenCode Terminal UI only"
+    fi
     echo ""
-    echo "  2) JetBrains AI Assistant only"
-    echo "     • Official JetBrains AI integration"
-    echo "     • Uses: Gemma4 (core) + FIM model (instant helpers + completion)"
-    echo "     • Works with IntelliJ, PyCharm, WebStorm, etc."
-    echo ""
-    echo "  3) Both OpenCode and JetBrains"
-    echo "     • Configure both tools for maximum flexibility"
-    echo "     • Downloads: Gemma4 + FIM model"
-    echo "     • Recommended if you use multiple IDEs"
-    echo ""
+
+    # Show options 2 and 3 only if JetBrains is detected
+    if [[ "$has_jetbrains" == true ]]; then
+        if [[ $recommended_option -eq 2 ]]; then
+            echo -e "  ${GREEN}2) JetBrains AI Assistant Plugin only${NC}"
+        else
+            echo "  2) JetBrains AI Assistant Plugin only"
+        fi
+        echo ""
+
+        if [[ $recommended_option -eq 3 ]]; then
+            echo -e "  ${GREEN}3) Both OpenCode and JetBrains AI Assistant${NC}"
+        else
+            echo "  3) Both OpenCode and JetBrains AI Assistant"
+        fi
+        echo ""
+    else
+        echo -e "${YELLOW}Note: JetBrains options not available (no JetBrains IDE detected)${NC}"
+        echo ""
+    fi
 
     # Get user selection
     while true; do
-        read -r -p "Enter selection (1-3, recommended: 3): " selection
+        if [[ $max_option -eq 1 ]]; then
+            read -r -p "Press Enter to continue with OpenCode: " selection
+            selection=1
+        else
+            read -r -p "Enter selection (1-${max_option}, recommended: ${recommended_option}): " selection
 
-        # Default to option 3 (both) if empty
-        if [[ -z "$selection" ]]; then
-            selection=3
+            # Default to recommended option if empty
+            if [[ -z "$selection" ]]; then
+                selection=$recommended_option
+            fi
         fi
 
         case "$selection" in
@@ -559,17 +638,25 @@ select_ide_tools() {
                 break
                 ;;
             2)
-                IDE_TOOLS=("jetbrains")
-                print_status "Selected: JetBrains AI Assistant"
-                break
+                if [[ "$has_jetbrains" == true ]]; then
+                    IDE_TOOLS=("jetbrains")
+                    print_status "Selected: JetBrains AI Assistant"
+                    break
+                else
+                    print_error "JetBrains option not available (no JetBrains IDE detected)"
+                fi
                 ;;
             3)
-                IDE_TOOLS=("opencode" "jetbrains")
-                print_status "Selected: Both OpenCode and JetBrains"
-                break
+                if [[ "$has_jetbrains" == true ]]; then
+                    IDE_TOOLS=("opencode" "jetbrains")
+                    print_status "Selected: Both OpenCode and JetBrains"
+                    break
+                else
+                    print_error "JetBrains option not available (no JetBrains IDE detected)"
+                fi
                 ;;
             *)
-                print_error "Invalid selection. Please enter 1, 2, or 3."
+                print_error "Invalid selection. Please enter 1-${max_option}."
                 ;;
         esac
     done

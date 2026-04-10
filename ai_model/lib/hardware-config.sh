@@ -157,50 +157,37 @@ calculate_context_length() {
     local model_weight_gb
     model_weight_gb=$(get_model_weight_gb "$model_key")
 
-    # Start with optimistic context based on RAM and model size heuristics
-    # Use model weight as a proxy for complexity
+    # Conservative context sizing optimized for speed
+    # Prioritizes fast responses over maximum context
+    # 16K max (good for multi-file work, 2-4x faster than old defaults)
     local candidate_context
     if [[ $model_weight_gb -ge 30 ]]; then
         # Very large models (40GB+) - e.g., llama3.1:70b
-        if [[ $ram_gb -ge 80 ]]; then
-            candidate_context="65536"   # 64K context
-        elif [[ $ram_gb -ge 64 ]]; then
-            candidate_context="32768"   # 32K context
-        else
+        # These are already slow, keep context modest
+        if [[ $ram_gb -ge 64 ]]; then
             candidate_context="16384"   # 16K context
+        else
+            candidate_context="8192"    # 8K context
         fi
     elif [[ $model_weight_gb -ge 15 ]]; then
         # Large models (15-30GB) - e.g., gemma4:31b, gemma4:26b, granite-code:34b
-        if [[ $ram_gb -ge 80 ]]; then
-            candidate_context="131072"  # 128K context
-        elif [[ $ram_gb -ge 64 ]]; then
-            candidate_context="65536"   # 64K context
-        elif [[ $ram_gb -ge 48 ]]; then
-            candidate_context="32768"   # 32K context
-        else
-            candidate_context="16384"   # 16K context
-        fi
+        # Most common use case - prioritize speed
+        candidate_context="8192"    # 8K context (4x faster than old 32K)
     elif [[ $model_weight_gb -ge 8 ]]; then
         # Medium models (8-15GB) - e.g., gemma4:latest, phi4:latest, mistral-small
-        if [[ $ram_gb -ge 48 ]]; then
-            candidate_context="131072"  # 128K context
-        elif [[ $ram_gb -ge 32 ]]; then
-            candidate_context="65536"   # 64K context
-        elif [[ $ram_gb -ge 16 ]]; then
-            candidate_context="32768"   # 32K context
-        else
+        # Good balance of speed and capability
+        if [[ $ram_gb -ge 32 ]]; then
             candidate_context="16384"   # 16K context
+        else
+            candidate_context="8192"    # 8K context
         fi
     else
         # Small models (<8GB) - e.g., gemma4:e2b, phi4-mini, mistral, llama3.1:8b
-        if [[ $ram_gb -ge 32 ]]; then
-            candidate_context="131072"  # 128K context
-        elif [[ $ram_gb -ge 24 ]]; then
-            candidate_context="65536"   # 64K context
-        elif [[ $ram_gb -ge 16 ]]; then
-            candidate_context="32768"   # 32K context
-        else
+        # Fast models, can afford slightly larger context
+        if [[ $ram_gb -ge 24 ]]; then
             candidate_context="16384"   # 16K context
+        else
+            candidate_context="8192"    # 8K context
         fi
     fi
 
@@ -211,7 +198,7 @@ calculate_context_length() {
 
     # Validate GPU fit and reduce context until it fits at 100% GPU
     # This ensures we NEVER recommend a context that causes CPU/GPU split
-    local min_context=8192  # 8K minimum (practical lower bound for coding)
+    local min_context=4096  # 4K minimum (matches smallest FIM models, still useful for coding)
 
     while [[ $candidate_context -ge $min_context ]]; do
         if validate_gpu_fit "$ram_gb" "$model_key" "$candidate_context"; then
@@ -231,11 +218,11 @@ calculate_context_length() {
 
 # Recommend best model based on available RAM AND GPU fit
 # Only recommends models that can run at 100% GPU with a reasonable context window
-# Requires minimum 32K context for practical coding work
+# Requires minimum 8K context for practical coding work (speed-optimized)
 # Iterates over all models in registry and picks the best fit
 recommend_model() {
     local ram_gb=$1
-    local min_useful_context=32768  # 32K minimum for practical coding
+    local min_useful_context=8192  # 8K minimum for practical coding (speed-optimized)
 
     # Get all models from registry and test each one
     local best_model=""

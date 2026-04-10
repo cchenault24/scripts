@@ -276,105 +276,105 @@ test_recommend_model() {
 test_calculate_context_length() {
     print_section "Testing calculate_context_length()"
 
-    # Test gemma4:e2b model
-    begin_test "16GB RAM + gemma4:e2b -> 32K context"
+    # Test gemma4:e2b model (speed-optimized: <8GB models)
+    begin_test "16GB RAM + gemma4:e2b -> 8K context"
     local result
     result=$(calculate_context_length 16 "gemma4:e2b")
-    if [[ $result -eq 32768 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 32768, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 
-    begin_test "32GB RAM + gemma4:e2b -> 64K context"
+    begin_test "32GB RAM + gemma4:e2b -> 16K context"
     result=$(calculate_context_length 32 "gemma4:e2b")
-    if [[ $result -eq 65536 ]]; then
-        pass_test
-    else
-        fail_test "Expected 65536, got $result"
-    fi
-
-    begin_test "48GB RAM + gemma4:e2b -> 128K context"
-    result=$(calculate_context_length 48 "gemma4:e2b")
-    if [[ $result -eq 131072 ]]; then
-        pass_test
-    else
-        fail_test "Expected 131072, got $result"
-    fi
-
-    # Test gemma4:latest model (GPU-validated contexts)
-    begin_test "16GB RAM + gemma4:latest -> 16K context"
-    result=$(calculate_context_length 16 "gemma4:latest")
     if [[ $result -eq 16384 ]]; then
         pass_test
     else
         fail_test "Expected 16384, got $result"
     fi
 
-    begin_test "32GB RAM + gemma4:latest -> 64K context"
+    begin_test "48GB RAM + gemma4:e2b -> 16K context"
+    result=$(calculate_context_length 48 "gemma4:e2b")
+    if [[ $result -eq 16384 ]]; then
+        pass_test
+    else
+        fail_test "Expected 16384, got $result"
+    fi
+
+    # Test gemma4:latest model (speed-optimized: 8-15GB models)
+    begin_test "16GB RAM + gemma4:latest -> 8K context"
+    result=$(calculate_context_length 16 "gemma4:latest")
+    if [[ $result -eq 8192 ]]; then
+        pass_test
+    else
+        fail_test "Expected 8192, got $result"
+    fi
+
+    begin_test "32GB RAM + gemma4:latest -> 16K context"
     result=$(calculate_context_length 32 "gemma4:latest")
-    if [[ $result -eq 65536 ]]; then
+    if [[ $result -eq 16384 ]]; then
         pass_test
     else
-        fail_test "Expected 65536, got $result"
+        fail_test "Expected 16384, got $result"
     fi
 
-    begin_test "48GB RAM + gemma4:latest -> 64K context"
+    begin_test "48GB RAM + gemma4:latest -> 16K context"
     result=$(calculate_context_length 48 "gemma4:latest")
-    if [[ $result -eq 65536 ]]; then
+    if [[ $result -eq 16384 ]]; then
         pass_test
     else
-        fail_test "Expected 65536, got $result"
+        fail_test "Expected 16384, got $result"
     fi
 
-    # Test gemma4:26b model (new algorithm is more conservative, validates GPU fit)
-    begin_test "32GB RAM + gemma4:26b -> valid context"
+    # Test gemma4:26b model (speed-optimized: 15-30GB models hardcoded to 8K)
+    begin_test "32GB RAM + gemma4:26b -> 8K context"
     result=$(calculate_context_length 32 "gemma4:26b")
-    if [[ $result -ge 16384 && $result -le 65536 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 16K-64K, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 
-    begin_test "48GB RAM + gemma4:26b -> valid context"
+    begin_test "48GB RAM + gemma4:26b -> 8K context"
     result=$(calculate_context_length 48 "gemma4:26b")
-    if [[ $result -ge 32768 && $result -le 131072 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 32K-128K, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 
-    begin_test "64GB RAM + gemma4:26b -> valid context"
+    begin_test "64GB RAM + gemma4:26b -> 8K context"
     result=$(calculate_context_length 64 "gemma4:26b")
-    if [[ $result -ge 32768 && $result -le 131072 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 32K-128K, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 
-    # Test gemma4:31b model (new algorithm validates GPU fit)
-    begin_test "48GB RAM + gemma4:31b -> valid context"
+    # Test gemma4:31b model (speed-optimized: 15-30GB models hardcoded to 8K)
+    begin_test "48GB RAM + gemma4:31b -> 8K context"
     result=$(calculate_context_length 48 "gemma4:31b")
-    if [[ $result -ge 16384 && $result -le 65536 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 16K-64K, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 
-    begin_test "64GB RAM + gemma4:31b -> valid context"
+    begin_test "64GB RAM + gemma4:31b -> 8K context"
     result=$(calculate_context_length 64 "gemma4:31b")
-    if [[ $result -ge 16384 && $result -le 65536 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 16K-64K, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 
-    begin_test "80GB RAM + gemma4:31b -> valid context"
+    begin_test "80GB RAM + gemma4:31b -> 8K context"
     result=$(calculate_context_length 80 "gemma4:31b")
-    if [[ $result -ge 32768 && $result -le 131072 ]]; then
+    if [[ $result -eq 8192 ]]; then
         pass_test
     else
-        fail_test "Expected 32K-128K, got $result"
+        fail_test "Expected 8192, got $result"
     fi
 }
 
