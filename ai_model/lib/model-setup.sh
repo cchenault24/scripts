@@ -134,6 +134,55 @@ EOF
     verify_custom_model
 }
 
+# Pull CodeGemma model for JetBrains AI Assistant (FIM support)
+#
+# Globals read:
+#   - CODEGEMMA_MODEL: CodeGemma model name (e.g., "codegemma:7b")
+#   - DETECTED_RAM_GB: Detected RAM for validation
+pull_codegemma() {
+    print_header "Pulling CodeGemma Model (for JetBrains)"
+
+    # Check if CodeGemma model variable is set
+    if [[ -z "$CODEGEMMA_MODEL" ]]; then
+        print_info "No CodeGemma model configured (skipping)"
+        return 0
+    fi
+
+    # Check if model already exists
+    if get_ollama_list | grep -q "^${CODEGEMMA_MODEL}"; then
+        print_status "Model $CODEGEMMA_MODEL already pulled"
+        return 0
+    fi
+
+    print_info "Pulling CodeGemma model: $CODEGEMMA_MODEL"
+    print_info "CodeGemma supports Fill-In-Middle (FIM) for code completion"
+    print_warning "This may take 5-15 minutes depending on your internet connection..."
+
+    # Get model size info
+    local model_variant="${CODEGEMMA_MODEL#*:}"
+    case "$model_variant" in
+        2b)
+            print_info "Model: codegemma:2b (1.6GB download, 8K context)"
+            print_info "Optimized for fast code completion on constrained systems"
+            ;;
+        7b)
+            print_info "Model: codegemma:7b (5.0GB download, 8K context)"
+            print_info "Recommended for 16GB+ RAM - more accurate completions"
+            ;;
+        *)
+            print_info "Downloading ${CODEGEMMA_MODEL}..."
+            ;;
+    esac
+
+    if ollama pull "$CODEGEMMA_MODEL"; then
+        print_status "Model $CODEGEMMA_MODEL pulled successfully"
+        clear_ollama_cache  # Invalidate cache after pulling new model
+    else
+        print_error "Failed to pull model $CODEGEMMA_MODEL"
+        exit 1
+    fi
+}
+
 # Verify custom model exists and is accessible
 #
 # Globals read:

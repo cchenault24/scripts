@@ -145,6 +145,77 @@ select_model_interactive() {
 }
 
 #############################################
+# CodeGemma Selection (for JetBrains FIM)
+#############################################
+
+# Interactive CodeGemma model selection for JetBrains AI Assistant
+# CodeGemma models support Fill-In-Middle (FIM) for code completion
+#
+# Globals read:
+#   - DETECTED_RAM_GB: Detected RAM in GB
+# Globals set:
+#   - CODEGEMMA_MODEL: Selected CodeGemma model (e.g., "codegemma:7b")
+select_codegemma_interactive() {
+    print_header "CodeGemma Selection (for JetBrains AI Assistant)"
+
+    echo -e "${BLUE}JetBrains AI Assistant needs a FIM-capable model for code completion${NC}"
+    echo ""
+    echo "CodeGemma models are optimized for:"
+    echo "  • Fill-In-Middle (FIM) code completion"
+    echo "  • Inline suggestions and auto-completion"
+    echo "  • Code infilling and refactoring"
+    echo ""
+
+    # Build arrays of available CodeGemma models
+    local -a models=("codegemma:2b" "codegemma:7b")
+    local -a model_sizes=("2b" "7b")
+    local -a model_weights=("1.6GB" "5.0GB")
+    local -a context_sizes=("8K" "8K")
+    local -a descriptions=(
+        "Smallest, fastest (good for code completion)"
+        "Larger, more accurate (recommended for 16GB+ RAM)"
+    )
+
+    echo "Select a CodeGemma model:"
+    echo ""
+
+    # Display models with recommendations
+    for i in "${!models[@]}"; do
+        local idx=$((i + 1))
+        local model="${models[$i]}"
+        local weight="${model_weights[$i]}"
+        local context="${context_sizes[$i]}"
+        local desc="${descriptions[$i]}"
+
+        # Recommend based on RAM
+        if [[ $DETECTED_RAM_GB -ge 16 && "$model" == "codegemma:7b" ]]; then
+            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, $context context) - $desc ${GREEN}[Recommended]${NC}"
+        elif [[ $DETECTED_RAM_GB -lt 16 && "$model" == "codegemma:2b" ]]; then
+            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, $context context) - $desc ${GREEN}[Recommended]${NC}"
+        else
+            echo -e "  $idx) $model ($weight model, $context context) - $desc"
+        fi
+    done
+
+    echo ""
+
+    # Get user selection
+    while true; do
+        read -r -p "Enter selection (1-2): " selection
+
+        # Validate numeric input in range 1-2
+        if [[ "$selection" =~ ^[1-2]$ ]]; then
+            local idx=$((selection - 1))
+            CODEGEMMA_MODEL="${models[$idx]}"
+            print_status "Selected: $CODEGEMMA_MODEL"
+            break
+        else
+            print_error "Invalid selection. Please enter 1 or 2."
+        fi
+    done
+}
+
+#############################################
 # Context Window Selection
 #############################################
 
@@ -414,4 +485,63 @@ select_custom_name() {
     else
         CUSTOM_MODEL_NAME="$default_name"
     fi
+}
+
+#############################################
+# IDE Tool Selection
+#############################################
+
+# Interactive IDE tool selection
+# Sets IDE_TOOLS global array with selected tools
+#
+# Globals set:
+#   - IDE_TOOLS: Array of selected tools ("opencode" and/or "jetbrains")
+select_ide_tools() {
+    print_header "IDE Tool Configuration"
+
+    echo "Which IDE tool(s) would you like to configure?"
+    echo ""
+    echo -e "${BLUE}Available Options:${NC}"
+    echo ""
+    echo "  1) OpenCode only"
+    echo "     • VS Code extension for AI-assisted coding"
+    echo "     • Uses: Gemma4 for all features"
+    echo "     • Open source: https://opencode.ai"
+    echo ""
+    echo "  2) JetBrains AI Assistant only"
+    echo "     • Official JetBrains AI integration"
+    echo "     • Uses: Gemma4 (core + instant helpers) + CodeGemma (completion)"
+    echo "     • Works with IntelliJ, PyCharm, WebStorm, etc."
+    echo ""
+    echo "  3) Both OpenCode and JetBrains"
+    echo "     • Configure both tools for maximum flexibility"
+    echo "     • Downloads: Gemma4 + CodeGemma"
+    echo "     • Recommended if you use multiple IDEs"
+    echo ""
+
+    # Get user selection
+    while true; do
+        read -r -p "Enter selection (1-3): " selection
+
+        case "$selection" in
+            1)
+                IDE_TOOLS=("opencode")
+                print_status "Selected: OpenCode"
+                break
+                ;;
+            2)
+                IDE_TOOLS=("jetbrains")
+                print_status "Selected: JetBrains AI Assistant"
+                break
+                ;;
+            3)
+                IDE_TOOLS=("opencode" "jetbrains")
+                print_status "Selected: Both OpenCode and JetBrains"
+                break
+                ;;
+            *)
+                print_error "Invalid selection. Please enter 1, 2, or 3."
+                ;;
+        esac
+    done
 }

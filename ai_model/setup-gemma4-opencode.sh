@@ -1,11 +1,12 @@
 #!/bin/bash
-# setup-gemma4-opencode.sh - Idempotent setup for Gemma4 + OpenCode via Ollama (Homebrew)
+# setup-gemma4-opencode.sh - Idempotent setup for Gemma4 + IDE tools via Ollama (Homebrew)
 #
 # One-stop shop for team deployment:
 # - Installs Ollama and OpenCode via Homebrew
 # - Dynamically optimizes configuration based on detected hardware
 # - Pulls and configures Gemma4 models with native context windows
-# - Sets up OpenCode integration
+# - Sets up IDE tool integration (OpenCode and/or JetBrains AI Assistant)
+# - For JetBrains: Includes CodeGemma for FIM (Fill-In-Middle) code completion
 #
 # Safe to run multiple times - idempotent design
 #
@@ -62,6 +63,7 @@ source "$SCRIPT_DIR/lib/installation.sh"
 source "$SCRIPT_DIR/lib/launchagent.sh"
 source "$SCRIPT_DIR/lib/model-setup.sh"
 source "$SCRIPT_DIR/lib/opencode-config.sh"
+source "$SCRIPT_DIR/lib/jetbrains-config.sh"
 source "$SCRIPT_DIR/lib/verification.sh"
 
 #############################################
@@ -82,6 +84,9 @@ LAUNCHAGENT_PLIST="$HOME/Library/LaunchAgents/${LAUNCHAGENT_LABEL}.plist"
 
 # Custom model name will be set after model selection
 CUSTOM_MODEL_NAME=""
+
+# IDE tool selection (will be set after user selection)
+IDE_TOOLS=()
 
 # Ollama configuration
 OLLAMA_HOST="http://localhost:11434"
@@ -121,6 +126,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 #############################################
+# IDE Tool Selection (Must happen FIRST)
+#############################################
+
+# Ask which IDE tool(s) to configure (skip in auto mode - default to OpenCode only)
+if [[ "$AUTO_MODE" != true ]]; then
+    select_ide_tools
+else
+    IDE_TOOLS=("opencode")  # Default to OpenCode in auto mode
+fi
+
+#############################################
 # Interactive Model Selection
 #############################################
 
@@ -143,6 +159,21 @@ fi
 
 # Extract model size for dynamic configuration
 MODEL_SIZE=$(get_model_size "$GEMMA_MODEL")
+
+#############################################
+# CodeGemma Selection (for JetBrains FIM)
+#############################################
+
+# If JetBrains is selected, also need a FIM model for code completion
+CODEGEMMA_MODEL=""
+if [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
+    if [[ "$AUTO_MODE" != true ]]; then
+        select_codegemma_interactive
+    else
+        # Auto mode: use recommended CodeGemma based on RAM
+        CODEGEMMA_MODEL=$(recommend_codegemma "$DETECTED_RAM_GB")
+    fi
+fi
 
 #############################################
 # Calculate Hardware-Optimized Settings
@@ -204,8 +235,25 @@ main() {
     pull_model
     create_custom_model
 
-    # OpenCode setup
-    configure_opencode
+    # Pull CodeGemma if JetBrains is selected
+    if [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
+        pull_codegemma
+    fi
+
+    # IDE tool setup
+    for tool in "${IDE_TOOLS[@]}"; do
+        case "$tool" in
+            opencode)
+                configure_opencode
+                ;;
+            jetbrains)
+                configure_jetbrains
+                ;;
+            *)
+                print_warning "Unknown IDE tool: $tool (skipping)"
+                ;;
+        esac
+    done
 
     # Verification and instructions
     verify_setup

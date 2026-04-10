@@ -294,6 +294,21 @@ recommend_model() {
     echo "gemma4:e2b"
 }
 
+# Recommend best CodeGemma model based on available RAM
+# CodeGemma is optimized for FIM (Fill-In-Middle) code completion in JetBrains
+# Models: codegemma:2b (1.6GB, 8K) and codegemma:7b (5.0GB, 8K)
+recommend_codegemma() {
+    local ram_gb=$1
+
+    # CodeGemma models are smaller and focused on code completion
+    # 7b is better for 16GB+ systems, 2b works for constrained systems
+    if [[ $ram_gb -ge 16 ]]; then
+        echo "codegemma:7b"
+    else
+        echo "codegemma:2b"
+    fi
+}
+
 # Get model variant from model name (e.g., "gemma4:26b" -> "26b")
 get_model_size() {
     local model=$1
