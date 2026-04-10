@@ -159,17 +159,17 @@ fi
 MODEL_VARIANT=$(get_model_variant "$SELECTED_MODEL")
 
 #############################################
-# CodeGemma Selection (for JetBrains FIM)
+# FIM Model Selection (for JetBrains)
 #############################################
 
 # If JetBrains is selected, also need a FIM model for code completion
 CODESELECTED_MODEL=""
 if [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
     if [[ "$AUTO_MODE" != true ]]; then
-        select_codegemma_interactive
+        select_fim_model_interactive
     else
-        # Auto mode: use recommended CodeGemma based on RAM
-        CODESELECTED_MODEL=$(recommend_codegemma "$DETECTED_RAM_GB")
+        # Auto mode: use recommended FIM model based on RAM
+        CODESELECTED_MODEL=$(recommend_fim_model "$DETECTED_RAM_GB")
     fi
 fi
 
@@ -306,9 +306,9 @@ main() {
     pull_model
     create_custom_model
 
-    # Pull CodeGemma if JetBrains is selected
+    # Pull FIM model if JetBrains is selected
     if [[ " ${IDE_TOOLS[*]} " =~ " jetbrains " ]]; then
-        pull_codegemma
+        pull_fim_model
     fi
 
     # IDE tool setup

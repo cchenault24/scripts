@@ -431,7 +431,7 @@ show_final_menu() {
         echo "║    [Q] Quit                                               ║"
         echo "║                                                           ║"
         echo "╠═══════════════════════════════════════════════════════════╣"
-        echo "║  Tip: Run './setup-gemma4-opencode.sh -v' for verbose     ║"
+        echo "║  Tip: Run './setup-ai-opencode.sh -v' for verbose        ║"
         echo "╚═══════════════════════════════════════════════════════════╝"
         echo ""
 

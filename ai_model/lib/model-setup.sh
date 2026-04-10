@@ -175,55 +175,48 @@ EOF
     verify_custom_model
 }
 
-# Pull CodeGemma model for JetBrains AI Assistant (FIM support)
+# Pull FIM model for JetBrains AI Assistant
 #
 # Globals read:
-#   - CODEGEMMA_MODEL: CodeGemma model name (e.g., "codegemma:7b")
+#   - CODESELECTED_MODEL: FIM model name (e.g., "codegemma:7b-code")
 #   - DETECTED_RAM_GB: Detected RAM for validation
-pull_codegemma() {
-    # Check if CodeGemma model variable is set
-    if [[ -z "$CODEGEMMA_MODEL" ]]; then
+pull_fim_model() {
+    # Check if FIM model variable is set
+    if [[ -z "$CODESELECTED_MODEL" ]]; then
         return 0
     fi
 
-    print_step "5.5/6" "Pulling CodeGemma (FIM)"
+    print_step "5.5/6" "Pulling FIM Model"
 
     # Check if model already exists
-    if get_ollama_list | grep -q "^${CODEGEMMA_MODEL}"; then
-        print_status "$CODEGEMMA_MODEL (already downloaded)"
+    if get_ollama_list | grep -q "^${CODESELECTED_MODEL}"; then
+        print_status "$CODESELECTED_MODEL (already downloaded)"
         return 0
     fi
 
-    # Get model size info
-    local model_variant="${CODEGEMMA_MODEL#*:}"
-    local size_info=""
-    case "$model_variant" in
-        2b)
-            size_info="1.6GB"
-            ;;
-        7b)
-            size_info="5.0GB"
-            ;;
-    esac
+    # Get model size from registry
+    local weight_gb
+    weight_gb=$(get_fim_model_weight_gb "$CODESELECTED_MODEL")
+    local size_info="${weight_gb}GB"
 
     if [[ $VERBOSITY_LEVEL -eq 1 ]]; then
-        start_spinner "Downloading ${CODEGEMMA_MODEL} (${size_info})..."
-        if ollama pull "$CODEGEMMA_MODEL" > /dev/null 2>&1; then
+        start_spinner "Downloading ${CODESELECTED_MODEL} (${size_info})..."
+        if ollama pull "$CODESELECTED_MODEL" > /dev/null 2>&1; then
             stop_spinner
-            print_status "$CODEGEMMA_MODEL downloaded"
+            print_status "$CODESELECTED_MODEL downloaded"
             clear_ollama_cache
         else
             stop_spinner
-            print_error "Failed to pull model $CODEGEMMA_MODEL"
+            print_error "Failed to pull model $CODESELECTED_MODEL"
             exit 1
         fi
     else
-        print_info "Downloading ${CODEGEMMA_MODEL} (${size_info})..."
-        if ollama pull "$CODEGEMMA_MODEL" 2>&1 | grep -E "pulling|success" || true; then
-            print_status "$CODEGEMMA_MODEL downloaded"
+        print_info "Downloading ${CODESELECTED_MODEL} (${size_info})..."
+        if ollama pull "$CODESELECTED_MODEL" 2>&1 | grep -E "pulling|success" || true; then
+            print_status "$CODESELECTED_MODEL downloaded"
             clear_ollama_cache
         else
-            print_error "Failed to pull model $CODEGEMMA_MODEL"
+            print_error "Failed to pull model $CODESELECTED_MODEL"
             exit 1
         fi
     fi

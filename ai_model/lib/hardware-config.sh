@@ -283,18 +283,28 @@ recommend_model() {
     fi
 }
 
-# Recommend best CodeGemma model based on available RAM
-# CodeGemma is optimized for FIM (Fill-In-Middle) code completion in JetBrains
-# Models: codegemma:2b (1.6GB, 8K) and codegemma:7b (5.0GB, 8K)
-recommend_codegemma() {
+# Recommend best FIM model based on available RAM
+# FIM (Fill-In-Middle) models are optimized for code completion in JetBrains
+# Available models: CodeGemma, Codestral, Granite, CodeLlama
+recommend_fim_model() {
     local ram_gb=$1
 
-    # CodeGemma models are smaller and focused on code completion
-    # 7b is better for 16GB+ systems, 2b works for constrained systems
-    if [[ $ram_gb -ge 16 ]]; then
-        echo "codegemma:7b"
+    # Recommend based on RAM tiers:
+    # - <8GB: CodeGemma 2B (2GB) - smallest
+    # - 8-12GB: CodeLlama 7B (4GB) - good balance
+    # - 12-16GB: CodeGemma 7B (5GB) - best FIM quality in range
+    # - 16-24GB: CodeLlama 13B (8GB) - higher quality
+    # - 24GB+: Codestral (12GB) - most capable (FIM + test generation)
+    if [[ $ram_gb -lt 8 ]]; then
+        echo "codegemma:2b-code"
+    elif [[ $ram_gb -lt 12 ]]; then
+        echo "codellama:7b-code"
+    elif [[ $ram_gb -lt 16 ]]; then
+        echo "codegemma:7b-code"
+    elif [[ $ram_gb -lt 24 ]]; then
+        echo "codellama:13b-code"
     else
-        echo "codegemma:2b"
+        echo "codestral:latest"
     fi
 }
 

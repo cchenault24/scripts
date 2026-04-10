@@ -8,8 +8,8 @@
 #
 # JetBrains AI Assistant Model Configuration:
 # - Core features: Gemma4 (in-editor code generation, commit messages)
-# - Instant helpers: CodeGemma (chat context, title generation, name suggestions)
-# - Completion model: CodeGemma (inline code completion via FIM)
+# - Instant helpers: FIM model (chat context, title generation, name suggestions)
+# - Completion model: FIM model (inline code completion via Fill-In-Middle)
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ set -euo pipefail
 # Globals read:
 #   - CUSTOM_MODEL_NAME: Name of custom model
 #   - SELECTED_MODEL: Base model name
-#   - CODESELECTED_MODEL: CodeGemma model for FIM
+#   - CODESELECTED_MODEL: FIM model for code completion
 #   - OLLAMA_HOST: Ollama server URL
 #   - NUM_CTX: Context length
 #   - AUTO_MODE: Whether in auto mode
@@ -40,20 +40,22 @@ configure_jetbrains() {
     echo "     Model: ${CUSTOM_MODEL_NAME} (Gemma4)"
     echo ""
     if [[ -n "$CODESELECTED_MODEL" ]]; then
+        local fim_display_name
+        fim_display_name=$(get_fim_model_display_name "$CODESELECTED_MODEL")
         echo -e "  ${YELLOW}2. Instant helpers:${NC}"
         echo "     Used for: Chat context collection, title generation, name suggestions"
-        echo "     Model: ${CODESELECTED_MODEL} (CodeGemma)"
+        echo "     Model: ${CODESELECTED_MODEL} ($fim_display_name)"
         echo ""
         echo -e "  ${YELLOW}3. Completion model:${NC}"
         echo "     Used for: Inline code completion (requires FIM)"
-        echo "     Model: ${CODESELECTED_MODEL} (CodeGemma)"
+        echo "     Model: ${CODESELECTED_MODEL} ($fim_display_name)"
         echo ""
     else
         echo -e "  ${YELLOW}2. Instant helpers:${NC}"
-        echo "     Not configured - CodeGemma needed"
+        echo "     Not configured - FIM model needed"
         echo ""
         echo -e "  ${YELLOW}3. Completion model:${NC}"
-        echo "     Not configured - CodeGemma needed for FIM completion"
+        echo "     Not configured - FIM model needed for code completion"
         echo ""
     fi
     echo -e "${GREEN}Setup Steps:${NC}"
@@ -111,30 +113,32 @@ Purpose:          In-editor code generation, commit message generation, etc.
 EOF
 
     if [[ -n "$CODESELECTED_MODEL" ]]; then
+        local fim_display_name
+        fim_display_name=$(get_fim_model_display_name "$CODESELECTED_MODEL")
         cat >> "$config_ref" << EOF
-2. Instant Helpers Model (CodeGemma):
+2. Instant Helpers Model (${fim_display_name}):
 --------------------------------------
 Provider Type:    OpenAI-compatible
 API Base URL:     ${OLLAMA_HOST}/v1
 Model Name:       ${CODESELECTED_MODEL}
-Context:          8K tokens (optimized for fast responses)
+Context:          Optimized for fast responses
 API Key:          ollama (or leave empty)
 Purpose:          Chat context collection, chat title generation, name suggestions
-Note:             Lightweight model for fast helper tasks
+Note:             Lightweight FIM model for fast helper tasks
 
-3. Completion Model (CodeGemma FIM):
+3. Completion Model (${fim_display_name} FIM):
 ------------------------------------
 Provider Type:    OpenAI-compatible
 API Base URL:     ${OLLAMA_HOST}/v1
 Model Name:       ${CODESELECTED_MODEL}
-Context:          8K tokens (optimized for FIM)
+Context:          Optimized for FIM
 API Key:          ollama (or leave empty)
 Purpose:          Inline code completion in the main editor
 Requirements:     Must support Fill-In-the-Middle (FIM)
 Features:         • Real-time code completion
                   • Code infilling
                   • Context-aware suggestions
-Note:             Same CodeGemma model used for both Instant helpers and Completion
+Note:             Same FIM model used for both Instant helpers and Completion
 
 EOF
     else
@@ -142,14 +146,14 @@ EOF
 2. Instant Helpers Model:
 --------------------------
 Status:           Not configured
-Note:             CodeGemma needed for fast helper tasks
-                  Run setup again and select JetBrains to configure CodeGemma
+Note:             FIM model needed for fast helper tasks
+                  Run setup again and select JetBrains to configure FIM model
 
 3. Completion Model:
 --------------------
 Status:           Not configured
-Note:             CodeGemma needed for FIM-based inline code completion
-                  Run setup again and select JetBrains to configure CodeGemma
+Note:             FIM model needed for inline code completion
+                  Run setup again and select JetBrains to configure FIM model
 
 EOF
     fi
@@ -189,18 +193,18 @@ EOF
 
 Notes:
 - Core features uses Gemma4 for complex code generation tasks
-- Instant helpers and Completion both use CodeGemma for speed and FIM support
+- Instant helpers and Completion both use FIM model for speed and FIM support
 - Always keep cloud features disabled to ensure 100% local operation
 EOF
     else
         cat >> "$config_ref" << EOF
-   • Instant helpers:    (not configured - needs CodeGemma)
-   • Completion model:   (not configured - needs CodeGemma)
+   • Instant helpers:    (not configured - needs FIM model)
+   • Completion model:   (not configured - needs FIM model)
 
 7. Test connection
 
 8. Save settings
-   Note: Without CodeGemma, instant helpers and inline completion will not be available
+   Note: Without FIM model, instant helpers and inline completion will not be available
 
 IMPORTANT: Always keep cloud features disabled to ensure 100% local operation
 EOF
@@ -234,7 +238,7 @@ EOF
 
     if [[ -n "$CODESELECTED_MODEL" ]]; then
         cat >> "$config_ref" << EOF
-• Test CodeGemma: ollama run ${CODESELECTED_MODEL}
+• Test FIM model: ollama run ${CODESELECTED_MODEL}
 EOF
     fi
 

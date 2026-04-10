@@ -266,3 +266,87 @@ granite-code:8b
 granite-code:34b
 EOF
 }
+
+#############################################
+# FIM Model Registry
+#############################################
+
+# List all FIM-capable models
+# Returns: newline-separated list of model keys
+list_fim_models() {
+    cat <<EOF
+codegemma:7b-code
+codegemma:2b-code
+codestral:latest
+ibm/granite3.3:8b
+granite4:latest
+codellama:7b-code
+codellama:13b-code
+EOF
+}
+
+# Get FIM model weight in GB
+# Args: model_key (format: "family:variant" or "provider/family:variant")
+# Returns: integer GB
+get_fim_model_weight_gb() {
+    local model_key="$1"
+
+    case "$model_key" in
+        codegemma:7b-code) echo "5" ;;
+        codegemma:2b-code) echo "2" ;;
+        codestral:latest) echo "12" ;;
+        ibm/granite3.3:8b) echo "5" ;;
+        granite4:latest) echo "5" ;;
+        codellama:7b-code) echo "4" ;;
+        codellama:13b-code) echo "8" ;;
+
+        *)
+            echo "ERROR: Unknown FIM model '$model_key' in get_fim_model_weight_gb" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Get FIM model display name for menu display
+# Args: model_key (format: "family:variant" or "provider/family:variant")
+# Returns: string for display in menus
+get_fim_model_display_name() {
+    local model_key="$1"
+
+    case "$model_key" in
+        codegemma:7b-code) echo "CodeGemma 7B" ;;
+        codegemma:2b-code) echo "CodeGemma 2B" ;;
+        codestral:latest) echo "Codestral" ;;
+        ibm/granite3.3:8b) echo "Granite 3.3 8B" ;;
+        granite4:latest) echo "Granite 4.0" ;;
+        codellama:7b-code) echo "CodeLlama 7B" ;;
+        codellama:13b-code) echo "CodeLlama 13B" ;;
+
+        *)
+            echo "ERROR: Unknown FIM model '$model_key' in get_fim_model_display_name" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Get FIM model description/notes
+# Args: model_key (format: "family:variant" or "provider/family:variant")
+# Returns: string describing capabilities and provider
+get_fim_model_description() {
+    local model_key="$1"
+
+    case "$model_key" in
+        codegemma:7b-code) echo "Best FIM quality (Google)" ;;
+        codegemma:2b-code) echo "Fastest (Google)" ;;
+        codestral:latest) echo "FIM + test generation (Mistral AI)" ;;
+        ibm/granite3.3:8b) echo "FIM + chat capable (IBM)" ;;
+        granite4:latest) echo "Newest, FIM + instruct (IBM)" ;;
+        codellama:7b-code) echo "Proven FIM support (Meta)" ;;
+        codellama:13b-code) echo "Better quality than 7B (Meta)" ;;
+
+        *)
+            echo "ERROR: Unknown FIM model '$model_key' in get_fim_model_description" >&2
+            return 1
+            ;;
+    esac
+}

@@ -126,9 +126,9 @@ select_model_interactive() {
         fi
 
         if validate_gpu_fit "$DETECTED_RAM_GB" "$model_key" "$context"; then
-            echo -e "  ${GREEN}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K context, 100% GPU)$suffix"
+            echo -e "  ${GREEN}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K recommended, 100% GPU)$suffix"
         else
-            echo -e "  ${YELLOW}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K context, CPU/GPU split)$suffix"
+            echo -e "  ${YELLOW}$idx) $model_key${NC} (${weight_gb}GB model, ${context_k}K recommended, CPU/GPU split)$suffix"
         fi
     done
 
@@ -161,83 +161,91 @@ select_model_interactive() {
 }
 
 #############################################
-# CodeGemma Selection (for JetBrains FIM)
+# FIM Model Selection (for JetBrains)
 #############################################
 
-# Interactive CodeGemma model selection for JetBrains AI Assistant
-# CodeGemma models support Fill-In-Middle (FIM) for code completion
+# Interactive FIM model selection for JetBrains AI Assistant
+# FIM (Fill-In-Middle) models support inline code completion
 #
 # Globals read:
-#   - DETECTED_RAM_GB: Detected RAM in GB
+#   - DETECTED_RAM_GB: Detected RAM for recommendations and filtering
 # Globals set:
-#   - CODEGEMMA_MODEL: Selected CodeGemma model (e.g., "codegemma:7b")
-select_codegemma_interactive() {
-    print_header "CodeGemma Selection (for JetBrains AI Assistant)"
+#   - CODESELECTED_MODEL: Selected FIM model (e.g., "codegemma:7b-code")
+select_fim_model_interactive() {
+    print_header "FIM Model Selection (for JetBrains AI Assistant)"
 
     echo -e "${BLUE}JetBrains AI Assistant needs a FIM-capable model for code completion${NC}"
     echo ""
-    echo "CodeGemma models are optimized for:"
-    echo "  • Fill-In-Middle (FIM) code completion"
-    echo "  • Inline suggestions and auto-completion"
-    echo "  • Code infilling and refactoring"
+    echo "FIM (Fill-In-Middle) models are optimized for:"
+    echo "  • Inline code completion"
+    echo "  • Code infilling and suggestions"
+    echo "  • Context-aware auto-completion"
     echo ""
 
-    # Build arrays of available CodeGemma models
-    local -a models=("codegemma:2b" "codegemma:7b")
-    local -a model_sizes=("2b" "7b")
-    local -a model_weights=("1.6GB" "5.0GB")
-    local -a context_sizes=("8K" "8K")
-    local -a descriptions=(
-        "Smallest, fastest (good for code completion)"
-        "Larger, more accurate (recommended for 16GB+ RAM)"
-    )
+    # Build arrays dynamically from registry
+    local -a models=()
+    local -a weights=()
+    local -a display_names=()
+    local -a descriptions=()
 
-    echo "Select a CodeGemma model:"
-    echo ""
+    while IFS= read -r model_key; do
+        local weight
+        weight=$(get_fim_model_weight_gb "$model_key")
+
+        # Only include models that fit in available RAM (leave 8GB headroom)
+        local available_ram=$((DETECTED_RAM_GB - 8))
+        if [[ $weight -le $available_ram ]]; then
+            models+=("$model_key")
+            weights+=("${weight}GB")
+            display_names+=("$(get_fim_model_display_name "$model_key")")
+            descriptions+=("$(get_fim_model_description "$model_key")")
+        fi
+    done < <(list_fim_models)
 
     # Display models with recommendations
+    local recommended_model
+    recommended_model=$(recommend_fim_model "$DETECTED_RAM_GB")
+    local recommended_idx=-1
+
+    echo "Select a FIM model:"
+    echo ""
+
     for i in "${!models[@]}"; do
         local idx=$((i + 1))
         local model="${models[$i]}"
-        local weight="${model_weights[$i]}"
-        local context="${context_sizes[$i]}"
+        local weight="${weights[$i]}"
+        local display="${display_names[$i]}"
         local desc="${descriptions[$i]}"
 
-        # Recommend based on RAM
-        if [[ $DETECTED_RAM_GB -ge 16 && "$model" == "codegemma:7b" ]]; then
-            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, $context context) - $desc ${GREEN}[Recommended]${NC}"
-        elif [[ $DETECTED_RAM_GB -lt 16 && "$model" == "codegemma:2b" ]]; then
-            echo -e "  ${GREEN}$idx) $model${NC} ($weight model, $context context) - $desc ${GREEN}[Recommended]${NC}"
+        # Mark recommended model
+        if [[ "$model" == "$recommended_model" ]]; then
+            recommended_idx=$idx
+            echo -e "  ${GREEN}$idx) $display${NC} ($weight) - $desc ${GREEN}[Recommended]${NC}"
         else
-            echo -e "  $idx) $model ($weight model, $context context) - $desc"
+            echo -e "  $idx) $display ($weight) - $desc"
         fi
     done
 
     echo ""
 
-    # Determine recommended index
-    local recommended_idx=2  # Default to 7b
-    if [[ $DETECTED_RAM_GB -lt 16 ]]; then
-        recommended_idx=1  # Use 2b for low RAM
-    fi
-
     # Get user selection
     while true; do
-        read -r -p "Enter selection (1-2, recommended: $recommended_idx): " selection
-
-        # Default to recommended if empty
-        if [[ -z "$selection" ]]; then
-            selection=$recommended_idx
+        if [[ $recommended_idx -gt 0 ]]; then
+            read -r -p "Enter selection (1-${#models[@]}, recommended: $recommended_idx): " selection
+            if [[ -z "$selection" ]]; then
+                selection=$recommended_idx
+            fi
+        else
+            read -r -p "Enter selection (1-${#models[@]}): " selection
         fi
 
-        # Validate numeric input in range 1-2
-        if [[ "$selection" =~ ^[1-2]$ ]]; then
+        if [[ "$selection" =~ ^[0-9]+$ ]] && [[ $selection -ge 1 ]] && [[ $selection -le ${#models[@]} ]]; then
             local idx=$((selection - 1))
-            CODEGEMMA_MODEL="${models[$idx]}"
-            print_status "Selected: $CODEGEMMA_MODEL"
+            CODESELECTED_MODEL="${models[$idx]}"
+            print_status "Selected: $CODESELECTED_MODEL"
             break
         else
-            print_error "Invalid selection. Please enter 1 or 2."
+            print_error "Invalid selection. Please enter 1-${#models[@]}."
         fi
     done
 }
@@ -526,12 +534,12 @@ select_ide_tools() {
     echo ""
     echo "  2) JetBrains AI Assistant only"
     echo "     • Official JetBrains AI integration"
-    echo "     • Uses: Gemma4 (core) + CodeGemma (instant helpers + completion)"
+    echo "     • Uses: Gemma4 (core) + FIM model (instant helpers + completion)"
     echo "     • Works with IntelliJ, PyCharm, WebStorm, etc."
     echo ""
     echo "  3) Both OpenCode and JetBrains"
     echo "     • Configure both tools for maximum flexibility"
-    echo "     • Downloads: Gemma4 + CodeGemma"
+    echo "     • Downloads: Gemma4 + FIM model"
     echo "     • Recommended if you use multiple IDEs"
     echo ""
 
